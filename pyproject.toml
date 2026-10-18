@@ -1,0 +1,39 @@
+[build-system]
+# Nothing to download: the backend is in this repository and uses only the
+# standard library.
+requires = []
+build-backend = "backend"
+backend-path = ["_build"]
+
+[project]
+name = "symbolic-acceptance"
+version = "0.1.0"
+description = "Acceptance checklists that drive a coding agent until its change is approved."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Vitali Avagyan" }]
+keywords = ["acceptance criteria", "coding agents", "llm judge", "code review", "ci"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+dependencies = []
+import-names = ["symbolic_acceptance"]
+
+[project.scripts]
+symbolic-acceptance = "symbolic_acceptance.cli:main"
+
+[project.urls]
+Repository = "https://github.com/vitali87/symbolic-acceptance"
+Issues = "https://github.com/vitali87/symbolic-acceptance/issues"

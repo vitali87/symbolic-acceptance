@@ -1,0 +1,44 @@
+# Tests, lint and a reproducible build, with no third-party actions and no
+# downloads: the checkout is plain git, the runner's Python runs the tests,
+# and the package has no dependencies to install.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          git init -q .
+          git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          git -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+
+      - name: Show Python
+        run: python3 --version
+
+      - name: Test
+        run: PYTHONPATH=src:tests python3 -m unittest discover -s tests -t tests -v
+
+      - name: Lint the example checklists
+        run: PYTHONPATH=src python3 -m symbolic_acceptance lint --strict examples/*.toml
+
+      - name: Build twice and compare
+        run: |
+          for out in one two; do
+            python3 -c "import sys; sys.path.insert(0, '_build'); import backend; print(backend.build_wheel('$out'), backend.build_sdist('$out'))" >/dev/null
+          done
+          cmp one/*.whl two/*.whl
+          cmp one/*.tar.gz two/*.tar.gz
+          sha256sum one/*

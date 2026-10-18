@@ -1,0 +1,207 @@
+# symbolic-acceptance
+
+Turn a bug report or feature request into an **acceptance checklist**, then
+drive a coding agent until its change meets it.
+
+A person approves the checklist before any code is written. Each attempt is
+checked by CI, an LLM judge and people, in that order, and every failed
+requirement goes back to the agent, with the reasons and evidence, until the
+attempt is approved or a person has to step in.
+
+**No dependencies.** The package, its build and its CI use only the Python
+standard library (3.11+). There is nothing to download: not at install time,
+not at build time (the build backend is in this repository), not in CI (no
+third-party actions). Builds are reproducible byte for byte.
+
+## A checklist
+
+```toml
+title = "Throttle brute-force logins (#342)"
+
+[q.repro_fixed]
+ask = "Does the reproduction script from the issue now get throttled?"
+by = "ci"
+check = "repro"
+
+[q.locks_account]
+ask = "Does the change lock an account after repeated failed logins?"
+by = "llm"
+
+[q.can_unlock]
+ask = "Can a locked account be unlocked by its owner or an administrator?"
+by = "llm"
+
+[q.backs_off]
+ask = "Does the change add an increasing delay between failed login attempts?"
+by = "llm"
+
+[q.touches_sso]
+ask = "Does the diff change single sign-on code?"
+by = "llm"
+
+[q.sso_exempt]
+ask = "Is this change to single sign-on acceptable without a security review?"
+by = "human"
+
+[[require]]
+that = "repro_fixed"
+fail = "The reproduction from the issue is still not throttled"
+
+[[require]]
+id = "protected"
+that = { any = [{ all = ["locks_account", "can_unlock"] }, "backs_off"] }
+fail = "Neither lockout with a way to unlock, nor back-off between attempts"
+
+[[require]]
+id = "sso"
+when = "touches_sso"
+that = "sso_exempt"
+fail = "Single sign-on changed without approval"
+```
+
+`[q.<id>]` declares a yes/no question and the oracle that answers it (`by`).
+`[[require]]` declares a requirement: `that` must be YES, `fail` is what the
+agent is told when it is not, and `when` makes it conditional. Expressions are
+a question id or `{ all = [...] }`, `{ any = [...] }`, `{ not = ... }`.
+
+Because every requirement carries its own failure, a checklist always
+decides: once its questions are answered, an attempt is approved or has named
+failures, never both and never neither. The full example is
+[`examples/issue-342.toml`](examples/issue-342.toml); `symbolic-acceptance
+template bug` and `template feature` print starting points.
+
+## How an attempt is checked
+
+1. **Automated questions first, all of them.** Every `ci` and `llm` question
+   that could show a requirement unmet is asked, in parallel, so the agent
+   hears about every failure at once, not just the first. A `when` condition
+   is settled before the checks it gates.
+2. **People last, and only when it matters.** `human` questions are asked
+   only once nothing automated is left, no requirement has failed, and their
+   answer can still change the result. A failure never waits for a person,
+   and nobody is asked a question whose answer cannot matter.
+3. **Feedback follows the logic.** A failed `all` lists the items to fix, a
+   failed `any` lists the alternatives (fix any one), and `not` flips what was
+   wanted. Each item carries the oracle's reasoning and evidence:
+
+   ```text
+   2. protected: Neither lockout with a way to unlock, nor back-off between attempts
+      - any(all(locks_account, can_unlock), backs_off): needs YES; fix any one of:
+        - all(locks_account, can_unlock): needs YES; fix each of:
+          - can_unlock: needs YES, got NO [llm:claude-opus-5-5]
+            Q: Can a locked account be unlocked by its owner or an administrator?
+            Why: lock() has no inverse; add unlock() in src/auth.py
+        - backs_off: needs YES, got NO [llm:claude-opus-5-5]
+            ...
+   ```
+
+A run stops when an attempt is **approved**, and **escalates** to a person on
+the attempt cap, on no progress (the same requirements fail twice in a row),
+on a regression (a requirement that held now fails), or when an oracle hands
+the attempt over. A run waiting on a person is **saved and resumed** later,
+for example from the next GitHub event, rather than holding a process open.
+
+## Oracles
+
+| `by` | Built in | Answers from |
+|---|---|---|
+| `ci` | `Checks`, `GitHubChecks` | `run = "<command>"` in a checkout, `check = "frozen"`, or the GitHub check run named by `check` |
+| `llm` | `Judge` | Claude, reading the diff |
+| `human` | `Reviews`, terminal | `/yes <id> <why>` replies on the pull request |
+
+An oracle is any function `(questions, context) -> {id: Answer}`, sync or
+async. It raises `Pending` when it has asked and must wait, and `Escalate` to
+hand the attempt to a person.
+
+**The agent is treated as adversarial.** It writes what the oracles read, so:
+
+- The judge gets the diff, computed by the runner from git or GitHub, inside
+  a block with a boundary the agent cannot predict. The agent's own account
+  of its change is never shown to it.
+- A YES from the judge must quote the diff, and the quotes are checked. An
+  unsupported YES counts as NO. With `samples > 1`, every sample must agree.
+- Text in the change addressed to a reviewer escalates instead of being
+  answered, and so does a diff too large to judge whole.
+- `check = "frozen"` fails any change to the checklist, CI configuration or
+  existing tests; a new regression test can be allowed with `allow_new`.
+- On GitHub, only owners, members and collaborators (or an allowlist) can
+  answer, never bots or the agent's own account, and only for the commit the
+  question was asked about.
+- Run the agent without credentials that can comment as a reviewer. A reply
+  posted with your token reads as yours; nothing in a comment can tell the
+  agent apart from you.
+
+The judge calls the Claude Messages API over HTTPS with `urllib`. It uses
+`claude-opus-5-5` at `high` effort, structured outputs for the verdict, and
+server-side refusal fallback (`fallbacks: "default"`), so a classifier false
+positive is retried on another model instead of failing the check. It sends no
+sampling parameters, which current models reject. Set `ANTHROPIC_API_KEY`.
+
+## Use it
+
+From Python:
+
+```python
+import asyncio
+import symbolic_acceptance as sa
+from symbolic_acceptance.agents import CommandAgent
+from symbolic_acceptance.checks import Checks
+from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews
+from symbolic_acceptance.judge import Judge
+
+checklist = sa.load("acceptance/issue-342.toml")
+github = GitHub("owner/repo")
+
+result = asyncio.run(sa.run(
+    checklist,
+    agent=CommandAgent(["claude", "-p", "--permission-mode", "auto"], cwd="."),
+    oracles={
+        "ci": Checks(cwd=".", fallback=GitHubChecks(github, wait=1800)),
+        "llm": Judge(),
+        "human": Reviews(github, number=57, exclude=["agent-account"]),
+    },
+    issue=open("issue-342.md").read(),
+    max_attempts=5,
+    on_progress=lambda run: sa.record.save(run, checklist, "run.json"),
+))
+result.status   # "approved" | "escalated" | "waiting"
+result.reason
+```
+
+From the command line:
+
+```sh
+symbolic-acceptance template bug > acceptance.toml   # or: draft issue.md (Claude drafts it)
+symbolic-acceptance lint acceptance.toml             # before a person approves it
+symbolic-acceptance digest acceptance.toml           # pin the approved version
+symbolic-acceptance run acceptance.toml --issue issue.md --agent "claude -p" \
+    --record run.json --github owner/repo --pr 57
+symbolic-acceptance run acceptance.toml --agent "claude -p" --resume run.json
+symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
+```
+
+`explain acceptance.toml answers.json` decides a checklist from answers you
+supply, which is handy for checking a checklist by hand.
+
+## Install
+
+```sh
+pip install git+https://github.com/vitali87/symbolic-acceptance
+```
+
+or from a checkout, `pip install .`. The build backend lives in
+[`_build/backend.py`](_build/backend.py) and `pyproject.toml` requires
+nothing, so `pip install --no-index .` works offline.
+
+## Develop
+
+```sh
+PYTHONPATH=src:tests python3 -m unittest discover -s tests -t tests
+```
+
+The design, and how it changed from the original proposal, is in
+[`docs/design.md`](docs/design.md).
+
+## License
+
+MIT
