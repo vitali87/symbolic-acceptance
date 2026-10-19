@@ -540,6 +540,19 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("**approved**: every requirement holds", out)
 
+    def test_a_failure_outside_the_program_is_an_error_not_a_crash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            checklist = Path(tmp, "acceptance.toml")
+            checklist.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            work = Path(tmp, "work")
+            work.mkdir()
+            args = ("run", str(checklist), "--agent", "true", "--cwd", str(work))
+            with self.assertRaisesRegex(SystemExit, "^error: git rev-parse HEAD"):
+                cli(*args)
+
     def test_files_it_cannot_read_are_errors_not_crashes(self):
         with tempfile.TemporaryDirectory() as tmp:
             missing, broken, other, binary = (

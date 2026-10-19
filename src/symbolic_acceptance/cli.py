@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
-from symbolic_acceptance.agents import CommandAgent
+from symbolic_acceptance.agents import CommandAgent, GitError
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import (
     Checklist,
@@ -22,10 +22,11 @@ from symbolic_acceptance.checklist import (
     render,
 )
 from symbolic_acceptance.checks import Checks, Commands
-from symbolic_acceptance.claude import DEFAULT_MODEL, Claude
+from symbolic_acceptance.claude import DEFAULT_MODEL, Claude, ClaudeError
 from symbolic_acceptance.draft import DraftError, draft
 from symbolic_acceptance.feedback import assess, render_failures
 from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews, post_report
+from symbolic_acceptance.http import HTTPError
 from symbolic_acceptance.judge import Judge
 from symbolic_acceptance.lint import lint
 from symbolic_acceptance.loop import (
@@ -33,6 +34,7 @@ from symbolic_acceptance.loop import (
     WAITING,
     Context,
     Oracle,
+    OracleError,
     Pending,
     Result,
     run,
@@ -161,10 +163,7 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
     issue = _read(args.issue)
-    try:
-        result = draft(issue, template=args.template, claude=Claude(model=args.model))
-    except DraftError as error:
-        raise SystemExit(f"error: {error}") from None
+    result = draft(issue, template=args.template, claude=Claude(model=args.model))
     text = result.text if result.text.endswith("\n") else result.text + "\n"
     out.write_text(text, encoding="utf-8")
     print(f"wrote {out}; review it before approving")
@@ -391,6 +390,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         return int(args.handler(args))
+    except (ClaudeError, DraftError, GitError, HTTPError, OracleError) as error:
+        # What went wrong outside this program, or in how it was set up; the
+        # record, if any, keeps the run as it was.
+        raise SystemExit(f"error: {error}") from None
     except BrokenPipeError:
         # The reader went away (e.g. `| head`); stop quietly.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
