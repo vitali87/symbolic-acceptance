@@ -268,6 +268,27 @@ class VerdictTests(unittest.TestCase):
         self.assertFalse(answer.is_met)
         self.assertIn("too little of what the change adds", answer.reasoning)
 
+    def test_lines_only_reindented_or_moved_do_not_support_a_yes(self):
+        # The lockout was already there; the change only adds a space after
+        # one line of it and swaps two lines below.
+        diff = (
+            "diff --git a/src/auth.py b/src/auth.py\n--- a/src/auth.py\n"
+            "+++ b/src/auth.py\n@@ -1,5 +1,5 @@\n"
+            "-    if failures(user) > MAX_FAILURES:\n"
+            "+    if failures(user) > MAX_FAILURES: \n"
+            "         lock(user)\n"
+            "-    audit(user)\n     notify(user)\n+    audit(user)\n"
+        )
+        for quote in (
+            "if failures(user) > MAX_FAILURES:\n    lock(user)",
+            "notify(user)\n    audit(user)",
+        ):
+            with self.subTest(quote):
+                j, _ = judge(*[verdict("YES", [quote])] * 2)
+                answer = ask(j, diff=diff)
+                self.assertFalse(answer.is_met)
+                self.assertIn("too little of what the change adds", answer.reasoning)
+
     def test_a_copy_of_the_line_in_another_file_does_not_back_it(self):
         # The lockout was already there; the change only copies its line
         # into a notes file.
