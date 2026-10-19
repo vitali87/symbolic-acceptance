@@ -14,6 +14,7 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
+from http.client import HTTPException
 from typing import TypeAlias
 
 __all__ = ["JSON", "HTTPError", "Response", "Transport", "request"]
@@ -129,7 +130,8 @@ def request(
         )
         try:
             response = send(prepared, timeout)
-        except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
+        # No reply, or one cut off: the connection failed either way.
+        except (OSError, HTTPException) as error:
             if final or not idempotent:
                 raise HTTPError(method, url, 0, f"connection failed: {error}") from None
             sleep(_wait(None, attempt))

@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import unittest
+from http.client import IncompleteRead
 
 from helpers import DIFF, FakeHTTP, json_response, message
 
@@ -521,6 +522,18 @@ class HTTPTests(unittest.TestCase):
                 sleep=lambda s: None,
             )
         self.assertEqual(len(calls), 3)
+
+    def test_a_reply_cut_off_midway_is_a_connection_failure(self):
+        def cut(request):
+            raise IncompleteRead(b'{"check_runs": [', 100)
+
+        fake = FakeHTTP(cut, json_response({"ok": True}))
+        reply = http.request(
+            "GET", "https://example.test/x", transport=fake, sleep=lambda s: None
+        )
+        self.assertEqual((reply.status, len(fake.requests)), (200, 2))
+        with self.assertRaisesRegex(http.HTTPError, "connection failed"):
+            http.request("POST", "https://example.test/x", transport=FakeHTTP(cut))
 
 
 if __name__ == "__main__":
