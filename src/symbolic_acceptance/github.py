@@ -126,31 +126,21 @@ class GitHub:
     )
     transport: http.Transport | None = None
 
-    def _headers(self, accept: str) -> dict[str, str]:
+    def _url(self, path: str) -> str:
+        return f"{self.api.rstrip('/')}/repos/{self.repo}{path}"
+
+    def _request(self, method: str, url: str, body: http.JSON = None) -> http.Response:
         headers = {
-            "accept": accept,
+            "accept": "application/vnd.github+json",
             "x-github-api-version": API_VERSION,
             "user-agent": "symbolic-acceptance",
         }
         if self.token:
             headers["authorization"] = f"Bearer {self.token}"
-        return headers
-
-    def _url(self, path: str) -> str:
-        return f"{self.api.rstrip('/')}/repos/{self.repo}{path}"
-
-    def call(
-        self,
-        method: str,
-        path: str,
-        *,
-        body: http.JSON = None,
-        accept: str = "application/vnd.github+json",
-    ) -> http.Response:
         return http.request(
             method,
-            self._url(path),
-            headers=self._headers(accept),
+            url,
+            headers=headers,
             json_body=body,
             timeout=60,
             transport=self.transport,
@@ -160,13 +150,7 @@ class GitHub:
         """The body of every page of a list, following ``Link: rel="next"``."""
         url: str | None = self._url(f"{path}?per_page=100")
         while url:
-            response = http.request(
-                "GET",
-                url,
-                headers=self._headers("application/vnd.github+json"),
-                timeout=60,
-                transport=self.transport,
-            )
+            response = self._request("GET", url)
             yield response.body
             match = _NEXT.search(response.header("link") or "")
             url = match.group(1) if match else None
@@ -182,10 +166,12 @@ class GitHub:
         return [comment for page in pages for comment in page]
 
     def comment(self, number: int, body: str) -> None:
-        self.call("POST", f"/issues/{number}/comments", body={"body": body})
+        self._request("POST", self._url(f"/issues/{number}/comments"), {"body": body})
 
     def edit_comment(self, comment_id: int, body: str) -> None:
-        self.call("PATCH", f"/issues/comments/{comment_id}", body={"body": body})
+        self._request(
+            "PATCH", self._url(f"/issues/comments/{comment_id}"), {"body": body}
+        )
 
 
 def _author(comment: Comment) -> tuple[str, bool, str]:

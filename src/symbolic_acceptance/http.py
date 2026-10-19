@@ -42,9 +42,6 @@ class Response:
                 return value
         return None
 
-    def text(self) -> str:
-        return self.body.decode("utf-8", errors="replace")
-
 
 class HTTPError(RuntimeError):
     def __init__(self, method: str, url: str, status: int, detail: str) -> None:
@@ -80,7 +77,7 @@ def _wait(response: Response | None, attempt: int) -> float:
 
 
 def _detail(response: Response) -> str:
-    text = response.text().strip()
+    text = response.body.decode("utf-8", errors="replace").strip()
     try:
         data = json.loads(text)
     except ValueError:
