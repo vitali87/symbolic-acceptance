@@ -93,6 +93,7 @@ class ParseTests(unittest.TestCase):
             Path(tmp, "docs").mkdir()
             Path(tmp, "docs", "naïve café.md").write_text("hello there\n")
             Path(tmp, "docs", 'say "hi"\there.md').write_text("hi\n")
+            Path(tmp, "docs", "notes ").write_text("ends in a space\n")
             Path(tmp, "app.py").write_text("print('v2')\n")
             git("add", ".")
             git("commit", "-qm", "change")
@@ -105,6 +106,7 @@ class ParseTests(unittest.TestCase):
             [
                 ("app.py", "modified"),
                 ("docs/naïve café.md", "added"),
+                ("docs/notes ", "added"),
                 ('docs/say "hi"\there.md', "added"),
             ],
         )

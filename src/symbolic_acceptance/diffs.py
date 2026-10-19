@@ -86,7 +86,8 @@ def _unquote(path: str) -> str:
 
 
 def _strip_prefix(path: str) -> str | None:
-    path = _unquote(path.strip())
+    # Git ends a ---/+++ line with a tab when the name has a space in it.
+    path = _unquote(path.removesuffix("\t"))
     if path == "/dev/null":
         return None
     if path[:2] in ("a/", "b/"):
