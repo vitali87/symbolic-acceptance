@@ -534,6 +534,29 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("**approved**: every requirement holds", out)
 
+    def test_files_it_cannot_read_are_errors_not_crashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing, broken, other, binary = (
+                str(Path(tmp, name))
+                for name in ("missing.json", "broken.json", "other.json", "issue.md")
+            )
+            Path(broken).write_text("[1")
+            Path(other).write_text('{"format": "something else"}')
+            Path(binary).write_bytes(b"\xff")
+            checklist = str(EXAMPLE)
+            for args, message in (
+                (("report", checklist, missing), "No such file"),
+                (("report", checklist, broken), "broken.json: Expecting"),
+                (("report", checklist, other), "not a symbolic-acceptance/run v1"),
+                (("explain", checklist, broken), "broken.json: Expecting"),
+                (("run", checklist, "--agent", "x", "--issue", binary), "not UTF-8"),
+            ):
+                with (
+                    self.subTest(args),
+                    self.assertRaisesRegex(SystemExit, f"^error: .*{message}"),
+                ):
+                    cli(*args)
+
     def test_draft_will_not_overwrite_before_asking_claude(self):
         with tempfile.TemporaryDirectory() as tmp:
             # No issue file either: were the check late, reading it would fail

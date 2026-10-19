@@ -50,6 +50,30 @@ def _load(path: str) -> Checklist:
         raise SystemExit(f"error: {error}") from None
 
 
+def _read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError as error:
+        raise SystemExit(f"error: {error}") from None
+    except UnicodeDecodeError:
+        raise SystemExit(f"error: {path} is not UTF-8 text") from None
+
+
+def _json(path: str) -> object:
+    try:
+        data: object = json.loads(_read(path))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"error: {path}: {error}") from None
+    return data
+
+
+def _record(path: str, checklist: Checklist) -> Result:
+    try:
+        return record.loads(_read(path), checklist)
+    except ValueError as error:
+        raise SystemExit(f"error: {path}: {error}") from None
+
+
 def _cmd_lint(args: argparse.Namespace) -> int:
     oracles = tuple(args.oracles.split(",")) if args.oracles else ORACLES
     worst = 0
@@ -100,7 +124,7 @@ def _cmd_template(args: argparse.Namespace) -> int:
 
 
 def _answers(path: str) -> dict[str, Answer]:
-    data: object = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = _json(path)
     if not isinstance(data, dict):
         raise SystemExit(
             "error: answers must be a JSON object of question id to answer"
@@ -136,7 +160,7 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
-    issue = Path(args.issue).read_text(encoding="utf-8")
+    issue = _read(args.issue)
     try:
         result = draft(issue, template=args.template, claude=Claude(model=args.model))
     except DraftError as error:
@@ -155,7 +179,7 @@ def _cmd_draft(args: argparse.Namespace) -> int:
 
 def _cmd_report(args: argparse.Namespace) -> int:
     checklist = _load(args.file)
-    sys.stdout.write(markdown(record.load(args.record, checklist), checklist))
+    sys.stdout.write(markdown(_record(args.record, checklist), checklist))
     return 0
 
 
@@ -192,7 +216,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(
             "error: the checklist has lint errors:\n" + "\n".join(map(str, errors))
         )
-    issue = Path(args.issue).read_text(encoding="utf-8") if args.issue else ""
+    issue = _read(args.issue) if args.issue else ""
     if args.pr and not args.github:
         raise SystemExit("error: --pr needs --github")
     github = GitHub(args.github) if args.github else None
@@ -226,7 +250,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     }
     resume: Result | None = None
     if args.resume:
-        resume = record.load(args.resume, checklist)
+        resume = _record(args.resume, checklist)
     record_path = args.record or args.resume
     if args.record and args.record != args.resume and Path(args.record).exists():
         raise SystemExit(
