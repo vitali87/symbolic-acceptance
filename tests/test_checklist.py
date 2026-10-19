@@ -132,11 +132,13 @@ class RejectTests(unittest.TestCase):
 
 
 class DigestTests(unittest.TestCase):
-    def test_comments_and_layout_do_not_change_the_digest(self):
+    def test_comments_and_layout_do_not_change_the_checklist(self):
         reformatted = "# a comment\n" + MINIMAL.replace(
             'ask = "Is A done?"', 'ask   =   "Is A done?"   # same'
         )
         self.assertEqual(sa.loads(MINIMAL).digest, sa.loads(reformatted).digest)
+        self.assertEqual(sa.loads(MINIMAL), sa.loads(reformatted))
+        self.assertNotIn("a comment", repr(sa.loads(reformatted)))
         options = MINIMAL.replace('by = "ci"', 'by = "ci"\ncheck = "t"\nrun = "x"')
         reordered = MINIMAL.replace('by = "ci"', 'by = "ci"\nrun = "x"\ncheck = "t"')
         self.assertEqual(sa.loads(options).digest, sa.loads(reordered).digest)
