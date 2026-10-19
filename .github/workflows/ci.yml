@@ -10,6 +10,11 @@ on:
 permissions:
   contents: read
 
+# A newer push makes a run of an older commit on the same ref moot.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-24.04
