@@ -251,8 +251,11 @@ class LintTests(unittest.TestCase):
             '[q.f]\nask = "F?"\nby = "ci"\ncheck = 3\n'
             '[q.g]\nask = "G?"\nby = "ci"\ncheck = ""\n'
             '[q.h]\nask = "H?"\nby = "ci"\nfrozen = ["x"]\nrun = "true"\n'
-            '[[require]]\nid = "r"\n'
-            'that = { all = ["a", "b", "c", "d", "e", "f", "g", "h"] }\nfail = "x"\n'
+            '[q.i]\nask = "I?"\nby = "llm"\nfrozen = ["x"]\n'
+            '[q.j]\nask = "J?"\nby = "human"\nkind = "absence"\n'
+            '[q.k]\nask = "K?"\nby = "scanner"\nfrozen = ["x"]\n'
+            '[[require]]\nid = "r"\nthat = { all = '
+            '["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] }\nfail = "x"\n'
         )
         findings = [f for f in sa.lint(c) if f.code == "bad-option"]
         self.assertEqual(
@@ -267,6 +270,8 @@ class LintTests(unittest.TestCase):
                 ("f", "q.f.check must name a check run"),
                 ("g", "q.g.check must name a check run"),
                 ("h", "q.h has both frozen and run; split it in two"),
+                ("i", 'q.i.frozen works only with by = "ci"'),
+                ("j", 'q.j.kind works only with by = "llm"'),
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))

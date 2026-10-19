@@ -33,12 +33,24 @@ from symbolic_acceptance.checklist import (
 )
 from symbolic_acceptance.checks import admits, command, frozen_paths, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
+from symbolic_acceptance.templates import ORACLES
 
 __all__ = ["MAX_EXHAUSTIVE", "Finding", "lint"]
 
 # Exhaustive checks enumerate 2**n answer sets; past this many questions they
 # are skipped and reported as such.
 MAX_EXHAUSTIVE = 16
+# The options a built-in oracle acts on, and that oracle. On a question for
+# another built-in oracle nothing acts on them, though the author may think
+# so: frozen paths on an llm question are frozen for nobody.
+_READERS = {
+    "check": "ci",
+    "run": "ci",
+    "expect": "ci",
+    "frozen": "ci",
+    "allow_new": "ci",
+    "kind": "llm",
+}
 
 
 @dataclass(frozen=True)
@@ -147,6 +159,11 @@ def _option_findings(question: Question) -> list[Finding]:
         problems.append(f"q.{question.id}.check must name a check run")
     if "frozen" in options and "run" in options:
         problems.append(f"q.{question.id} has both frozen and run; split it in two")
+    problems += [
+        f'q.{question.id}.{key} works only with by = "{reader}"'
+        for key, reader in _READERS.items()
+        if key in options and question.by in ORACLES and question.by != reader
+    ]
     return [
         Finding("error", "bad-option", problem, question.id) for problem in problems
     ]
