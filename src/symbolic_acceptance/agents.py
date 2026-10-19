@@ -195,14 +195,13 @@ class CommandAgent:
     :func:`symbolic_acceptance.loop.run` to keep it with the run, and pass
     the recorded one back when resuming. Each later attempt starts from the
     previous one, which the checkout must have checked out. With ``push``,
-    each attempt is
-    pushed to that branch of ``origin``, so CI runs on it; the agent may
-    rewrite its earlier attempts, and the branch follows as long as nobody
-    else has pushed to it. An attempt that changes ``.github/`` is not
-    pushed but handed to a person: pushing would run the workflows it holds,
-    with whatever token they ask for, before any check could refuse them.
-    The agent gets ``env`` (by default this process's environment) without
-    :data:`RUNNER_SECRETS`.
+    each attempt is pushed to that branch of ``origin``, so CI runs on it;
+    the agent may rewrite its earlier attempts, and the branch follows as
+    long as nobody else has pushed to it. An attempt that changes
+    ``.github/`` is not pushed but handed to a person: pushing would run the
+    workflows it holds, with whatever token they ask for, before any check
+    could refuse them. The agent gets ``env`` (by default this process's
+    environment) without :data:`RUNNER_SECRETS`.
 
     An agent that fails, runs past ``timeout`` or changes nothing hands the
     run to a person (:class:`Escalate`).
