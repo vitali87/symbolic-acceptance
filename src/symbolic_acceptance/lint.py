@@ -19,7 +19,7 @@ looks for checklists that load but cannot mean what their author intended:
 from __future__ import annotations
 
 import itertools
-import re
+import shlex
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from typing import Literal
@@ -52,8 +52,8 @@ _READERS = {
     "allow_new": "ci",
     "kind": "llm",
 }
-# Shell syntax: a pipe, a list of commands or a redirection.
-_SHELL = re.compile(r"[|&;]+|[0-9]*[<>].*")
+# What a shell's pipes, command lists and redirections are made of.
+_SHELL = frozenset("|&;<>")
 
 
 @dataclass(frozen=True)
@@ -143,8 +143,14 @@ def _run_command(question: Question) -> None:
     """Read the question's ``run`` command. It runs without a shell, so shell
     syntax in a command given as one string would reach the program as
     arguments, and ``prog | grep -q x`` would pass whatever ``prog`` says."""
-    syntax = [arg for arg in command(question) if _SHELL.fullmatch(arg)]
-    if syntax and isinstance(question.options["run"], str):
+    command(question)
+    run = question.options["run"]
+    if not isinstance(run, str):
+        return
+    # Outside quotes, which this lexer keeps, shell syntax is a token of its own.
+    lexer = shlex.shlex(run, punctuation_chars=True)
+    syntax = [token for token in lexer if set(token) <= _SHELL]
+    if syntax:
         raise ValueError(
             f"q.{question.id}.run has {' '.join(syntax)} but runs without a shell;"
             ' for one, write run = ["sh", "-c", "<script>"]'

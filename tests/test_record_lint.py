@@ -275,8 +275,11 @@ class LintTests(unittest.TestCase):
             '[q.m]\nask = "M?"\nby = "ci"\nrun = "make test 2>&1 > log"\n'
             '[q.n]\nask = "N?"\nby = "ci"\nrun = ["sh", "-c", "a | b"]\n'
             '[q.o]\nask = "O?"\nby = "ci"\nrun = ["tr", "|", ","]\n'
+            '[q.p]\nask = "P?"\nby = "ci"\nrun = "grep -q \'<b>x</b>\' f"\n'
+            '[q.q]\nask = "Q?"\nby = "ci"\nrun = "python3 v.py \'>=3.11\'"\n'
             '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", '
-            '"f", "g", "h", "i", "j", "k", "l", "m", "n", "o"] }\nfail = "x"\n'
+            '"f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q"] }\n'
+            'fail = "x"\n'
         )
         findings = [f for f in sa.lint(c) if f.code == "bad-option"]
         shell = (
@@ -297,7 +300,7 @@ class LintTests(unittest.TestCase):
                 ("i", 'q.i.frozen works only with by = "ci"'),
                 ("j", 'q.j.kind works only with by = "llm"'),
                 ("l", "q.l.run has |" + shell),
-                ("m", "q.m.run has 2>&1 >" + shell),
+                ("m", "q.m.run has >& >" + shell),
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))
