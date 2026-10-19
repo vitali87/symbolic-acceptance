@@ -371,6 +371,38 @@ class CommandAgentTests(unittest.TestCase):
             )
             self.assertEqual(seen.read_text().strip(), "none")
 
+    def test_the_push_carries_the_runners_token(self):
+        # A credential helper may read it to authenticate the push.
+        with (
+            tempfile.TemporaryDirectory() as remote,
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            git(remote, "init", "-q", "--bare")
+            local = repo(tmp)
+            local("remote", "add", "origin", remote)
+            seen = Path(outside, "seen")
+            spy = f"sh -c 'echo ${{GITHUB_TOKEN:-none}} >> {seen}; exec git-receive-pack \"$1\"' -"
+            local("config", "remote.origin.receivepack", spy)
+            script = (
+                "import asyncio, sys, symbolic_acceptance as sa\n"
+                "from symbolic_acceptance.agents import CommandAgent\n"
+                "write = \"open('app.py', 'w').write('v2')\"\n"
+                "agent = CommandAgent([sys.executable, '-c', write], cwd=sys.argv[1],"
+                " push='agent')\n"
+                "asyncio.run(agent(sa.Task('', sa.load(sys.argv[2]), 1)))\n"
+            )
+            subprocess.run(
+                [sys.executable, "-c", script, tmp, str(EXAMPLE)],
+                env=dict(
+                    os.environ,
+                    GITHUB_TOKEN="secret",
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                check=True,
+            )
+            self.assertEqual(seen.read_text(), "secret\n")
+
     def test_a_git_failure_says_why(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
