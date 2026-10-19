@@ -5,6 +5,7 @@ import io
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1062,6 +1063,42 @@ class CLITests(unittest.TestCase):
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("no terminal to ask a person", done.stdout)
         self.assertEqual(requests, [])
+
+    def test_ctrl_c_stops_the_agent_and_leaves_the_run_to_resume(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            pid = Path(outside, "pid")
+            slow = f"import os, time; open({str(pid)!r}, 'w').write(str(os.getpid())); time.sleep(60)"
+            saved = Path(outside, "run.json")
+            runner = subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--agent", shlex.join([sys.executable, "-c", slow]), "--cwd", tmp]
+                + ["--record", str(saved)],
+                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            deadline = time.monotonic() + 30
+            while not pid.exists() or not pid.read_text():
+                self.assertLess(time.monotonic(), deadline, "the agent never started")
+                time.sleep(0.05)
+            runner.send_signal(signal.SIGINT)
+            _, err = runner.communicate(timeout=20)
+            self.assertEqual(runner.returncode, 130, err)
+            self.assertNotIn("Traceback", err)
+            with self.assertRaises(ProcessLookupError, msg="the agent was stopped"):
+                os.kill(int(pid.read_text()), 0)
+            self.assertEqual(json.loads(saved.read_text())["status"], "running")
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):

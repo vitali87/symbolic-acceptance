@@ -43,6 +43,7 @@ __all__ = [
     "for_agent",
     "git",
     "run_program",
+    "stop_programs",
 ]
 
 _OVERRIDES = (
@@ -90,6 +91,18 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k not in RUNNER_SECRETS | _ELSEWHERE}
 
 
+# The process groups of the programs run_program is running now.
+_running: set[int] = set()
+
+
+def stop_programs() -> None:
+    """End every program :func:`run_program` is running, and what they
+    started, for a runner told to stop: each run_program returns at once."""
+    for group in _running.copy():
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(group, signal.SIGKILL)
+
+
 def run_program(
     argv: Sequence[str],
     *,
@@ -119,6 +132,7 @@ def run_program(
             stderr=subprocess.STDOUT,
             start_new_session=True,
         )
+        _running.add(process.pid)
         try:
             status: int | None = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -127,6 +141,7 @@ def run_program(
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait()
+            _running.discard(process.pid)
         log.seek(0)
         return status, log.read().decode("utf-8", errors="replace")
 

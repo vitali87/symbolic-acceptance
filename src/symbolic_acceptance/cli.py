@@ -7,12 +7,13 @@ import asyncio
 import json
 import os
 import shlex
+import signal
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
-from symbolic_acceptance.agents import CommandAgent, GitError, git
+from symbolic_acceptance.agents import CommandAgent, GitError, git, stop_programs
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import (
     Checklist,
@@ -349,7 +350,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Acceptance checklists for coding agents.",
         epilog="Exit status: 0 approved (or clean), 1 changes, escalated or "
         "errors (options it refuses included), 2 malformed arguments, 3 waiting "
-        "(or undecided).",
+        "(or undecided), 130 interrupted.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -441,10 +442,24 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _interrupted(signum: int, frame: object) -> None:
+    """Ctrl-C: end the agent or check running now, and stop as soon as the
+    rest has; a second Ctrl-C, for a request still waiting on the network,
+    quits at once."""
+    signal.signal(signal.SIGINT, lambda signum, frame: os._exit(130))
+    print("interrupted; stopping (Ctrl-C again quits at once)", file=sys.stderr)
+    stop_programs()
+    raise KeyboardInterrupt
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    previous = signal.signal(signal.SIGINT, _interrupted)
     try:
         return int(args.handler(args))
+    except KeyboardInterrupt:
+        # A record, if any, keeps the run as it was last saved.
+        return 130
     except BrokenPipeError:
         # The reader went away (e.g. `| head`); stop quietly.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
@@ -460,6 +475,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # What went wrong outside this program, or in how it was set up; the
         # record, if any, keeps the run as it was.
         raise SystemExit(f"error: {error}") from None
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 if __name__ == "__main__":
