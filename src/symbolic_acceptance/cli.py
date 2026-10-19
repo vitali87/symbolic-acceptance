@@ -288,8 +288,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "the agent could rewrite it"
             )
     # What a commit could hold, whatever the checkout's settings would hide.
-    status = ("status", "--porcelain", "--untracked-files=all")
-    if resume is None and git(args.cwd, *status, "--ignore-submodules=dirty"):
+    status = "status --porcelain --untracked-files=all --ignore-submodules=dirty"
+    if resume is None and git(args.cwd, *status.split()):
         raise SystemExit(
             "error: the checkout (--cwd) has changes no commit holds; commit or "
             "stash them, so that the attempts hold only what the agent does"
