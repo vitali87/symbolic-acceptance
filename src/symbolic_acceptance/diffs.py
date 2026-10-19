@@ -10,18 +10,6 @@ __all__ = ["DiffLine", "FileChange", "locate", "parse"]
 
 _QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"(?= )')
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-_ESCAPES = {
-    "a": "\a",
-    "b": "\b",
-    "t": "\t",
-    "n": "\n",
-    "v": "\v",
-    "f": "\f",
-    "r": "\r",
-    '"': '"',
-    "\\": "\\",
-}
-_OCTAL = re.compile(r"[0-7]{3}")
 
 
 Change = Literal["added", "deleted", "modified", "renamed"]
@@ -74,23 +62,14 @@ class DiffLine:
 def _unquote(path: str) -> str:
     """Undo git's C-style quoting of unusual paths (see ``core.quotePath``).
 
-    Octal escapes are the path's UTF-8 bytes, so they are collected as bytes
-    and decoded once.
+    Git's escapes are C's, which Python's include. Octal escapes are the
+    path's UTF-8 bytes, so ``unicode_escape`` makes each escape, and each
+    other byte, the character of that number, which Latin-1 maps back to
+    the byte.
     """
     if not (len(path) >= 2 and path[0] == path[-1] == '"'):
         return path
-    body, raw, index = path[1:-1], bytearray(), 0
-    while index < len(body):
-        if body[index] != "\\":
-            raw += body[index].encode("utf-8")
-            index += 1
-        elif _OCTAL.fullmatch(body, index + 1, index + 4):
-            raw.append(int(body[index + 1 : index + 4], 8))
-            index += 4
-        else:
-            escaped = body[index + 1 : index + 2]
-            raw += _ESCAPES.get(escaped, escaped).encode("utf-8")
-            index += 2
+    raw = path[1:-1].encode().decode("unicode_escape").encode("latin-1")
     return raw.decode("utf-8", errors="surrogateescape")
 
 

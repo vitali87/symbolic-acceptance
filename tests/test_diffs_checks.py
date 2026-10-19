@@ -93,6 +93,7 @@ class ParseTests(unittest.TestCase):
             Path(tmp, "docs").mkdir()
             Path(tmp, "docs", "naïve café.md").write_text("hello there\n")
             Path(tmp, "docs", 'say "hi"\there.md').write_text("hi\n")
+            Path(tmp, "docs", "bell\a, \x01, \x7f and é.md").write_text("ding\n")
             Path(tmp, "docs", "notes ").write_text("ends in a space\n")
             Path(tmp, "app.py").write_text("print('v2')\n")
             git("add", ".")
@@ -100,11 +101,13 @@ class ParseTests(unittest.TestCase):
             changed = diff(tmp, "HEAD~1", "HEAD")
         self.assertIn("+++ b/docs/naïve café.md", changed, "shown as it is")
         self.assertIn('"b/docs/say \\"hi\\"\\there.md"', changed, "quoted by git")
+        self.assertIn('"b/docs/bell\\a, \\001, \\177 and é.md"', changed, "in octal")
         files, lines = parse(changed)
         self.assertEqual(
             [(f.path, f.status) for f in files],
             [
                 ("app.py", "modified"),
+                ("docs/bell\a, \x01, \x7f and é.md", "added"),
                 ("docs/naïve café.md", "added"),
                 ("docs/notes ", "added"),
                 ('docs/say "hi"\there.md', "added"),
