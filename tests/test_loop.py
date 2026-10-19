@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import time
 import unittest
 
@@ -123,6 +124,14 @@ class EvaluateTests(unittest.TestCase):
         script = Scripted({"tests": True}, silent={"github"})
         result = evaluate(checklist, script.oracles(("ci", "github")))
         self.assertEqual(result.status, sa.APPROVED)
+
+    def test_an_oracle_cannot_change_the_answers_the_others_read(self):
+        async def meddler(questions, context):
+            context.answers["sso_exempt"] = sa.Answer(True)
+
+        oracles = {**Scripted(PASSING).oracles(), "llm": meddler}
+        with self.assertRaisesRegex(TypeError, "does not support item assignment"):
+            evaluate(self.checklist, oracles)
 
     def test_failure_does_not_wait_for_people(self):
         script = Scripted(
@@ -276,6 +285,35 @@ def run(checklist, truths, **kwargs):
 class RunTests(unittest.TestCase):
     def setUp(self):
         self.checklist = example()
+
+    def test_what_a_run_hands_out_cannot_be_changed(self):
+        # Oracles, agents and listeners get the same objects, so none of them
+        # can change what the others see.
+        result, agent = run(self.checklist, [dict(PASSING, new_test=False), PASSING])
+        evaluation = result.evaluations[0]
+        failure = evaluation.failures[0]
+        context = sa.Context(self.checklist, evaluation.attempt, evaluation.answers)
+        for value, name in (
+            (result, "status"),
+            (evaluation, "status"),
+            (evaluation.attempt, "diff"),
+            (context, "answers"),
+            (agent.tasks[1], "feedback"),
+            (failure, "reason"),
+            (failure.reason, "answer"),
+            (evaluation.answers["new_test"], "is_met"),
+            (self.checklist, "requirements"),
+            (self.checklist.questions["new_test"], "ask"),
+            (self.checklist.requirement("new_test"), "fail"),
+            (self.checklist.requirement("new_test").that, "id"),
+            (self.checklist.requirement("protected").that, "items"),
+            (self.checklist.requirement("sso").when, "item"),
+        ):
+            with (
+                self.subTest(type(value).__name__),
+                self.assertRaises(dataclasses.FrozenInstanceError),
+            ):
+                setattr(value, name, None)
 
     def test_feedback_reaches_the_agent_until_approval(self):
         result, agent = run(
