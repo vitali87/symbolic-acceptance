@@ -146,9 +146,11 @@ off (`stop_on_regression=False`).
   it is asked again on resume, so a person's correction made meanwhile
   counts.
 - The runner never pushes an attempt that changes `.github/`, since pushing
-  runs its workflows at once; give the workflows that run the attempt's
-  code a read-only token (`permissions: contents: read`), so that code
-  cannot report checks or comment.
+  runs its workflows at once (as it would another CI service's
+  configuration, so push only where GitHub Actions is the only CI); give
+  the workflows that run the attempt's code a read-only token
+  (`permissions: contents: read`), so that code cannot report checks or
+  comment.
 - The runner's diff ignores what the agent's checkout configuration and
   attributes could change in it (hooks, replace refs, textconv, binary
   files, diff format); `run` commands execute in a fresh copy of the commit

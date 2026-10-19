@@ -171,6 +171,9 @@ hand the attempt to a person.
 - `CommandAgent` never pushes an attempt that changes `.github/`: pushing
   runs the workflows a commit holds, with the token they ask for, before
   any check could refuse them. It hands such an attempt to a person.
+  Another CI service connected to the repository would run the
+  configuration a pushed commit holds for it in the same way, so push
+  attempts only where GitHub Actions is the only CI.
 - The workflows that run on the agent's branch run its code. Give them a
   read-only token (`permissions: contents: read`); a token that can write
   checks or comments would let that code report a check run or post a
