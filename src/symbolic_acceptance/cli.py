@@ -215,6 +215,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(
             "error: the checklist has lint errors:\n" + "\n".join(map(str, errors))
         )
+    try:
+        argv = shlex.split(args.agent)
+    except ValueError as error:
+        raise SystemExit(f"error: --agent: {error}") from None
+    if not argv:
+        raise SystemExit("error: --agent names no command")
     issue = _read(args.issue) if args.issue else ""
     if args.pr and not args.github:
         raise SystemExit("error: --pr needs --github")
@@ -253,6 +259,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     resume: Result | None = None
     if args.resume:
         resume = _record(args.resume, checklist)
+        if issue and resume.issue and issue != resume.issue:
+            raise SystemExit("error: --issue differs from the run being resumed")
     record_path = args.record or args.resume
     resuming_it = (
         args.resume and Path(args.record or "").resolve() == Path(args.resume).resolve()
@@ -264,9 +272,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
     if record_path and not Path(record_path).resolve().parent.is_dir():
         raise SystemExit(f"error: no folder to save {record_path} in")
-    if record_path and Path(record_path).resolve().is_relative_to(
-        Path(args.cwd).resolve()
-    ):
+    top = git(args.cwd, "rev-parse", "--show-toplevel").strip()
+    if record_path and Path(record_path).resolve().is_relative_to(Path(top).resolve()):
         raise SystemExit(
             "error: keep the run record outside the agent's checkout (--cwd); "
             "inside it, the record would be committed with the attempt and the "
@@ -279,9 +286,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "error: the checkout (--cwd) has changes no commit holds; commit or "
             "stash them, so that the attempts hold only what the agent does"
         )
+    # Checked now, before the agent runs, rather than when first needed.
+    if github and args.pr and not github.token:
+        raise SystemExit("error: --pr needs a token in GITHUB_TOKEN or GH_TOKEN")
+    judged = any(checklist.questions[q].by == "llm" for q in checklist.used())
+    if judged and not (claude.api_key or claude.auth_token):
+        raise SystemExit(
+            "error: the judge needs ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN"
+        )
     # A resumed run keeps diffing against the commit it started from.
     agent = CommandAgent(
-        shlex.split(args.agent),
+        argv,
         cwd=args.cwd,
         base=(resume.base if resume else "") or None,
         push=args.push,
@@ -407,14 +422,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         return int(args.handler(args))
-    except (ClaudeError, DraftError, GitError, HTTPError, OracleError) as error:
-        # What went wrong outside this program, or in how it was set up; the
-        # record, if any, keeps the run as it was.
-        raise SystemExit(f"error: {error}") from None
     except BrokenPipeError:
         # The reader went away (e.g. `| head`); stop quietly.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 1
+    except (
+        ClaudeError,
+        DraftError,
+        GitError,
+        HTTPError,
+        OracleError,
+        OSError,
+    ) as error:
+        # What went wrong outside this program, or in how it was set up; the
+        # record, if any, keeps the run as it was.
+        raise SystemExit(f"error: {error}") from None
 
 
 if __name__ == "__main__":

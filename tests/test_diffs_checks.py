@@ -342,6 +342,14 @@ class CommandsTests(unittest.TestCase):
         self.assertTrue(answer.is_met)
         self.assertEqual(answer.evidence, ("print('v1')",))
 
+    def test_a_command_runs_from_the_top_of_the_repository(self):
+        Path(self.tmp.name, "src").mkdir()
+        commands = Commands(Path(self.tmp.name, "src"))
+        sees = run_question("sees", "print(open('app.py').read().strip())")
+        self.assertEqual(
+            commands(sees, context(ref=self.head)).evidence, ("print('v1')",)
+        )
+
     def test_the_checkout_cannot_set_up_a_filter(self):
         # A filter defined in the agent's checkout would rewrite files as
         # they are checked out; the command must see the commit as it is.

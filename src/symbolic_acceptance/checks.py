@@ -134,9 +134,10 @@ class Commands:
     def __call__(self, question: Question, context: Context) -> Answer:
         argv = command(question)
         expect = question.choice("expect", "pass", "fail")
+        top = git(self.repo, "rev-parse", "--show-toplevel").strip()
         with tempfile.TemporaryDirectory(prefix="symbolic-acceptance-") as scratch:
             tree = str(Path(scratch, "tree"))
-            source = self.repo.resolve().as_uri()
+            source = Path(top).as_uri()
             git(scratch, "init", "--quiet", tree, isolated=True)
             fetch = ("fetch", "--quiet", "--depth=1", "--no-tags", source)
             git(tree, *fetch, context.attempt.ref, isolated=True)

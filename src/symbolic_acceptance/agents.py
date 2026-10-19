@@ -148,22 +148,33 @@ class GitError(RuntimeError):
     """A git command the runner ran failed."""
 
 
-def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
+def git(
+    cwd: str | Path, *args: str, isolated: bool = False, secrets: bool = False
+) -> str:
     """Run git on the repository in ``cwd``, overriding its own settings.
 
     ``isolated`` also leaves out the user's and the system's configuration.
+    Git may run programs the checkout's configuration names (a filter, a
+    credential helper), so the runner's GitHub token is withheld unless
+    ``secrets``, for a push whose credential helper needs it. Git never
+    stops to ask for a password, and gives up after five minutes.
     """
-    env = {k: v for k, v in os.environ.items() if k not in _ELSEWHERE}
-    done = subprocess.run(
-        ["git", *_OVERRIDES, *args],
-        cwd=cwd,
-        env=env | _ISOLATED if isolated else env,
-        capture_output=True,
-        timeout=300,
-        check=False,
-    )
+    hidden = _ELSEWHERE if secrets else _ELSEWHERE | RUNNER_SECRETS
+    env = {k: v for k, v in os.environ.items() if k not in hidden}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        done = subprocess.run(
+            ["git", *_OVERRIDES, *args],
+            cwd=cwd,
+            env=env | _ISOLATED if isolated else env,
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        raise GitError(f"git {' '.join(args)} ran past 300s") from None
     if done.returncode != 0:
-        error = done.stderr.decode(errors="replace").strip()
+        error = (done.stderr or done.stdout).decode(errors="replace").strip()
         raise GitError(f"git {' '.join(args)} failed: {error}")
     # Decoded here rather than in text mode, which would take a carriage
     # return inside a line for a line break: file content could then forge
@@ -274,7 +285,8 @@ class CommandAgent:
                 if task.previous
                 else []
             )
-            git(self.cwd, "push", "--quiet", *lease, "origin", f"{after}:{branch}")
+            push = ("push", "--quiet", *lease, "origin", f"{after}:{branch}")
+            git(self.cwd, *push, secrets=True)
         return Attempt(
             ref=after,
             diff=changed,

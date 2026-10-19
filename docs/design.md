@@ -171,6 +171,11 @@ off (`stop_on_regression=False`).
   on gaming them belong in CI, behind frozen workflows; against one
   attacking the runner itself, run the agent in a sandbox that holds none
   of the runner's credentials, with a checkout that has none persisted.
+  The runner's own git (status, add, commit, push) reads the checkout's
+  `.git`, whose configuration can name programs git runs (filters, a
+  signing program, credential helpers) and where a push goes; only the
+  push sees the runner's GitHub token. So a sandboxed agent must not be
+  able to write `.git`: mount it read-only, and the runner commits for it.
 - An `llm` question in a `when` condition helps the attempt with a NO,
   which has nothing to quote, so the judge's NO there stands unbacked.
   Where the condition is about files ("does it touch SSO?"), a frozen

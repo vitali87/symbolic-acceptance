@@ -252,6 +252,12 @@ class CommandAgentTests(unittest.TestCase):
             attempt = asyncio.run(agent(self.task()))
         self.assertEqual(attempt.claims, "['ANTHROPIC_AUTH_TOKEN']")
 
+    def test_a_git_failure_says_why(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            with self.assertRaisesRegex(GitError, "nothing to commit"):
+                git(tmp, "commit", "-m", "empty")
+
     def test_an_agent_past_its_timeout_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
@@ -421,18 +427,42 @@ class CLITests(unittest.TestCase):
             kept.write_text("{}")
             with self.assertRaisesRegex(SystemExit, "pass --resume"):
                 cli("run", str(local), "--agent", "true", "--record", str(kept))
-            record = str(Path(tmp, "run.json"))
+            # Inside the repository, though --cwd names only part of it.
+            work = Path(tmp, "work")
+            work.mkdir()
+            repo(str(work))
+            Path(work, "src").mkdir()
+            inside = str(Path(work, "run.json"))
             with self.assertRaisesRegex(SystemExit, "outside the agent's checkout"):
                 cli(
                     "run",
                     str(local),
-                    "--agent",
-                    "true",
-                    "--cwd",
-                    tmp,
-                    "--record",
-                    record,
+                    *("--agent", "true", "--cwd", str(Path(work, "src"))),
+                    *("--record", inside),
                 )
+            missing = "no-such-agent-xyz"
+            with self.assertRaisesRegex(SystemExit, f"^error: .*{missing}"):
+                cli("run", str(local), "--agent", missing, "--cwd", str(work))
+            for agent, message in (("", "names no command"), ("x 'y", "--agent: ")):
+                with self.assertRaisesRegex(SystemExit, message):
+                    cli("run", str(local), "--agent", agent, "--cwd", str(work))
+            judged = Path(tmp, "judged.toml")
+            judged.write_text(
+                '[q.a]\nask = "A?"\nby = "llm"\n[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            without = dict(os.environ)
+            without.pop("ANTHROPIC_API_KEY", None)
+            without.pop("ANTHROPIC_AUTH_TOKEN", None)
+            done = subprocess.run(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(judged)]
+                + ["--agent", "true", "--cwd", str(work)],
+                capture_output=True,
+                text=True,
+                env=dict(without, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                check=False,
+            )
+            self.assertIn("the judge needs ANTHROPIC_API_KEY", done.stderr)
+            self.assertEqual(git(work, "log", "--format=%s").split(), ["base"])
 
     def test_usage_errors_exit_2(self):
         run = ("run", str(EXAMPLE), "--agent", "x")
