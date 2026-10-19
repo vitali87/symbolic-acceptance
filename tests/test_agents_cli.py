@@ -37,6 +37,43 @@ class CommandAgentTests(unittest.TestCase):
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(diff(tmp, attempt.base, attempt.ref), attempt.diff)
 
+    def test_the_whole_change_counts_from_a_subdirectory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            git("config", "diff.relative", "true")
+            Path(tmp, "sub").mkdir()
+            script = (
+                "open('../app.py', 'w').write('v2\\n'); open('x.py', 'w').write('')"
+            )
+            agent = CommandAgent([sys.executable, "-c", script], cwd=Path(tmp, "sub"))
+            attempt = asyncio.run(agent(self.task()))
+        assert attempt.diff is not None
+        self.assertIn("diff --git a/app.py b/app.py", attempt.diff)
+
+    def test_a_submodule_update_alone_is_an_attempt_whatever_the_checkout_says(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as library,
+        ):
+            other = repo(library)
+            first = other("rev-parse", "HEAD").strip()
+            other("commit", "-q", "--allow-empty", "-m", "newer")
+            newer = other("rev-parse", "HEAD").strip()
+            git = repo(tmp)
+            allow = ("-c", "protocol.file.allow=always")
+            git(*allow, "submodule", "add", "-q", library, "vendored")
+            git("-C", "vendored", "checkout", "-q", first)
+            git("commit", "-qam", "vendor")
+            git("config", "diff.ignoreSubmodules", "all")
+            move = (
+                "import subprocess; subprocess.run(['git', '-C', 'vendored',"
+                f" 'checkout', '-q', '{newer}'], check=True)"
+            )
+            agent = CommandAgent([sys.executable, "-c", move], cwd=tmp)
+            attempt = asyncio.run(agent(self.task()))
+        assert attempt.diff is not None
+        self.assertIn(f"+Subproject commit {newer}", attempt.diff)
+
     def test_a_new_file_is_an_attempt_whatever_the_checkout_says(self):
         with tempfile.TemporaryDirectory() as tmp:
             git = repo(tmp)
@@ -337,6 +374,34 @@ class CLITests(unittest.TestCase):
             # Resuming a finished run runs no agent: `false` would fail.
             code, out = cli(*args, "false", "--resume", record_path)
             self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+
+    def test_a_resumed_run_keeps_diffing_from_where_it_started(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            check = json.dumps([sys.executable, "-c", "import app; assert app.V == 3"])
+            checklist.write_text(
+                f'[q.v3]\nask = "Is V 3?"\nby = "ci"\nrun = {check}\n'
+                '[[require]]\nthat = "v3"\nfail = "V is not 3"\n'
+            )
+            saved = str(Path(outside, "run.json"))
+
+            def agent(value):
+                script = f"open('app.py', 'w').write('V = {value}\\n')"
+                return shlex.join([sys.executable, "-c", script])
+
+            args = ("run", str(checklist), "--cwd", tmp, "--agent")
+            code, _ = cli(*args, agent(2), "--record", saved, "--max-attempts", "1")
+            self.assertEqual(code, 1, "escalated at the attempt cap")
+            code, _ = cli(*args, agent(3), "--resume", saved, "--max-attempts", "2")
+            self.assertEqual(code, 0)
+            first, second = record.load(saved, sa.load(checklist)).evaluations
+        self.assertEqual(second.attempt.base, first.attempt.base)
+        assert second.attempt.diff is not None
+        self.assertIn("-print('v1')\n+V = 3", second.attempt.diff)
 
     def test_report_renders_a_recorded_run(self):
         with tempfile.TemporaryDirectory() as tmp:

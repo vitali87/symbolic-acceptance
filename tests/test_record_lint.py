@@ -42,6 +42,14 @@ class RecordTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, r"unknown questions: \['planted'\]"):
             record.loads(json.dumps(data), self.checklist)
 
+    def test_a_failed_save_leaves_nothing_behind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            taken = Path(tmp, "run.json")
+            taken.mkdir()  # a directory where the record should go
+            with self.assertRaises(OSError):
+                record.save(self.result, self.checklist, taken)
+            self.assertEqual([p.name for p in Path(tmp).iterdir()], ["run.json"])
+
     def test_rejects_another_checklist(self):
         text = record.dumps(self.result, self.checklist)
         other = sa.loads(EXAMPLE.read_text().replace("Throttle", "Limit"))
@@ -96,6 +104,11 @@ class RecordTests(unittest.TestCase):
         self.assertNotIn("Feedback sent to the agent", text)
         self.assertIn("What the agent says it did", text)
         self.assertIn("I fixed it", text)
+        waiting = sa.Evaluation.from_answers(
+            self.checklist, sa.Attempt("abc", 1), {}, [], "waiting", "CI: tests queued"
+        )
+        waiting_run = sa.Result("waiting", "", (waiting,), self.result.digest)
+        self.assertIn("> CI: tests queued", markdown(waiting_run, self.checklist))
         sent_back = sa.Result(
             sa.ESCALATED, "", self.result.evaluations[:1], self.result.digest
         )

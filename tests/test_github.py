@@ -175,7 +175,9 @@ class ChecksTests(unittest.TestCase):
             asyncio.run(GitHubChecks(github)([sa.Question("x", "X?", "ci")], context()))
 
 
-SSO = sa.Question("sso_exempt", "Is the SSO change fine?", "human")
+SSO = sa.Question(
+    "sso_exempt", "Is the SSO change fine?", "human", "YES if security signed off."
+)
 DOCS = sa.Question("docs_ok", "Are the docs right?", "human")
 ASK = "<!-- symbolic-acceptance:ask ref=abc123 ids=sso_exempt,docs_ok -->\nquestions"
 
@@ -190,6 +192,7 @@ class ReviewsTests(unittest.TestCase):
             "<!-- symbolic-acceptance:ask ref=abc123 ids=sso_exempt -->", posted
         )
         self.assertIn("`sso_exempt`: Is the SSO change fine?", posted)
+        self.assertIn("  - YES if security signed off.", posted)
 
     def test_reads_trusted_replies_after_the_question(self):
         comments = [

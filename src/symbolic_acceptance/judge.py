@@ -110,20 +110,17 @@ class Judge:
         self.max_diff_chars = max_diff_chars
         self._key = secrets.token_bytes(32)
 
-    def _boundary(self, ref: str, texts: Sequence[str]) -> str:
-        counter = 0
-        while True:
-            seed = f"{ref}:{counter}".encode()
-            boundary = hmac.new(self._key, seed, hashlib.sha256).hexdigest()[:20]
-            if not any(boundary in text for text in texts):
-                return boundary
-            counter += 1
+    def _boundary(self, ref: str) -> str:
+        """80 bits keyed by a secret, so the change cannot contain them except
+        by a chance not worth a thought; the same for every question about one
+        attempt, so the cached block is reused."""
+        return hmac.new(self._key, ref.encode(), hashlib.sha256).hexdigest()[:20]
 
     def _change(self, context: Context, diff: str) -> str:
         """What every question about the attempt shares: guidance, issue, diff."""
         ref = context.attempt.ref
         guidance = context.checklist.context or ""
-        boundary = self._boundary(ref, (diff, context.issue, guidance))
+        boundary = self._boundary(ref)
         parts = []
         if guidance:
             parts.append(f"Guidance for every question:\n{guidance.strip()}\n")

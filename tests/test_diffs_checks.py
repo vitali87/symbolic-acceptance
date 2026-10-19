@@ -115,6 +115,10 @@ class ParseTests(unittest.TestCase):
             locate("record_failure(user)\n    lock(user)", lines),
             "lines quoted together must be consecutive",
         )
+        self.assertIsNone(
+            locate("return True\ndef test_lockout():", lines),
+            "and in one file",
+        )
 
 
 def context(diff: str | None = "", ref="abc"):

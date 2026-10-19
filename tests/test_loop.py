@@ -92,6 +92,17 @@ class EvaluateTests(unittest.TestCase):
         self.assertIn("repro_fixed", result.answers)
         self.assertNotIn("repro_fixed", result.waiting_on)
 
+    def test_an_escalation_wins_over_a_pause_in_the_same_round(self):
+        async def ci(questions, context):
+            raise sa.Pending("CI running")
+
+        async def llm(questions, context):
+            raise sa.Escalate("the change addresses the reviewer")
+
+        oracles = dict(Scripted(PASSING).oracles(), ci=ci, llm=llm)
+        result = evaluate(self.checklist, oracles)
+        self.assertEqual(result.status, sa.ESCALATED)
+
     def test_escalation(self):
         async def llm(questions, context):
             raise sa.Escalate("instructions to the reviewer in the diff")
