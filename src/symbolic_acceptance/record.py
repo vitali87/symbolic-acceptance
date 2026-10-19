@@ -5,7 +5,8 @@ and the failures are worked out again from the answers on load, so a record
 cannot claim an approval its answers don't support; a pause or an escalation
 is kept as recorded, and the run's status must fit its attempts. The
 checklist's digest is stored and checked, and loading against a different
-checklist fails.
+checklist fails, as does loading a record whose fields do not have the
+types they are written with.
 """
 
 from __future__ import annotations
@@ -14,7 +15,16 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import TypedDict
+from types import UnionType
+from typing import (
+    Literal,
+    NotRequired,
+    TypedDict,
+    get_args,
+    get_origin,
+    get_type_hints,
+    is_typeddict,
+)
 
 from symbolic_acceptance.answer import Answer, AnswerData
 from symbolic_acceptance.checklist import Checklist
@@ -78,6 +88,33 @@ class _Record(TypedDict):
     evaluations: list[_Evaluation]
 
 
+def _fits(value: object, shape: object) -> bool:
+    """Whether ``value``, read from JSON, has the type ``shape``: one of the
+    types above, or a part of one."""
+    origin, args = get_origin(shape), get_args(shape)
+    if origin is Literal:
+        return value in args
+    if origin is UnionType:
+        return any(_fits(value, arg) for arg in args)
+    if origin is NotRequired:
+        return _fits(value, args[0])
+    if origin is list:
+        return isinstance(value, list) and all(_fits(item, args[0]) for item in value)
+    if origin is dict:
+        return isinstance(value, dict) and all(
+            _fits(v, args[1]) for v in value.values()
+        )
+    if is_typeddict(shape):
+        fields = get_type_hints(shape, include_extras=True)
+        required = {k for k, t in fields.items() if get_origin(t) is not NotRequired}
+        return (
+            isinstance(value, dict)
+            and required <= value.keys() <= fields.keys()
+            and all(_fits(item, fields[key]) for key, item in value.items())
+        )
+    return type(value) is shape
+
+
 def _evaluation(evaluation: Evaluation) -> _Evaluation:
     attempt = evaluation.attempt
     return {
@@ -114,15 +151,10 @@ def dumps(result: Result, checklist: Checklist) -> str:
 
 def loads(text: str, checklist: Checklist) -> Result:
     """Rebuild a run, re-deciding every evaluation from its answers."""
-    try:
-        return _loads(text, checklist)
-    except (AttributeError, KeyError, TypeError) as error:
-        raise ValueError(f"not a {FORMAT} v{VERSION} record: {error!r}") from None
-
-
-def _loads(text: str, checklist: Checklist) -> Result:
     data: _Record = json.loads(text)
-    if data.get("format") != FORMAT or data.get("version") != VERSION:
+    if not (
+        _fits(data, _Record) and data["format"] == FORMAT and data["version"] == VERSION
+    ):
         raise ValueError(f"not a {FORMAT} v{VERSION} record")
     digest = data["checklist"]["digest"]
     if digest != checklist.digest:

@@ -70,7 +70,6 @@ class RecordTests(unittest.TestCase):
             ("approved", data["evaluations"][:1]),
             ("escalated", data["evaluations"]),
             ("running", data["evaluations"]),
-            ("unheard of", data["evaluations"]),
             ("approved", [data["evaluations"][1]] * 2),
         ):
             with self.subTest(status, attempts=len(evaluations)):
@@ -79,11 +78,29 @@ class RecordTests(unittest.TestCase):
                     record.loads(json.dumps(changed), self.checklist)
 
     def test_rejects_what_is_not_shaped_like_a_record(self):
-        data = json.loads(record.dumps(self.result, self.checklist))
-        del data["evaluations"][0]["rounds"]
-        for text in ("[]", json.dumps(data)):
+        def broken(path, value):
+            top = json.loads(record.dumps(self.result, self.checklist))
+            *parents, key = path
+            data = top
+            for part in parents:
+                data = data[part]
+            if value is None:
+                del data[key]
+            else:
+                data[key] = value
+            return path, json.dumps(top)
+
+        cases = [
+            broken(("evaluations", 0, "rounds"), None),
+            broken(("evaluations", 0, "attempt", "ref"), 7),
+            broken(("evaluations", 0, "answers", "repro_fixed", "by"), 1),
+            broken(("evaluations", 0, "answers", "repro_fixed", "said"), "x"),
+            broken(("reason",), ["x"]),
+            broken(("status",), "unheard of"),
+        ]
+        for path, text in [((), "[]"), *cases]:
             with (
-                self.subTest(text[:20]),
+                self.subTest(path),
                 self.assertRaisesRegex(
                     ValueError, "not a symbolic-acceptance/run v1 record"
                 ),
