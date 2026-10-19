@@ -450,19 +450,35 @@ class CLITests(unittest.TestCase):
             judged.write_text(
                 '[q.a]\nask = "A?"\nby = "llm"\n[[require]]\nthat = "a"\nfail = "x"\n'
             )
-            without = dict(os.environ)
-            without.pop("ANTHROPIC_API_KEY", None)
-            without.pop("ANTHROPIC_AUTH_TOKEN", None)
-            done = subprocess.run(
-                [sys.executable, "-m", "symbolic_acceptance", "run", str(judged)]
-                + ["--agent", "true", "--cwd", str(work)],
-                capture_output=True,
-                text=True,
-                env=dict(without, PYTHONPATH=str(Path(sa.__file__).parents[1])),
-                check=False,
-            )
+            # Credentials are checked before the agent runs, in a process
+            # whose environment has only the ones each case gives it.
+            secrets = {
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+                "GITHUB_TOKEN",
+                "GH_TOKEN",
+            }
+            bare = {k: v for k, v in os.environ.items() if k not in secrets}
+            bare["PYTHONPATH"] = str(Path(sa.__file__).parents[1])
+
+            def run(checklist, *more, **given):
+                return subprocess.run(
+                    [sys.executable, "-m", "symbolic_acceptance", "run", checklist]
+                    + ["--agent", "true", "--cwd", str(work), *more],
+                    capture_output=True,
+                    text=True,
+                    env=bare | given,
+                    check=False,
+                )
+
+            done = run(str(judged))
             self.assertIn("the judge needs ANTHROPIC_API_KEY", done.stderr)
+            done = run(str(local), "--github", "octo/repo", "--pr", "5")
+            self.assertIn("--pr needs a token in GITHUB_TOKEN", done.stderr)
             self.assertEqual(git(work, "log", "--format=%s").split(), ["base"])
+            # Either credential will do; with one, the agent runs.
+            done = run(str(judged), ANTHROPIC_AUTH_TOKEN="t")
+            self.assertIn("attempt 1 changed nothing", done.stdout)
 
     def test_usage_errors_exit_2(self):
         run = ("run", str(EXAMPLE), "--agent", "x")
@@ -549,7 +565,11 @@ class CLITests(unittest.TestCase):
                 [sys.executable, "-c", "open('app.py', 'w').write(\"print('v2')\\n\")"]
             )
             args = ("run", str(checklist), "--cwd", tmp, "--agent")
-            code, out = cli(*args, write, "--record", record_path)
+            issue = Path(outside, "issue.md")
+            issue.write_text("app.py should print v2\n")
+            code, out = cli(
+                *args, write, "--record", record_path, "--issue", str(issue)
+            )
             self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
             saved = record.load(record_path, sa.load(checklist))
             self.assertEqual(saved.status, sa.APPROVED)
@@ -558,6 +578,10 @@ class CLITests(unittest.TestCase):
             same = os.path.join(outside, ".", "run.json")
             code, out = cli(*args, "false", "--resume", record_path, "--record", same)
             self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+            other = Path(outside, "other.md")
+            other.write_text("Another issue\n")
+            with self.assertRaisesRegex(SystemExit, "--issue differs"):
+                cli(*args, "false", "--resume", record_path, "--issue", str(other))
 
     def test_run_starts_from_a_checkout_whose_changes_are_all_committed(self):
         with (
