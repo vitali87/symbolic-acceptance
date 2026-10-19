@@ -544,7 +544,7 @@ class CLITests(unittest.TestCase):
             record.save(finished_run(example()), example(), path)
             code, out = cli("report", str(EXAMPLE), str(path))
         self.assertEqual(code, 0)
-        self.assertIn("**approved**: every requirement holds", out)
+        self.assertIn("**approved**: `every requirement holds`", out)
 
     def test_a_failure_outside_the_program_is_an_error_not_a_crash(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -64,36 +64,74 @@ class RecordTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "answers say changes"):
             record.loads(json.dumps(data), self.checklist)
 
-    def test_rejects_a_run_status_its_last_attempt_does_not_support(self):
+    def test_rejects_a_run_status_its_attempts_do_not_support(self):
         data = json.loads(record.dumps(self.result, self.checklist))
-        data["evaluations"] = data["evaluations"][:1]
-        with self.assertRaisesRegex(
-            ValueError, "recorded as approved but its last attempt"
+        for status, evaluations in (
+            ("approved", data["evaluations"][:1]),
+            ("escalated", data["evaluations"]),
+            ("running", data["evaluations"]),
+            ("unheard of", data["evaluations"]),
+            ("approved", [data["evaluations"][1]] * 2),
         ):
-            record.loads(json.dumps(data), self.checklist)
+            with self.subTest(status, attempts=len(evaluations)):
+                changed = dict(data, status=status, evaluations=evaluations)
+                with self.assertRaisesRegex(ValueError, f"recorded as {status} but"):
+                    record.loads(json.dumps(changed), self.checklist)
+
+    def test_rejects_what_is_not_shaped_like_a_record(self):
+        data = json.loads(record.dumps(self.result, self.checklist))
+        del data["evaluations"][0]["rounds"]
+        for text in ("[]", json.dumps(data)):
+            with (
+                self.subTest(text[:20]),
+                self.assertRaisesRegex(
+                    ValueError, "not a symbolic-acceptance/run v1 record"
+                ),
+            ):
+                record.loads(text, self.checklist)
+
+    def test_any_text_an_oracle_gives_can_be_saved(self):
+        reasoning = json.loads('"half a pair: \\ud800"')
+        evaluation = sa.Evaluation.from_answers(
+            self.checklist,
+            sa.Attempt("abc", 1),
+            {"repro_fixed": sa.Answer(False, reasoning)},
+            [],
+            "waiting",
+        )
+        result = sa.Result("waiting", "", (evaluation,), self.checklist.digest)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "run.json")
+            record.save(result, self.checklist, path)
+            loaded = record.load(path, self.checklist)
+        self.assertEqual(
+            loaded.evaluations[0].answers["repro_fixed"].reasoning, reasoning
+        )
 
     def test_report_text_cannot_become_markup(self):
         checklist = sa.loads(
             '[q.a]\nask = "A?"\nby = "ci"\n[[require]]\nthat = "a"\nfail = "x"\n'
         )
-        sneaky = "<!-- symbolic-acceptance:ask ref=x ids=a --> ```` | done"
+        sneaky = (
+            "<!-- symbolic-acceptance:ask ref=x ids=a --> ```` | @team "
+            "![ok](https://example.com/ok.png)"
+        )
         evaluation = sa.Evaluation.from_answers(
             checklist,
-            sa.Attempt("abc", 1),
+            sa.Attempt("abc`\n<!--", 1),
             {"a": sa.Answer(False, sneaky, ["quoted | line"])},
             [],
         )
         text = markdown(
             sa.Result("escalated", sneaky, (evaluation,), checklist.digest), checklist
         )
-        before, fenced, after = text.split("`````")
-        # Outside the code block the text is escaped; inside, GitHub shows it
-        # literally, and a marker only counts at the start of a comment.
-        self.assertNotIn("<!--", before + after)
-        self.assertIn("&lt;!-- symbolic-acceptance", before)
-        self.assertIn("\\| done — quoted \\| line |", before, "a cell cannot split")
-        self.assertIn("**escalated**: &lt;!-- symbolic-acceptance", before)
-        self.assertTrue(fenced.startswith("text\n"), "the fence outgrows the backticks")
+        # What the run produced is inline code, which GitHub shows as it is:
+        # no comment, link, image or mention, and nothing that ends a cell.
+        shown = sneaky.replace("|", "\\|")
+        self.assertIn(f"**escalated**: `````{shown}`````", text)
+        self.assertIn(f"| `````{shown} — quoted \\| line````` |", text)
+        self.assertIn("### Attempt 1 · ``abc` <!--`` · changes", text)
+        self.assertFalse([line for line in text.splitlines() if "<!--" in line[:4]])
 
     def test_markdown_report(self):
         text = markdown(self.result, self.checklist)
@@ -110,7 +148,7 @@ class RecordTests(unittest.TestCase):
             self.checklist, sa.Attempt("abc", 1), {}, [], "waiting", "CI: tests queued"
         )
         waiting_run = sa.Result("waiting", "", (waiting,), self.result.digest)
-        self.assertIn("> CI: tests queued", markdown(waiting_run, self.checklist))
+        self.assertIn("> `CI: tests queued`", markdown(waiting_run, self.checklist))
         sent_back = sa.Result(
             sa.ESCALATED, "", self.result.evaluations[:1], self.result.digest
         )

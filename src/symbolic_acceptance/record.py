@@ -18,7 +18,9 @@ from symbolic_acceptance.answer import Answer, AnswerData
 from symbolic_acceptance.checklist import Checklist
 from symbolic_acceptance.loop import (
     APPROVED,
+    CHANGES,
     ESCALATED,
+    RUNNING,
     WAITING,
     Attempt,
     Evaluation,
@@ -31,6 +33,14 @@ __all__ = ["dumps", "load", "loads", "save"]
 
 FORMAT = "symbolic-acceptance/run"
 VERSION = 1
+# What the last attempt of a run with each status can be; every attempt
+# before it was sent back with changes.
+_LAST: dict[str, set[str | None]] = {
+    APPROVED: {APPROVED},
+    WAITING: {WAITING},
+    RUNNING: {CHANGES},
+    ESCALATED: {None, CHANGES, ESCALATED},
+}
 
 
 class _Attempt(TypedDict):
@@ -96,11 +106,18 @@ def dumps(result: Result, checklist: Checklist) -> str:
         "reason": result.reason,
         "evaluations": [_evaluation(e) for e in result.evaluations],
     }
-    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    return json.dumps(data, indent=2) + "\n"
 
 
 def loads(text: str, checklist: Checklist) -> Result:
     """Rebuild a run, re-deciding every evaluation from its answers."""
+    try:
+        return _loads(text, checklist)
+    except (AttributeError, KeyError, TypeError) as error:
+        raise ValueError(f"not a {FORMAT} v{VERSION} record: {error!r}") from None
+
+
+def _loads(text: str, checklist: Checklist) -> Result:
     data: _Record = json.loads(text)
     if data.get("format") != FORMAT or data.get("version") != VERSION:
         raise ValueError(f"not a {FORMAT} v{VERSION} record")
@@ -135,9 +152,12 @@ def loads(text: str, checklist: Checklist) -> Result:
         evaluations.append(evaluation)
     recorded = data["status"]
     last = evaluations[-1].status if evaluations else None
-    if recorded in (APPROVED, WAITING) and recorded != last:
+    if last not in _LAST.get(recorded, set()) or any(
+        evaluation.status != CHANGES for evaluation in evaluations[:-1]
+    ):
         raise ValueError(
-            f"the run is recorded as {recorded} but its last attempt is {last}"
+            f"the run is recorded as {recorded} but its attempts end "
+            f"{[evaluation.status for evaluation in evaluations]}"
         )
     return Result(recorded, data["reason"], tuple(evaluations), digest, data["issue"])
 
@@ -150,6 +170,8 @@ def save(result: Result, checklist: Checklist, path: str | Path) -> None:
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
             stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
         os.replace(temporary, path)
     except BaseException:
         Path(temporary).unlink(missing_ok=True)
