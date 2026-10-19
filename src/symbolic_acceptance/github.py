@@ -342,7 +342,7 @@ class Reviews:
     def _ask_body(self, questions: Sequence[Question], ref: str) -> str:
         ids = ",".join(q.id for q in questions)
         lines = [
-            f"<!-- symbolic-acceptance:ask ref={ref} ids={ids} -->",
+            f"{_MARKER}ask ref={ref} ids={ids} -->",
             f"**Questions for a person** about commit `{ref[:12]}`",
             "",
             "Reply with one line per question: `/yes <id> <why>` or `/no <id> <why>`.",
