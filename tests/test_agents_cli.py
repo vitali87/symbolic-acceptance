@@ -252,9 +252,13 @@ class CommandAgentTests(unittest.TestCase):
             git = repo(tmp)
             lines = [f"line_{n} = {n}" for n in range(40)]
             Path(tmp, "app.py").write_text("\n".join(["def login():", *lines, ""]))
-            Path(tmp, "b.py").write_text("def a():\n    return 1\n")
+            Path(tmp, "b.py").write_text("def a():\n\n    return 1\n")
+            for name in ("r1", "r2"):
+                Path(tmp, f"{name}.txt").write_text(
+                    "".join(f"{name} {n}\n" for n in range(30))
+                )
             git("add", ".")
-            git("commit", "-qm", "long")
+            git("commit", "-qm", "base")
             base = git("rev-parse", "HEAD").strip()
             settings = {
                 # One hunk for a whole file, under a header naming any line.
@@ -265,6 +269,11 @@ class CommandAgentTests(unittest.TestCase):
                 "diff.pick.algorithm": "histogram",
                 "diff.indentHeuristic": "false",
                 "diff.orderFile": str(Path(tmp, ".git", "order")),
+                # Renames read as deletions and additions, other ids, and
+                # blank context lines written without their space.
+                "diff.renameLimit": "1",
+                "core.abbrev": "40",
+                "diff.suppressBlankEmpty": "true",
             }
             for key, value in settings.items():
                 git("config", key, value)
@@ -272,10 +281,12 @@ class CommandAgentTests(unittest.TestCase):
             Path(tmp, ".git", "info", "attributes").write_text("*.py diff=pick\n")
             lines[5], lines[35] = "line_5 = 'five'", "line_35 = 'thirty-five'"
             text = "\n".join(["def login():", *lines, ""])
-            added = "def a():\n    return 1\n\ndef c():\n    return 3\n"
             write = (
+                "import os; "
                 f"open('app.py', 'w').write({text!r}); "
-                f"open('b.py', 'w').write({added!r})"
+                "open('b.py', 'w').write('def a():\\n\\n    return 2\\n'); "
+                "[os.rename(f'{n}.txt', f'moved_{n}.txt') for n in ('r1', 'r2')]; "
+                "[open(f'moved_{n}.txt', 'a').write('more\\n') for n in ('r1', 'r2')]"
             )
             attempt = asyncio.run(
                 CommandAgent([sys.executable, "-c", write], cwd=tmp)(self.task())
@@ -288,8 +299,10 @@ class CommandAgentTests(unittest.TestCase):
         self.assertEqual(attempt.diff, plain)
         headers = [line for line in plain.splitlines() if line[:2] == "@@"]
         self.assertEqual(
-            headers, ["@@ -4,7 +4,7 @@", "@@ -34,7 +34,7 @@", "@@ -1,2 +1,5 @@"]
+            headers[:3], ["@@ -4,7 +4,7 @@", "@@ -34,7 +34,7 @@", "@@ -1,3 +1,3 @@"]
         )
+        self.assertIn("rename from r1.txt", plain)
+        self.assertIn("rename from r2.txt", plain)
 
     def test_attempts_are_pushed_even_when_the_agent_rewrites_them(self):
         with (

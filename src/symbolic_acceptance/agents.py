@@ -14,8 +14,9 @@ a check run or comment as the runner. It can write to the checkout's git
 configuration and attributes, so every git command here overrides what they
 could change: hooks, replace refs, the file monitor, and in the diff
 textconv and external drivers, binary files, path prefixes, quoting,
-renames, submodules, context lines, how lines are matched up and files
-ordered, and the function names in hunk headers, which it leaves out. A
+renames and how many files rename detection reads, submodules, context
+and blank lines, object ids, how lines are matched up and files ordered,
+and the function names in hunk headers, which it leaves out. A
 filter can still rewrite what the agent's changes are committed as, which
 is the agent's to decide anyway: everyone judges the commit.
 """
@@ -152,6 +153,9 @@ def run_program(
 
 
 _DIFF = (
+    # A setting no option of git diff turns off.
+    "-c",
+    "diff.suppressBlankEmpty=false",
     "diff",
     "--no-color",
     "--no-ext-diff",
@@ -161,6 +165,8 @@ _DIFF = (
     "--ignore-submodules=none",
     "--submodule=short",
     "--find-renames",
+    "-l1000",
+    "--full-index",
     "--unified=3",
     "--inter-hunk-context=0",
     "--diff-algorithm=myers",
