@@ -353,9 +353,23 @@ class CommandAgentTests(unittest.TestCase):
     def test_no_change_is_an_error(self):
         empty = "git commit -q --allow-empty -m nothing"
         undone = "git commit -qam v2 && git revert --no-edit HEAD >/dev/null"
-        for script in ("true", empty, f"echo v2 > app.py && {undone}"):
-            with self.subTest(script), tempfile.TemporaryDirectory() as tmp:
-                repo(tmp)
+        # Line endings git normalizes away, and an edit inside a submodule,
+        # which only the submodule could commit.
+        endings = "printf \"print('v1')\\r\\n\" > app.py"
+        inside = "echo x > vendored/new.txt"
+        scripts = ("true", empty, f"echo v2 > app.py && {undone}", endings, inside)
+        for script in scripts:
+            with (
+                self.subTest(script),
+                tempfile.TemporaryDirectory() as tmp,
+                tempfile.TemporaryDirectory() as library,
+            ):
+                git = repo(tmp)
+                repo(library)
+                allow = ("-c", "protocol.file.allow=always")
+                git(*allow, "submodule", "add", "-q", library, "vendored")
+                git("commit", "-qm", "vendor")
+                git("config", "core.autocrlf", "input")
                 agent = CommandAgent(["sh", "-c", script], cwd=tmp, env=NO_GIT_CONFIG)
                 with self.assertRaisesRegex(sa.Escalate, "changed nothing"):
                     asyncio.run(agent(self.task()))

@@ -258,10 +258,11 @@ class CommandAgent:
             raise Escalate(f"the agent ran past {self.timeout:g}s")
         if status != 0:
             raise Escalate(f"the agent exited with {status}: {output.strip()[-2000:]}")
-        # Untracked files and submodules count, whatever the checkout says.
-        changes = ("status", "--porcelain", "--untracked-files=all")
-        if git(self.cwd, *changes, "--ignore-submodules=none").strip():
-            git(self.cwd, "add", "--all")
+        # Whatever a commit can hold is committed, whatever the checkout's
+        # settings would hide; what none can (an edit inside a submodule,
+        # line endings git normalizes) is no change.
+        git(self.cwd, "add", "--all")
+        if git(self.cwd, "write-tree").strip() != self._tree("HEAD"):
             git(self.cwd, "commit", "--quiet", "-m", f"Attempt {task.number}")
         after = self._head()
         # The tree, not the commit: an empty commit, or one and its revert,
