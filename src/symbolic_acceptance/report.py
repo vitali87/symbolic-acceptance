@@ -21,8 +21,8 @@ def _cut(text: str, limit: int) -> str:
 
 
 def _cell(text: str) -> str:
-    """One table cell of the checklist's text: a single line, with no HTML
-    and nothing that ends the cell; long text is cut."""
+    """The checklist's text for a heading or a table cell: a single line,
+    with no HTML and nothing that ends a cell; long text is cut."""
     return _cut(" ".join(text.split()), CELL).replace("<", "&lt;").replace("|", "\\|")
 
 
@@ -92,7 +92,7 @@ def markdown(result: Result, checklist: Checklist) -> str:
     shows its answers and feedback."""
     title = checklist.title or "Acceptance run"
     lines = [
-        f"## {title}",
+        f"## {_cell(title)}",
         "",
         f"**{result.status}**"
         + (f": {_inert(result.reason)}" if result.reason else ""),

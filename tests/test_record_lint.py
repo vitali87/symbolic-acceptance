@@ -110,6 +110,7 @@ class RecordTests(unittest.TestCase):
 
     def test_report_text_cannot_become_markup(self):
         checklist = sa.loads(
+            'title = "Fix it\\n<!-- hidden"\n'
             '[q.a]\nask = "A?"\nby = "ci"\n[[require]]\nthat = "a"\nfail = "x"\n'
         )
         sneaky = (
@@ -130,6 +131,7 @@ class RecordTests(unittest.TestCase):
         shown = sneaky.replace("|", "\\|")
         self.assertIn(f"**escalated**: `````{shown}`````", text)
         self.assertIn(f"| `````{shown} — quoted \\| line````` |", text)
+        self.assertIn("## Fix it &lt;!-- hidden\n", text)
         self.assertIn("### Attempt 1 · ``abc` <!--`` · changes", text)
         self.assertFalse([line for line in text.splitlines() if "<!--" in line[:4]])
 
