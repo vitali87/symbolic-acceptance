@@ -161,6 +161,26 @@ class VerdictTests(unittest.TestCase):
         j, _ = judge(verdict("Yes", ["if failures(user) > MAX_FAILURES:"]))
         self.assertTrue(ask(j).is_met)
 
+    def test_a_yes_partly_quoting_what_is_not_in_the_diff_is_not_backed(self):
+        partly = verdict(
+            "YES", ["if failures(user) > MAX_FAILURES:", "rate_limit(user)"]
+        )
+        j, _ = judge(partly, partly)
+        answer = ask(j)
+        self.assertFalse(answer.is_met)
+        self.assertIn("quoted lines that are not in the diff", answer.reasoning)
+
+    def test_the_checklists_guidance_reaches_the_judge(self):
+        j, fake = judge(verdict("NO", missing="x"))
+        ask(
+            j,
+            checklist_text='context = "Only src/ counts."\n'
+            '[q.locks_account]\nask = "Lock?"\nby = "llm"\n'
+            '[[require]]\nthat = "locks_account"\nfail = "x"\n',
+        )
+        shared = fake.body()["messages"][0]["content"][0]["text"]
+        self.assertIn("Guidance for every question:\nOnly src/ counts.", shared)
+
     def test_supported_yes_carries_located_evidence(self):
         j, _ = judge(verdict("YES", ["if failures(user) > MAX_FAILURES:"]))
         answer = ask(j)
@@ -348,6 +368,17 @@ class HTTPTests(unittest.TestCase):
 
         with self.assertRaisesRegex(http.HTTPError, "connection failed"):
             http.request("POST", "https://example.test/x", transport=timeout)
+
+    def test_retry_after_may_be_a_date(self):
+        slept = []
+        past = "Wed, 21 Oct 2015 07:28:00 GMT"
+        fake = FakeHTTP(
+            json_response({}, 503, {"retry-after": past}), json_response({})
+        )
+        http.request(
+            "GET", "https://example.test/x", transport=fake, sleep=slept.append
+        )
+        self.assertEqual(slept, [0.0], "a date already past means now")
 
     def test_retry_after_is_capped(self):
         slept = []

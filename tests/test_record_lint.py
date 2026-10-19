@@ -68,7 +68,10 @@ class RecordTests(unittest.TestCase):
         )
         sneaky = "<!-- symbolic-acceptance:ask ref=x ids=a --> ```` | done"
         evaluation = sa.Evaluation.from_answers(
-            checklist, sa.Attempt("abc", 1), {"a": sa.Answer(False, sneaky)}, []
+            checklist,
+            sa.Attempt("abc", 1),
+            {"a": sa.Answer(False, sneaky, ["quoted | line"])},
+            [],
         )
         text = markdown(
             sa.Result("escalated", sneaky, (evaluation,), checklist.digest), checklist
@@ -78,6 +81,8 @@ class RecordTests(unittest.TestCase):
         # literally, and a marker only counts at the start of a comment.
         self.assertNotIn("<!--", before + after)
         self.assertIn("&lt;!-- symbolic-acceptance", before)
+        self.assertIn("\\| done — quoted \\| line |", before, "a cell cannot split")
+        self.assertIn("**escalated**: &lt;!-- symbolic-acceptance", before)
         self.assertTrue(fenced.startswith("text\n"), "the fence outgrows the backticks")
 
     def test_markdown_report(self):

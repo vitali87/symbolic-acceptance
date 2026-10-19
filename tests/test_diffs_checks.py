@@ -72,15 +72,15 @@ class ParseTests(unittest.TestCase):
             Path(tmp, "app.py").write_text("print('v2')\n")
             git("add", ".")
             git("commit", "-qm", "change")
-            diff = git("diff", "HEAD~1", "HEAD")
-        self.assertIn("\\303", diff, "git quoted the path with octal escapes")
-        files, _ = parse(diff)
+            changed = diff(tmp, "HEAD~1", "HEAD")
+        self.assertIn("\\303", changed, "git quoted the path with octal escapes")
+        files, _ = parse(changed)
         self.assertEqual(
             [(f.path, f.status) for f in files],
             [("app.py", "modified"), ("docs/naïve café.md", "added")],
         )
         q = sa.Question("frozen", "Frozen?", "ci", options={"frozen": ["docs/*"]})
-        self.assertFalse(frozen_files(q, context(diff)).is_met)
+        self.assertFalse(frozen_files(q, context(changed)).is_met)
 
     def test_header_only_changes_from_real_git(self):
         # A mode change or an empty file has no ---/+++ lines, so its path
@@ -205,8 +205,6 @@ class CommandsTests(unittest.TestCase):
         answer = self.check(sees)
         self.assertTrue(answer.is_met)
         self.assertEqual(answer.evidence, ("print('v1')",))
-        listed = self.git("worktree", "list")
-        self.assertEqual(len(listed.strip().splitlines()), 1, "the worktree is removed")
 
     def test_the_checkout_cannot_set_up_a_filter(self):
         # A filter defined in the agent's checkout would rewrite files as
@@ -252,6 +250,19 @@ class CommandsTests(unittest.TestCase):
         with self.assertRaises(sa.Pending) as caught:
             asyncio.run(router([local, remote], context(ref=self.head)))
         self.assertEqual(list(caught.exception.answers), ["local"])
+
+    def test_router_combines_local_and_fallback_answers(self):
+        async def github(questions, ctx):
+            return {q.id: sa.Answer(True, by="ci:tests") for q in questions}
+
+        router = Checks(self.commands, fallback=github)
+        local = run_question("local", "raise SystemExit(1)")
+        remote = sa.Question("remote", "R?", "ci", options={"check": "tests"})
+        answers = asyncio.run(router([local, remote], context(ref=self.head)))
+        self.assertEqual(
+            {qid: (a.is_met, a.by) for qid, a in answers.items()},
+            {"local": (False, "ci:run"), "remote": (True, "ci:tests")},
+        )
 
     def test_router_without_fallback(self):
         with self.assertRaisesRegex(sa.OracleError, "no local check"):

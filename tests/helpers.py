@@ -6,12 +6,12 @@ import asyncio
 import contextlib
 import io
 import json
-import subprocess
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 import symbolic_acceptance as sa
+from symbolic_acceptance.agents import git as run_git
 from symbolic_acceptance.cli import main
 from symbolic_acceptance.http import Response
 from symbolic_acceptance.loop import Oracle
@@ -131,21 +131,18 @@ def json_response(
 
 
 def repo(tmp: str) -> Callable[..., str]:
-    """A git repository in ``tmp`` with one commit of ``app.py``."""
+    """A git repository in ``tmp`` with one commit of ``app.py``.
+
+    Its git is the runner's, so neither the developer's git configuration nor
+    a hook's environment can reach it.
+    """
 
     def git(*args: str) -> str:
-        return subprocess.run(
-            ["git", *args],
-            cwd=tmp,
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
+        return run_git(tmp, *args, isolated=True)
 
     git("init", "-q")
     git("config", "user.name", "Test")
     git("config", "user.email", "test@example.com")
-    git("config", "commit.gpgSign", "false")
     Path(tmp, "app.py").write_text("print('v1')\n")
     git("add", ".")
     git("commit", "-q", "-m", "base")

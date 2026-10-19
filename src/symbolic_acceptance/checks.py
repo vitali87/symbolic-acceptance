@@ -25,7 +25,7 @@ import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from symbolic_acceptance.agents import git, without_secrets
+from symbolic_acceptance.agents import for_agent, git
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
@@ -149,7 +149,7 @@ class Commands:
             done = subprocess.run(
                 argv,
                 cwd=tree,
-                env=without_secrets(self.env),
+                env=for_agent(self.env),
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",

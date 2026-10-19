@@ -64,7 +64,10 @@ fail = "The change touches more than app.py"
 
 class EndToEndTests(unittest.TestCase):
     def test_failed_attempt_is_fixed_from_feedback(self):
-        with tempfile.TemporaryDirectory() as tmp:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as records,
+        ):
             repo(tmp)
             checklist = sa.loads(checklist_text(sys.executable))
             seen_claims = []
@@ -84,35 +87,32 @@ class EndToEndTests(unittest.TestCase):
                     for q in questions
                 }
 
-            saved = Path(tmp, "..", f"{Path(tmp).name}-run.json").resolve()
-            try:
-                result = asyncio.run(
-                    sa.run(
-                        checklist,
-                        agent=CommandAgent([sys.executable, "-c", AGENT], cwd=tmp),
-                        oracles={
-                            "ci": Checks(Commands(tmp)),
-                            "llm": judge,
-                            "human": lambda q, c: {},
-                        },
-                        max_attempts=3,
-                        on_progress=lambda run: sa.record.save(run, checklist, saved),
-                    )
+            saved = Path(records, "run.json")
+            result = asyncio.run(
+                sa.run(
+                    checklist,
+                    agent=CommandAgent([sys.executable, "-c", AGENT], cwd=tmp),
+                    oracles={
+                        "ci": Checks(Commands(tmp)),
+                        "llm": judge,
+                        "human": lambda q, c: {},
+                    },
+                    max_attempts=3,
+                    on_progress=lambda run: sa.record.save(run, checklist, saved),
                 )
-                self.assertEqual(result.status, sa.APPROVED, result.reason)
-                first, second = result.evaluations
-                self.assertEqual(first.failing, {"prints_v2"})
-                self.assertIn("exit 1", first.answers["prints_v2"].reasoning)
-                self.assertTrue(second.answers["prints_v2"].is_met)
-                self.assertTrue(second.answers["frozen_untouched"].is_met)
-                self.assertEqual(
-                    seen_claims[0], "attempt 1: I am confident this is correct"
-                )
-                self.assertEqual(
-                    sa.record.load(saved, checklist).evaluations[-1].status, sa.APPROVED
-                )
-            finally:
-                saved.unlink(missing_ok=True)
+            )
+            self.assertEqual(result.status, sa.APPROVED, result.reason)
+            first, second = result.evaluations
+            self.assertEqual(first.failing, {"prints_v2"})
+            self.assertIn("exit 1", first.answers["prints_v2"].reasoning)
+            self.assertTrue(second.answers["prints_v2"].is_met)
+            self.assertTrue(second.answers["frozen_untouched"].is_met)
+            self.assertEqual(
+                seen_claims[0], "attempt 1: I am confident this is correct"
+            )
+            self.assertEqual(
+                sa.record.load(saved, checklist).evaluations[-1].status, sa.APPROVED
+            )
 
 
 if __name__ == "__main__":

@@ -31,8 +31,8 @@ __all__ = [
     "CommandAgent",
     "GitError",
     "diff",
+    "for_agent",
     "git",
-    "without_secrets",
 ]
 
 # Git's empty tree: reading attributes from it means none apply, so no
@@ -51,13 +51,35 @@ _OVERRIDES = (
 # Git without the user's or the system's configuration, which the agent may
 # have written too.
 _ISOLATED = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+# Variables that point git at another repository, as git sets them for its
+# hooks (`git rev-parse --local-env-vars`); git here works on the one in cwd.
+_ELSEWHERE = frozenset(
+    {
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_CONFIG",
+        "GIT_CONFIG_COUNT",
+        "GIT_CONFIG_PARAMETERS",
+        "GIT_DIR",
+        "GIT_GRAFT_FILE",
+        "GIT_IMPLICIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_NO_REPLACE_OBJECTS",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_REPLACE_REF_BASE",
+        "GIT_SHALLOW_FILE",
+        "GIT_WORK_TREE",
+    }
+)
 # The variables the runner reads its GitHub token from (see github.GitHub).
 RUNNER_SECRETS = frozenset({"GITHUB_TOKEN", "GH_TOKEN"})
 
 
-def without_secrets(env: Mapping[str, str]) -> dict[str, str]:
-    """``env`` without :data:`RUNNER_SECRETS`, for running code the agent wrote."""
-    return {k: v for k, v in env.items() if k not in RUNNER_SECRETS}
+def for_agent(env: Mapping[str, str]) -> dict[str, str]:
+    """``env`` for running code the agent wrote: without
+    :data:`RUNNER_SECRETS`, and without git variables pointing elsewhere."""
+    return {k: v for k, v in env.items() if k not in RUNNER_SECRETS | _ELSEWHERE}
 
 
 _DIFF = (
@@ -79,14 +101,15 @@ class GitError(RuntimeError):
 
 
 def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
-    """Run git in ``cwd`` with the checkout's own settings overridden.
+    """Run git on the repository in ``cwd``, overriding its own settings.
 
     ``isolated`` also leaves out the user's and the system's configuration.
     """
+    env = {k: v for k, v in os.environ.items() if k not in _ELSEWHERE}
     done = subprocess.run(
         ["git", *_OVERRIDES, *args],
         cwd=cwd,
-        env={**os.environ, **_ISOLATED} if isolated else None,
+        env=env | _ISOLATED if isolated else env,
         capture_output=True,
         encoding="utf-8",
         errors="replace",  # binary and non-UTF-8 files in a diff
@@ -156,7 +179,7 @@ class CommandAgent:
                 self.argv,
                 cwd=self.cwd,
                 input=task.prompt(),
-                env=without_secrets(self.env),
+                env=for_agent(self.env),
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",

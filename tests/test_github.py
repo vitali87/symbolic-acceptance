@@ -105,7 +105,7 @@ class ClientTests(unittest.TestCase):
         github, fake = gh(json_response([]), json_response({"id": 3}))
         post_report(github, 5, "x" * 100_000)
         posted = fake.body(1)["body"]
-        self.assertLessEqual(len(posted), 60_000)
+        self.assertLessEqual(len(posted), 65_536, "GitHub's limit")
         self.assertTrue(posted.endswith("the run record has the rest)"))
 
     def test_report_is_updated_in_place(self):
@@ -233,6 +233,38 @@ class ReviewsTests(unittest.TestCase):
         self.assertEqual(answers["sso_exempt"].by, "human:@bob")
         self.assertEqual(answers["sso_exempt"].reasoning, "security signed off")
         self.assertEqual(answers["docs_ok"].by, "human:@alice")
+
+    def test_each_reply_that_may_not_answer_is_ignored(self):
+        asked = comment(2, "bot", ASK, user_type="Bot")
+        reply = "/yes sso_exempt ok"
+        cases = {
+            "a bot": comment(3, "helper", reply, user_type="Bot"),
+            "a bot by its login": comment(3, "helper[bot]", reply),
+            "the agent": comment(3, "Agent", reply, association="COLLABORATOR"),
+            "a stranger": comment(3, "stranger", reply, association="NONE"),
+            "an early reply": comment(3, "alice", reply, at="2026-10-18T09:00:00Z"),
+            "an edited reply": dict(
+                comment(3, "alice", reply), updated_at="2026-10-18T13:00:00Z"
+            ),
+            "a reply inside a line": comment(3, "alice", f"I'd say {reply}"),
+        }
+        for case, forbidden in cases.items():
+            with self.subTest(case):
+                github, _ = gh(json_response([asked, forbidden]))
+                with self.assertRaises(sa.Pending) as caught:
+                    asyncio.run(Reviews(github, 5, exclude=["agent"])([SSO], context()))
+                self.assertEqual(caught.exception.answers, {})
+
+    def test_an_edited_question_was_not_asked(self):
+        asked = dict(
+            comment(2, "bot", ASK, user_type="Bot"), updated_at="2026-10-18T13:00:00Z"
+        )
+        reply = comment(3, "alice", "/yes sso_exempt ok", at="2026-10-18T11:00:00Z")
+        github, fake = gh(json_response([asked, reply]), json_response({"id": 9}))
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(Reviews(github, 5)([SSO], context()))
+        self.assertEqual(caught.exception.answers, {})
+        self.assertIn("ids=sso_exempt -->", fake.body(1)["body"], "asked afresh")
 
     def test_reviewer_allowlist_and_partial_answers(self):
         comments = [

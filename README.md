@@ -233,7 +233,8 @@ supply, which is handy for checking a checklist by hand.
 pip install git+https://github.com/vitali87/symbolic-acceptance
 ```
 
-or from a checkout, `pip install .`. The build backend lives in
+or from a checkout, `pip install .`. It needs Python 3.11 or later, and
+git 2.40 or later for the runner. The build backend lives in
 [`_build/backend.py`](_build/backend.py) and `pyproject.toml` requires
 nothing, so `pip install --no-index .` works offline.
 

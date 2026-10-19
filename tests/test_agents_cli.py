@@ -1,7 +1,7 @@
 import asyncio
 import json
 import os
-import subprocess
+import shlex
 import sys
 import tempfile
 import unittest
@@ -11,7 +11,7 @@ from helpers import EXAMPLE, FakeHTTP, cli, example, finished_run, message, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
-from symbolic_acceptance.agents import CommandAgent, diff
+from symbolic_acceptance.agents import CommandAgent, GitError, diff, git
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.draft import DraftError, draft
 
@@ -33,13 +33,7 @@ class CommandAgentTests(unittest.TestCase):
             self.assertIn("+print('v2')", attempt.diff)
             self.assertEqual(len(attempt.ref), 40)
             self.assertNotEqual(attempt.base, attempt.ref)
-            log = subprocess.run(
-                ["git", "log", "-1", "--format=%s"],
-                cwd=tmp,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout
+            log = git(tmp, "log", "-1", "--format=%s")
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(diff(tmp, attempt.base, attempt.ref), attempt.diff)
 
@@ -53,41 +47,77 @@ class CommandAgentTests(unittest.TestCase):
         assert attempt.diff is not None
         self.assertIn("+++ b/new.py", attempt.diff)
 
-    def test_the_checkout_cannot_rig_the_diff(self):
-        with tempfile.TemporaryDirectory() as tmp:
+    def test_the_checkout_cannot_rig_what_the_runner_sees(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
             git = repo(tmp)
             Path(tmp, "tests").mkdir()
-            Path(tmp, "tests", "test_app.py").write_text("assert True\n")
+            Path(tmp, "tests", "test_app.py").write_text("a = 1\nassert True\nb = 2\n")
             git("add", ".")
             git("commit", "-qm", "tests")
-            # What an agent could do to hide a change to a frozen test file.
-            git("config", "diff.noprefix", "true")
-            git("config", "diff.relative", "true")
-            git("config", "diff.ignoreSubmodules", "all")
-            git("config", "diff.context", "0")
-            Path(tmp, ".gitattributes").write_text("*.py -diff\n")
-            # ... and a gitlink, which ignoreSubmodules would hide.
+            changed = "a = 1\nassert False or True\nb = 2\n"
+            # A replace ref would show the old test in place of the change.
+            Path(outside, "changed").write_text(changed)
+            new = git("hash-object", "-w", str(Path(outside, "changed"))).strip()
+            git("replace", new, git("rev-parse", "HEAD:tests/test_app.py").strip())
+            # Hooks, a file monitor, filters, diff drivers and settings that
+            # would hide or reshape the change.
+            hooks, ran = Path(outside, "hooks"), Path(outside, "monitor-ran")
+            hooks.mkdir()
+            for name, body in (("pre-commit", "exit 1"), ("monitor", f"touch {ran}")):
+                Path(hooks, name).write_text(f"#!/bin/sh\n{body}\n")
+                Path(hooks, name).chmod(0o755)
+            for key, value in {
+                "core.hooksPath": str(hooks),
+                "core.fsmonitor": str(Path(hooks, "monitor")),
+                "core.quotePath": "false",
+                "color.ui": "always",
+                "diff.noprefix": "true",
+                "diff.context": "0",
+                "diff.ignoreSubmodules": "all",
+                "diff.external": "echo HIDDEN",
+                "diff.hide.textconv": "echo HIDDEN",
+                "filter.rewrite.clean": "sed s/False/True/",
+            }.items():
+                git("config", key, value)
+            Path(tmp, ".git", "info", "attributes").write_text(
+                "*.py diff=hide\ntests/test_app.py -diff\n"
+            )
+            Path(tmp, ".gitattributes").write_text("*.py filter=rewrite\n")
+            # A gitlink, which ignoreSubmodules would hide.
             head = git("rev-parse", "HEAD").strip()
             Path(tmp, "tests", "vendored").mkdir()
             git("update-index", "--add", "--cacheinfo", f"160000,{head},tests/vendored")
-            script = "open('tests/test_app.py', 'w').write('assert False or True\\n')"
+            script = (
+                f"open('tests/test_app.py', 'w').write({changed!r});"
+                "open('app.py', 'w').write('v2\\n');"
+                "open('naïve.txt', 'w').write('x\\n')"
+            )
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
             attempt = asyncio.run(agent(self.task()))
+            self.assertFalse(ran.exists(), "the file monitor never ran")
         assert attempt.diff is not None
         self.assertIn(
             "diff --git a/tests/test_app.py b/tests/test_app.py", attempt.diff
         )
-        self.assertIn("+assert False or True", attempt.diff)
-        self.assertIn("new file mode 160000", attempt.diff, "the gitlink shows")
+        self.assertIn(
+            " a = 1\n-assert True\n+assert False or True\n b = 2", attempt.diff
+        )
+        self.assertIn("-print('v1')\n+v2", attempt.diff)
+        self.assertIn("new file mode 160000", attempt.diff)
+        self.assertIn('"b/na\\303\\257ve.txt"', attempt.diff)
+        self.assertNotIn("HIDDEN", attempt.diff)
+        self.assertNotIn("\x1b[", attempt.diff)
 
     def test_attempts_are_pushed_even_when_the_agent_rewrites_them(self):
         with (
             tempfile.TemporaryDirectory() as remote,
             tempfile.TemporaryDirectory() as tmp,
         ):
-            subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
-            git = repo(tmp)
-            git("remote", "add", "origin", remote)
+            git(remote, "init", "-q", "--bare")
+            repo(tmp)("remote", "add", "origin", remote)
             script = "open('app.py', 'w').write(\"print('v2')\\n\")"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp, push="agent")
             first = asyncio.run(agent(self.task()))
@@ -99,14 +129,31 @@ class CommandAgentTests(unittest.TestCase):
                 [sys.executable, "-c", amend], cwd=tmp, push="agent", base=first.base
             )
             second = asyncio.run(rewriter(self.task(2, previous=first)))
-            pushed = subprocess.run(
-                ["git", "rev-parse", "refs/heads/agent"],
-                cwd=remote,
-                capture_output=True,
-                text=True,
-                check=True,
-            ).stdout.strip()
+            pushed = git(remote, "rev-parse", "refs/heads/agent").strip()
         self.assertEqual(pushed, second.ref)
+
+    def test_a_push_never_overwrites_someone_elses_commit(self):
+        with (
+            tempfile.TemporaryDirectory() as remote,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            git(remote, "init", "-q", "--bare")
+            local = repo(tmp)
+            local("remote", "add", "origin", remote)
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            first = asyncio.run(CommandAgent(write, cwd=tmp, push="agent")(self.task()))
+            # Someone else pushes to the branch, on top of the first attempt.
+            local("commit", "-q", "--allow-empty", "-m", "theirs")
+            local("push", "-q", "origin", "HEAD:refs/heads/agent")
+            theirs = local("rev-parse", "HEAD").strip()
+            local("reset", "-q", "--hard", first.ref)
+            again = [sys.executable, "-c", "open('app.py', 'w').write('v3\\n')"]
+            agent = CommandAgent(again, cwd=tmp, push="agent", base=first.base)
+            with self.assertRaisesRegex(GitError, "push"):
+                asyncio.run(agent(self.task(2, previous=first)))
+            self.assertEqual(
+                git(remote, "rev-parse", "refs/heads/agent").strip(), theirs
+            )
 
     def test_a_later_attempt_starts_from_the_previous_one(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -178,7 +225,7 @@ class DraftTests(unittest.TestCase):
     def test_gives_up_after_tries(self):
         bad = message({"checklist": "nope = 1", "questions_for_reporter": []})
         fake = FakeHTTP(bad, bad)
-        with self.assertRaises(DraftError):
+        with self.assertRaisesRegex(DraftError, "no valid draft after 2 tries"):
             draft("x", claude=Claude(api_key="k", transport=fake), tries=2)
 
 
@@ -266,6 +313,31 @@ class CLITests(unittest.TestCase):
                     record,
                 )
 
+    def test_run_saves_a_run_and_resumes_it(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            runs = json.dumps([sys.executable, "-c", "import app"])
+            checklist.write_text(
+                f'[q.runs]\nask = "Does app.py run?"\nby = "ci"\nrun = {runs}\n'
+                '[[require]]\nthat = "runs"\nfail = "app.py fails"\n'
+            )
+            record_path = str(Path(outside, "run.json"))
+            write = shlex.join(
+                [sys.executable, "-c", "open('app.py', 'w').write(\"print('v2')\\n\")"]
+            )
+            args = ("run", str(checklist), "--cwd", tmp, "--agent")
+            code, out = cli(*args, write, "--record", record_path)
+            self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+            saved = record.load(record_path, sa.load(checklist))
+            self.assertEqual(saved.status, sa.APPROVED)
+            # Resuming a finished run runs no agent: `false` would fail.
+            code, out = cli(*args, "false", "--resume", record_path)
+            self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+
     def test_report_renders_a_recorded_run(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "run.json")
@@ -276,8 +348,9 @@ class CLITests(unittest.TestCase):
 
     def test_draft_will_not_overwrite_before_asking_claude(self):
         with tempfile.TemporaryDirectory() as tmp:
+            # No issue file either: were the check late, reading it would fail
+            # before any call to Claude.
             issue, out = Path(tmp, "issue.md"), Path(tmp, "acceptance.toml")
-            issue.write_text("Logins are not throttled")
             out.write_text("approved already")
             with self.assertRaisesRegex(SystemExit, "exists; pass --force"):
                 cli("draft", str(issue), "--out", str(out))

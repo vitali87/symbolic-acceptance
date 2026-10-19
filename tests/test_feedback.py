@@ -79,7 +79,7 @@ class ExplainTests(unittest.TestCase):
         self.assertNotIn("a: needs", text)
 
     def test_undecided_expression_cannot_be_explained(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "not decided"):
             sa.explain(CHECKLIST.requirement("not_c").that, CHECKLIST, {})
 
 

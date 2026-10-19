@@ -20,7 +20,7 @@ class EvaluateTests(unittest.TestCase):
         result = evaluate(self.checklist, script.oracles())
         self.assertEqual(result.status, sa.APPROVED)
         self.assertNotIn("sso_exempt", script.asked_ids())
-        self.assertEqual(result.rounds[0][0], "repro_fixed")
+        self.assertIn("repro_fixed", result.rounds[0], "CI is asked in the first round")
 
     def test_reports_every_failure_at_once(self):
         script = Scripted(
@@ -100,6 +100,13 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result.status, sa.ESCALATED)
         self.assertIn("instructions to the reviewer", result.reason)
 
+    def test_a_pause_may_only_carry_answers_to_what_was_asked(self):
+        async def ci(questions, context):
+            raise sa.Pending("still running", answers={"sso_exempt": sa.Answer(True)})
+
+        with self.assertRaisesRegex(sa.OracleError, "not asked"):
+            evaluate(self.checklist, dict(Scripted(PASSING).oracles(), ci=ci))
+
     def test_oracle_contract(self):
         script = Scripted(PASSING)
 
@@ -136,7 +143,7 @@ class EvaluateTests(unittest.TestCase):
             evaluate(self.checklist, oracles)
         self.assertLess(time.monotonic() - started, 10)
 
-    def test_sync_oracles_run_in_a_thread(self):
+    def test_sync_oracles_work(self):
         def ci(questions, context):
             return {q.id: sa.Answer(True) for q in questions}
 
@@ -251,6 +258,27 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result.status, sa.APPROVED)
         self.assertEqual([f.requirement.id for f in agent.tasks[2].feedback], ["sso"])
 
+    def test_a_regression_from_any_earlier_attempt_escalates(self):
+        # x holds in attempt 1, does not apply in attempt 2, fails in 3.
+        checklist = sa.loads(
+            "".join(f'[q.{q}]\nask = "{q}?"\nby = "ci"\n' for q in "gabc")
+            + '[[require]]\nid = "x"\nwhen = "g"\nthat = "a"\nfail = "x"\n'
+            + '[[require]]\nid = "y"\nthat = "b"\nfail = "y"\n'
+            + '[[require]]\nid = "z"\nthat = "c"\nfail = "z"\n'
+        )
+        result, _ = run(
+            checklist,
+            [
+                {"g": True, "a": True, "b": False, "c": False},
+                {"g": False, "a": True, "b": False, "c": True},
+                {"g": True, "a": False, "b": True, "c": True},
+            ],
+        )
+        self.assertEqual(result.status, sa.ESCALATED)
+        self.assertEqual(
+            result.reason, "regression: x held in attempt 1 and fails in attempt 3"
+        )
+
     def test_regression_can_go_back_to_the_agent(self):
         result, _ = run(
             self.checklist,
@@ -361,7 +389,7 @@ class RunTests(unittest.TestCase):
         async def agent(task):
             return ""
 
-        with self.assertRaises(TypeError):
+        with self.assertRaisesRegex(TypeError, "non-empty ref"):
             asyncio.run(
                 sa.run(self.checklist, agent=agent, oracles=Scripted(PASSING).oracles())
             )
