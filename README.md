@@ -4,9 +4,10 @@ Turn a bug report or feature request into an **acceptance checklist**, then
 drive a coding agent until its change meets it.
 
 A person approves the checklist before any code is written. Each attempt is
-checked by CI, an LLM judge and people, in that order, and every failed
-requirement goes back to the agent, with the reasons and evidence, until the
-attempt is approved or a person has to step in.
+checked by CI and an LLM judge together, then by people where it still
+matters, and every failed requirement goes back to the agent, with the
+reasons and evidence, until the attempt is approved or a person has to step
+in.
 
 **No dependencies.** The package, its build and its CI use only the Python
 standard library (3.11+). There is nothing to download: not at install time,

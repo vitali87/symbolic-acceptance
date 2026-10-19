@@ -1,9 +1,9 @@
 """Turn an issue into an acceptance checklist and drive a coding agent to it.
 
 A person approves the checklist before any code is written. Each attempt is
-checked by CI, an LLM judge and people, in that order, and every failed
-requirement goes back to the agent until the attempt is approved or a person
-has to step in. Standard library only.
+checked by CI and an LLM judge together, then by people where it still
+matters, and every failed requirement goes back to the agent until the
+attempt is approved or a person has to step in. Standard library only.
 """
 
 from symbolic_acceptance import record, templates

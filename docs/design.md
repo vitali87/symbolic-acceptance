@@ -10,10 +10,11 @@ escalation. What changed, and why, is below.
 
 symbolic-acceptance turns an issue into an **acceptance checklist** that a
 person approves before any code is written, then drives a coding agent until
-its attempt meets it. Each attempt is checked by CI, an LLM judge and people,
-in that order. Every failed requirement goes back to the agent with its
-reasons and evidence. The run escalates to a person on the attempt cap, on no
-progress, on a regression, or when an oracle hands the attempt over.
+its attempt meets it. Each attempt is checked by CI and an LLM judge
+together, then by people where it still matters. Every failed requirement
+goes back to the agent with its reasons and evidence. The run escalates to a
+person on the attempt cap, on no progress, on a regression, or when an
+oracle hands the attempt over.
 
 It has no dependencies: the package, its build and its CI use only the Python
 standard library.
