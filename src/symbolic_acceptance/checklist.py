@@ -42,13 +42,15 @@ __all__ = [
     "Requirement",
     "load",
     "loads",
+    "refs",
+    "render",
 ]
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TOP_LEVEL = frozenset({"title", "context", "q", "require"})
 _QUESTION_KEYS = frozenset({"ask", "by", "context"})
 _REQUIREMENT_KEYS = frozenset({"id", "that", "when", "fail"})
-_EMPTY: Mapping[str, Any] = MappingProxyType({})
+_EMPTY: Mapping[str, object] = MappingProxyType({})
 
 
 class ChecklistError(ValueError):
@@ -100,7 +102,7 @@ def refs(expr: Expr) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def _to_data(expr: Expr) -> Any:
+def _to_data(expr: Expr) -> str | dict[str, Any]:
     if isinstance(expr, Ref):
         return expr.id
     if isinstance(expr, Not):
@@ -111,11 +113,18 @@ def _to_data(expr: Expr) -> Any:
 
 @dataclass(frozen=True)
 class Question:
+    """One yes/no fact. ``options`` are frozen: tables become read-only
+    mappings and arrays become tuples, however the question was made."""
+
     id: str
     ask: str
     by: str
     context: str | None = None
-    options: Mapping[str, Any] = field(default_factory=lambda: _EMPTY)
+    options: Mapping[str, object] = field(default_factory=lambda: _EMPTY)
+
+    def __post_init__(self) -> None:
+        frozen = MappingProxyType({k: _freeze(v) for k, v in self.options.items()})
+        object.__setattr__(self, "options", frozen)
 
 
 @dataclass(frozen=True)
@@ -167,7 +176,7 @@ class Checklist:
                 "ask": q.ask,
                 "by": q.by,
                 **({"context": q.context} if q.context is not None else {}),
-                **_thaw(q.options),
+                **{key: _thaw(item) for key, item in q.options.items()},
             }
             for q in self.questions.values()
         }
@@ -186,12 +195,16 @@ class Checklist:
     def digest(self) -> str:
         """SHA-256 of the checklist's meaning; comments and layout don't count."""
         canonical = json.dumps(
-            self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            self.to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            default=str,  # TOML dates and times, which JSON has no type for
         )
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _freeze(value: Any) -> Any:
+def _freeze(value: object) -> object:
     if isinstance(value, dict):
         return MappingProxyType({key: _freeze(item) for key, item in value.items()})
     if isinstance(value, list):
@@ -199,7 +212,7 @@ def _freeze(value: Any) -> Any:
     return value
 
 
-def _thaw(value: Any) -> Any:
+def _thaw(value: object) -> object:
     if isinstance(value, Mapping):
         return {key: _thaw(item) for key, item in value.items()}
     if isinstance(value, tuple):
@@ -208,46 +221,45 @@ def _thaw(value: Any) -> Any:
 
 
 class _Loader:
-    def __init__(self, data: dict[str, Any], where: str) -> None:
+    def __init__(self, data: dict[str, object], where: str) -> None:
         self.data = data
         self.where = where
 
     def error(self, message: str) -> ChecklistError:
         return ChecklistError(f"{self.where}: {message}")
 
-    def text(self, value: Any, what: str, *, optional: bool = False) -> str | None:
-        if value is None and optional:
-            return None
+    def text(self, value: object, what: str) -> str:
         if not isinstance(value, str) or not value.strip():
             raise self.error(f"{what} must be a non-empty string")
         return value
 
-    def identifier(self, value: Any, what: str) -> str:
+    def optional_text(self, value: object, what: str) -> str | None:
+        return None if value is None else self.text(value, what)
+
+    def identifier(self, value: object, what: str) -> str:
         if not isinstance(value, str) or not _IDENTIFIER.fullmatch(value):
             raise self.error(
                 f"{what} must be an identifier (letters, digits, '_'), got {value!r}"
             )
         return value
 
-    def load(self) -> Checklist:
+    def load(self, source: str) -> Checklist:
         unknown = sorted(set(self.data) - _TOP_LEVEL)
         if unknown:
             raise self.error(
                 f"unknown top-level key(s) {', '.join(unknown)}; expected "
                 "title, context, [q.<id>] and [[require]]"
             )
-        title = self.text(self.data.get("title"), "title", optional=True)
-        context = self.text(self.data.get("context"), "context", optional=True)
         questions = self.questions(self.data.get("q", {}))
-        requirements = self.requirements(self.data.get("require"), questions)
         return Checklist(
             questions=MappingProxyType(questions),
-            requirements=tuple(requirements),
-            title=title,
-            context=context,
+            requirements=self.requirements(self.data.get("require"), questions),
+            title=self.optional_text(self.data.get("title"), "title"),
+            context=self.optional_text(self.data.get("context"), "context"),
+            source=source,
         )
 
-    def questions(self, table: Any) -> dict[str, Question]:
+    def questions(self, table: object) -> dict[str, Question]:
         if not isinstance(table, dict):
             raise self.error("q must be a table of questions: [q.<id>]")
         questions: dict[str, Question] = {}
@@ -255,22 +267,19 @@ class _Loader:
             self.identifier(qid, "a question id")
             if not isinstance(body, dict):
                 raise self.error(f"q.{qid} must be a table with ask and by")
-            ask = self.text(body.get("ask"), f"q.{qid}.ask")
-            by = self.identifier(body.get("by"), f"q.{qid}.by (the oracle's name)")
-            context = self.text(body.get("context"), f"q.{qid}.context", optional=True)
             options = {k: v for k, v in body.items() if k not in _QUESTION_KEYS}
             questions[qid] = Question(
                 id=qid,
-                ask=ask or "",
-                by=by,
-                context=context,
-                options=_freeze(options),
+                ask=self.text(body.get("ask"), f"q.{qid}.ask"),
+                by=self.identifier(body.get("by"), f"q.{qid}.by (the oracle's name)"),
+                context=self.optional_text(body.get("context"), f"q.{qid}.context"),
+                options=options,
             )
         return questions
 
     def requirements(
-        self, items: Any, questions: dict[str, Question]
-    ) -> list[Requirement]:
+        self, items: object, questions: dict[str, Question]
+    ) -> tuple[Requirement, ...]:
         if not isinstance(items, list) or not items:
             raise self.error("a checklist needs at least one [[require]]")
         requirements: list[Requirement] = []
@@ -304,20 +313,19 @@ class _Loader:
             if "when" in body:
                 when = self.expression(body["when"], questions, f"{label}.when")
             fail = self.text(body.get("fail"), f"{label}.fail")
-            requirements.append(
-                Requirement(id=rid, that=that, fail=fail or "", when=when)
-            )
-        return requirements
+            requirements.append(Requirement(id=rid, that=that, fail=fail, when=when))
+        return tuple(requirements)
 
-    def expression(self, value: Any, questions: dict[str, Question], at: str) -> Expr:
+    def expression(
+        self, value: object, questions: dict[str, Question], at: str
+    ) -> Expr:
         if isinstance(value, str):
             if value not in questions:
                 raise self.error(f"{at}: {value!r} is not a question (q.{value})")
             return Ref(value)
         if not isinstance(value, dict) or len(value) != 1:
             raise self.error(
-                f"{at}: expected a question id or a table with one of "
-                "all, any or not"
+                f"{at}: expected a question id or a table with one of all, any or not"
             )
         ((key, inner),) = value.items()
         if key == "not":
@@ -339,14 +347,7 @@ def loads(text: str, *, name: str = "<checklist>") -> Checklist:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError as error:
         raise ChecklistError(f"{name}: {error}") from None
-    checklist = _Loader(data, name).load()
-    return Checklist(
-        questions=checklist.questions,
-        requirements=checklist.requirements,
-        title=checklist.title,
-        context=checklist.context,
-        source=text,
-    )
+    return _Loader(data, name).load(text)
 
 
 def load(path: str | Path) -> Checklist:

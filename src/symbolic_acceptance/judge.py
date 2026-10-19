@@ -23,12 +23,11 @@ import hashlib
 import hmac
 import secrets
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any
 
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
-from symbolic_acceptance.claude import Claude, ClaudeError, Refusal
+from symbolic_acceptance.claude import Claude, Refusal
 from symbolic_acceptance.diffs import DiffLine, locate, parse
 from symbolic_acceptance.loop import Context, Escalate
 
@@ -68,14 +67,6 @@ SCHEMA: dict[str, Any] = {
     "required": ["reasoning", "answer", "quotes", "missing", "tampering"],
     "additionalProperties": False,
 }
-
-
-@dataclass(frozen=True)
-class _Verdict:
-    is_met: bool
-    reasoning: str
-    evidence: tuple[str, ...]
-    model: str
 
 
 class Judge:
@@ -120,9 +111,9 @@ class Judge:
             shared.append(f"Guidance for every question:\n{guidance.strip()}\n")
         if context.issue:
             shared.append(
-                f"The issue the change is meant to resolve is between ISSUE-{boundary} "
-                f"and END-ISSUE-{boundary}.\nISSUE-{boundary}\n{context.issue.strip()}\n"
-                f"END-ISSUE-{boundary}\n"
+                f"The issue the change is meant to resolve is between "
+                f"ISSUE-{boundary} and END-ISSUE-{boundary}.\n"
+                f"ISSUE-{boundary}\n{context.issue.strip()}\nEND-ISSUE-{boundary}\n"
             )
         shared.append(
             f"The change (commit {attempt.ref}) is the diff between CHANGE-{boundary} "
@@ -143,9 +134,9 @@ class Judge:
 
     def _ask(
         self, question: Question, context: Context, lines: list[DiffLine]
-    ) -> _Verdict:
+    ) -> Answer:
+        """One verdict; an unsupported YES is asked once more, then counts as NO."""
         content = self._content(question, context)
-        problem = ""
         for _ in range(2):
             try:
                 reply = self.claude.json(system=SYSTEM, content=content, schema=SCHEMA)
@@ -154,58 +145,60 @@ class Judge:
                     f"the judge declined {question.id} ({refusal.category}); "
                     "a person must answer it"
                 ) from None
+            # Structured output guarantees the shape SCHEMA describes.
             data = reply.data
-            if not isinstance(data, dict) or data.get("answer") not in ("YES", "NO"):
-                raise ClaudeError(f"malformed judge reply for {question.id}")
-            reasoning = str(data.get("reasoning", "")).strip()
-            quotes = [str(q) for q in data.get("quotes", []) if str(q).strip()]
-            if data.get("tampering") is True:
+            reasoning = data["reasoning"].strip()
+            if data["tampering"]:
                 raise Escalate(
                     f"the change addresses the reviewer ({question.id}): "
                     f"{reasoning[:300]}"
                 )
+            quotes = [quote for quote in data["quotes"] if quote.strip()]
             located = [(quote, locate(quote, lines)) for quote in quotes]
             evidence = tuple(
                 f"{found[0].where}: {' '.join(quote.split())}"
                 for quote, found in located
                 if found
             )
-            model = f"llm:{reply.model}"
+            by = f"llm:{reply.model}"
             if data["answer"] == "NO":
-                missing = str(data.get("missing", "")).strip()
-                text = missing if missing else reasoning
-                if missing and reasoning and reasoning not in missing:
-                    text = f"{missing} ({reasoning})"
-                return _Verdict(False, text, evidence, model)
-            if quotes and all(found for _, found in located):
-                return _Verdict(True, reasoning, evidence, model)
-            problem = (
-                "quoted nothing" if not quotes else "quoted lines that are not in the diff"
-            )
-        return _Verdict(
+                missing = data["missing"].strip()
+                why = (
+                    f"{missing} ({reasoning})"
+                    if missing and reasoning
+                    else missing or reasoning
+                )
+                return Answer(False, why, evidence, by)
+            if quotes and len(evidence) == len(quotes):
+                return Answer(True, reasoning, evidence, by)
+        problem = (
+            "quoted nothing" if not quotes else "quoted lines that are not in the diff"
+        )
+        return Answer(
             False,
-            f"The diff does not show it: the judge answered YES but {problem}. "
-            f"{reasoning}".strip(),
+            f"The diff does not show it: the judge said YES but {problem}.",
             (),
-            model,
+            by,
         )
 
     def _answer(
         self, question: Question, context: Context, lines: list[DiffLine]
     ) -> Answer:
-        verdicts = []
+        verdicts: list[Answer] = []
         for _ in range(self.samples):
-            verdict = self._ask(question, context, lines)
-            verdicts.append(verdict)
-            if not verdict.is_met:
+            verdicts.append(self._ask(question, context, lines))
+            if not verdicts[-1].is_met:
                 break
         decisive = verdicts[-1]
-        reasoning = decisive.reasoning
-        if self.samples > 1:
-            yes = sum(v.is_met for v in verdicts)
-            reasoning = f"{reasoning} [{yes}/{len(verdicts)} samples YES]"
+        if self.samples == 1:
+            return decisive
+        yes = sum(v.is_met for v in verdicts)
+        note = f"[{yes}/{len(verdicts)} samples YES]"
         return Answer(
-            decisive.is_met, reasoning, decisive.evidence, by=decisive.model
+            decisive.is_met,
+            f"{decisive.reasoning} {note}",
+            decisive.evidence,
+            decisive.by,
         )
 
     async def __call__(

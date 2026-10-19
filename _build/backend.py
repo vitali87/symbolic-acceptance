@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import csv
+import functools
 import gzip
 import hashlib
 import io
@@ -22,6 +23,9 @@ import time
 import tomllib
 import zipfile
 from pathlib import Path
+from typing import Any
+
+Settings = dict[str, str | list[str]] | None
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "symbolic_acceptance"
@@ -31,7 +35,8 @@ WHEEL_TAG = "py3-none-any"
 DEFAULT_EPOCH = 1577836800  # 2020-01-01T00:00:00Z
 
 
-def _project() -> dict:
+@functools.cache
+def _project() -> dict[str, Any]:
     with (ROOT / "pyproject.toml").open("rb") as stream:
         return tomllib.load(stream)["project"]
 
@@ -97,7 +102,9 @@ def _package_files() -> list[tuple[str, bytes]]:
     files = []
     for path in sorted(source.rglob("*")):
         if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
-            files.append((path.relative_to(source.parent).as_posix(), path.read_bytes()))
+            files.append(
+                (path.relative_to(source.parent).as_posix(), path.read_bytes())
+            )
     return files
 
 
@@ -141,19 +148,21 @@ def _write_wheel(directory: str, files: list[tuple[str, bytes]]) -> str:
 # -- PEP 517 hooks ------------------------------------------------------------
 
 
-def get_requires_for_build_wheel(config_settings=None):
+def get_requires_for_build_wheel(config_settings: Settings = None) -> list[str]:
     return []
 
 
-def get_requires_for_build_sdist(config_settings=None):
+def get_requires_for_build_sdist(config_settings: Settings = None) -> list[str]:
     return []
 
 
-def get_requires_for_build_editable(config_settings=None):
+def get_requires_for_build_editable(config_settings: Settings = None) -> list[str]:
     return []
 
 
-def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):
+def prepare_metadata_for_build_wheel(
+    metadata_directory: str, config_settings: Settings = None
+) -> str:
     target = Path(metadata_directory) / _dist_info()
     target.mkdir(parents=True, exist_ok=True)
     (target / "METADATA").write_text(_metadata(), encoding="utf-8")
@@ -165,16 +174,24 @@ def prepare_metadata_for_build_wheel(metadata_directory, config_settings=None):
 prepare_metadata_for_build_editable = prepare_metadata_for_build_wheel
 
 
-def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+def build_wheel(
+    wheel_directory: str,
+    config_settings: Settings = None,
+    metadata_directory: str | None = None,
+) -> str:
     return _write_wheel(wheel_directory, _package_files())
 
 
-def build_editable(wheel_directory, config_settings=None, metadata_directory=None):
+def build_editable(
+    wheel_directory: str,
+    config_settings: Settings = None,
+    metadata_directory: str | None = None,
+) -> str:
     pth = f"{(ROOT / 'src').as_posix()}\n".encode()
     return _write_wheel(wheel_directory, [(f"__editable__.{PACKAGE}.pth", pth)])
 
 
-def build_sdist(sdist_directory, config_settings=None):
+def build_sdist(sdist_directory: str, config_settings: Settings = None) -> str:
     project = _project()
     base = f"{_normalized(project['name'])}-{project['version']}"
     paths = [ROOT / name for name in SDIST_FILES]
@@ -186,7 +203,9 @@ def build_sdist(sdist_directory, config_settings=None):
                 if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
             ]
     members = [(f"{base}/PKG-INFO", _metadata().encode("utf-8"))]
-    members += [(f"{base}/{p.relative_to(ROOT).as_posix()}", p.read_bytes()) for p in paths]
+    members += [
+        (f"{base}/{p.relative_to(ROOT).as_posix()}", p.read_bytes()) for p in paths
+    ]
     members.sort()
     target = Path(sdist_directory) / f"{base}.tar.gz"
     epoch = _epoch()
@@ -200,8 +219,9 @@ def build_sdist(sdist_directory, config_settings=None):
             info.uid = info.gid = 0
             info.uname = info.gname = ""
             archive.addfile(info, io.BytesIO(data))
-    with target.open("wb") as raw, gzip.GzipFile(
-        filename="", mode="wb", fileobj=raw, mtime=epoch
-    ) as compressed:
+    with (
+        target.open("wb") as raw,
+        gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=epoch) as compressed,
+    ):
         compressed.write(buffer.getvalue())
     return target.name

@@ -22,7 +22,15 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result.rounds[0][0], "repro_fixed")
 
     def test_reports_every_failure_at_once(self):
-        script = Scripted(dict(PASSING, repro_fixed=False, suite_green=False, backs_off=False, can_unlock=False))
+        script = Scripted(
+            dict(
+                PASSING,
+                repro_fixed=False,
+                suite_green=False,
+                backs_off=False,
+                can_unlock=False,
+            )
+        )
         result = evaluate(self.checklist, script.oracles())
         self.assertEqual(result.status, sa.CHANGES)
         self.assertEqual(result.failing, {"repro_fixed", "suite_green", "protected"})
@@ -51,7 +59,9 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(script.asked_ids("ci").count("repro_fixed"), 1)
 
     def test_failure_does_not_wait_for_people(self):
-        script = Scripted(dict(PASSING, touches_sso=True, new_test=False), silent={"human"})
+        script = Scripted(
+            dict(PASSING, touches_sso=True, new_test=False), silent={"human"}
+        )
         result = evaluate(self.checklist, script.oracles())
         self.assertEqual(result.status, sa.CHANGES)
         self.assertNotIn("human", [who for who, _ in script.asked])
@@ -87,7 +97,11 @@ class EvaluateTests(unittest.TestCase):
         async def wrong_type(questions, context):
             return {q.id: True for q in questions}
 
-        for bad, pattern in [(silent, "none of"), (overreach, "not asked"), (wrong_type, "expected Answer")]:
+        for bad, pattern in [
+            (silent, "none of"),
+            (overreach, "not asked"),
+            (wrong_type, "expected Answer"),
+        ]:
             with self.subTest(bad=bad.__name__):
                 with self.assertRaisesRegex(sa.OracleError, pattern):
                     evaluate(self.checklist, dict(script.oracles(), ci=bad))
@@ -111,7 +125,11 @@ class EvaluateTests(unittest.TestCase):
             seen["known"] = sorted(context.answers)
             return {q.id: sa.Answer(PASSING[q.id]) for q in questions}
 
-        evaluate(self.checklist, dict(Scripted(PASSING).oracles(), llm=llm), issue="#342 text")
+        evaluate(
+            self.checklist,
+            dict(Scripted(PASSING).oracles(), llm=llm),
+            issue="#342 text",
+        )
         self.assertEqual(seen["issue"], "#342 text")
         self.assertEqual(seen["known"], [])
 
@@ -133,7 +151,9 @@ class Agent:
 def run(checklist, truths, **kwargs):
     script = Scripted(truths[0])
     agent = Agent(script, truths)
-    result = asyncio.run(sa.run(checklist, agent=agent, oracles=script.oracles(), **kwargs))
+    result = asyncio.run(
+        sa.run(checklist, agent=agent, oracles=script.oracles(), **kwargs)
+    )
     return result, agent
 
 
@@ -150,11 +170,27 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result.status, sa.APPROVED)
         self.assertEqual([a.number for a in result.attempts], [1, 2])
         self.assertEqual(agent.tasks[0].feedback, ())
-        self.assertEqual([f.requirement.id for f in agent.tasks[1].feedback], ["new_test"])
+        self.assertEqual(
+            [f.requirement.id for f in agent.tasks[1].feedback], ["new_test"]
+        )
         prompt = agent.tasks[1].prompt()
         self.assertIn("Brute force logins", prompt)
         self.assertIn("Attempt 1 (commit1) was not accepted", prompt)
         self.assertIn("new_test: needs YES, got NO", prompt)
+
+    def test_prompt_names_the_frozen_files(self):
+        prompt = sa.Task(issue="", checklist=self.checklist, number=1).prompt()
+        self.assertIn(
+            "Do not change files matching `acceptance/*`, `.github/*`, `tests/*` "
+            "(new files matching `tests/test_*.py` are allowed).",
+            prompt,
+        )
+        bare = sa.loads(
+            '[q.a]\nask = "A?"\nby = "ci"\n[[require]]\nthat = "a"\nfail = "x"\n'
+        )
+        self.assertNotIn(
+            "Do not change", sa.Task(issue="", checklist=bare, number=1).prompt()
+        )
 
     def test_no_progress_escalates(self):
         failing = dict(PASSING, new_test=False)
@@ -180,8 +216,13 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result.status, sa.APPROVED)
 
     def test_attempt_cap(self):
-        truths = [dict(PASSING, new_test=False), dict(PASSING, suite_green=False, new_test=False)]
-        result, _ = run(self.checklist, truths, max_attempts=2, stop_on_regression=False)
+        truths = [
+            dict(PASSING, new_test=False),
+            dict(PASSING, suite_green=False, new_test=False),
+        ]
+        result, _ = run(
+            self.checklist, truths, max_attempts=2, stop_on_regression=False
+        )
         self.assertEqual(result.status, sa.ESCALATED)
         self.assertIn("attempt cap", result.reason)
 
@@ -189,7 +230,9 @@ class RunTests(unittest.TestCase):
         truth = dict(PASSING, touches_sso=True)
         script = Scripted(truth, silent={"human"})
         agent = Agent(script, [truth])
-        first = asyncio.run(sa.run(self.checklist, agent=agent, oracles=script.oracles()))
+        first = asyncio.run(
+            sa.run(self.checklist, agent=agent, oracles=script.oracles())
+        )
         self.assertEqual(first.status, sa.WAITING)
         script.silent.clear()
         second = asyncio.run(
@@ -199,10 +242,19 @@ class RunTests(unittest.TestCase):
         self.assertEqual(len(agent.tasks), 1)
 
     def test_resume_rejects_a_changed_checklist(self):
-        result, agent = run(self.checklist, [dict(PASSING, new_test=False), PASSING], max_attempts=1)
+        result, agent = run(
+            self.checklist, [dict(PASSING, new_test=False), PASSING], max_attempts=1
+        )
         changed = sa.loads(self.checklist.source.replace("Throttle", "Limit"))
         with self.assertRaisesRegex(ValueError, "checklist changed"):
-            asyncio.run(sa.run(changed, agent=agent, oracles=Scripted(PASSING).oracles(), resume=result))
+            asyncio.run(
+                sa.run(
+                    changed,
+                    agent=agent,
+                    oracles=Scripted(PASSING).oracles(),
+                    resume=result,
+                )
+            )
 
     def test_progress_and_diff_source(self):
         seen = []
@@ -236,7 +288,9 @@ class RunTests(unittest.TestCase):
             return None
 
         with self.assertRaises(TypeError):
-            asyncio.run(sa.run(self.checklist, agent=agent, oracles=Scripted(PASSING).oracles()))
+            asyncio.run(
+                sa.run(self.checklist, agent=agent, oracles=Scripted(PASSING).oracles())
+            )
 
 
 if __name__ == "__main__":

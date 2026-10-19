@@ -102,7 +102,8 @@ class Claude:
         if self.fallbacks:
             body["fallbacks"] = "default"
         base = (
-            self.base_url or os.environ.get("ANTHROPIC_BASE_URL")
+            self.base_url
+            or os.environ.get("ANTHROPIC_BASE_URL")
             or "https://api.anthropic.com"
         )
         response = http.request(

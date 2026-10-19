@@ -15,15 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Checklist, Question, render
 from symbolic_acceptance.feedback import Failure, assess, render_failures
-from symbolic_acceptance.logic import NA, PASS, by_oracle, plan
+from symbolic_acceptance.logic import DEFAULT_LAST, NA, PASS, Status, by_oracle, plan
 
 __all__ = [
     "APPROVED",
@@ -32,25 +32,30 @@ __all__ = [
     "ESCALATED",
     "RUNNING",
     "WAITING",
+    "Agent",
     "Attempt",
     "Context",
     "Escalate",
     "Evaluation",
+    "EvaluationStatus",
+    "Oracle",
     "OracleError",
     "Pending",
     "Result",
+    "RunStatus",
     "Task",
     "evaluate",
     "run",
 ]
 
-APPROVED = "approved"
-CHANGES = "changes"
-WAITING = "waiting"
-ESCALATED = "escalated"
-RUNNING = "running"
+EvaluationStatus = Literal["approved", "changes", "waiting", "escalated"]
+RunStatus = Literal["approved", "escalated", "waiting", "running"]
 
-DEFAULT_LAST = ("human",)
+APPROVED: Literal["approved"] = "approved"
+CHANGES: Literal["changes"] = "changes"
+WAITING: Literal["waiting"] = "waiting"
+ESCALATED: Literal["escalated"] = "escalated"
+RUNNING: Literal["running"] = "running"
 
 
 @dataclass(frozen=True)
@@ -122,7 +127,8 @@ class OracleError(RuntimeError):
     """An oracle broke its contract: no answers, or answers it was not asked."""
 
 
-Oracle = Callable[[Sequence[Question], Context], Any]
+Answers = Mapping[str, Answer]
+Oracle = Callable[[Sequence[Question], Context], Answers | Awaitable[Answers]]
 
 
 @dataclass(frozen=True)
@@ -130,13 +136,47 @@ class Evaluation:
     """One attempt, checked: every answer, and what they decided."""
 
     attempt: Attempt
-    status: str
+    status: EvaluationStatus
     answers: Mapping[str, Answer]
     rounds: tuple[tuple[str, ...], ...]
-    requirements: Mapping[str, str]
+    requirements: Mapping[str, Status]
     failures: tuple[Failure, ...]
     reason: str = ""
     waiting_on: tuple[str, ...] = ()
+
+    @classmethod
+    def from_answers(
+        cls,
+        checklist: Checklist,
+        attempt: Attempt,
+        answers: Mapping[str, Answer],
+        rounds: Sequence[tuple[str, ...]],
+        paused: Literal["waiting", "escalated"] | None = None,
+        reason: str = "",
+        waiting_on: tuple[str, ...] = (),
+    ) -> Evaluation:
+        """Decide an attempt from its answers.
+
+        Approval and change requests follow from the answers alone; only a
+        pause or an escalation, which they don't show, is given as ``paused``.
+        """
+        assessment = assess(checklist, answers)
+        if paused is not None:
+            status: EvaluationStatus = paused
+        elif assessment.status == "open":
+            raise ValueError(f"attempt {attempt.number} is not decided by its answers")
+        else:
+            status = assessment.status
+        return cls(
+            attempt=attempt,
+            status=status,
+            answers=MappingProxyType(dict(answers)),
+            rounds=tuple(rounds),
+            requirements=MappingProxyType(dict(assessment.requirements)),
+            failures=assessment.failures,
+            reason=reason,
+            waiting_on=waiting_on,
+        )
 
     @property
     def failing(self) -> frozenset[str]:
@@ -171,10 +211,15 @@ class Task:
             "Your change is accepted only when every requirement below holds.",
             "Each question is answered by CI, by an independent reviewer or by a",
             "person, from your commit itself. What you write about the change is",
-            "not evidence. Do not edit this checklist, CI configuration or",
-            "existing tests the checks rely on; add new tests instead.",
+            "not evidence.",
             "",
         ]
+        for question in checklist.questions.values():
+            frozen = _globs(question.options, "paths")
+            if question.options.get("check") == "frozen" and frozen:
+                allowed = _globs(question.options, "allow_new")
+                note = f" (new files matching {allowed} are allowed)" if allowed else ""
+                lines += [f"Do not change files matching {frozen}{note}.", ""]
         for requirement in checklist.requirements:
             gate = ""
             if requirement.when is not None:
@@ -203,6 +248,12 @@ class Task:
         return "\n".join(lines) + "\n"
 
 
+def _globs(options: Mapping[str, object], key: str) -> str:
+    value = options.get(key, ())
+    patterns = (value,) if isinstance(value, str) else value
+    return ", ".join(f"`{p}`" for p in patterns) if isinstance(patterns, tuple) else ""
+
+
 @dataclass(frozen=True)
 class Result:
     """``approved``, ``escalated`` (a person must decide) or ``waiting``.
@@ -210,7 +261,7 @@ class Result:
     ``running`` is only seen by an ``on_progress`` listener mid-run.
     """
 
-    status: str
+    status: RunStatus
     reason: str
     evaluations: tuple[Evaluation, ...]
     digest: str
@@ -224,12 +275,12 @@ class Result:
         return self.evaluations[-1] if self.evaluations else None
 
 
-Agent = Callable[[Task], Any]
-DiffSource = Callable[[Attempt], Any]
-Listener = Callable[[Result], Any]
+Agent = Callable[[Task], Attempt | str | Awaitable[Attempt | str]]
+DiffSource = Callable[[Attempt], str | Awaitable[str]]
+Listener = Callable[[Result], object]
 
 
-async def _call(function: Callable[..., Any], *args: Any) -> Any:
+async def _call(function: Callable[..., Any], *args: object) -> object:
     """Await an async callable; run a sync one in a thread."""
     method = type(function).__call__ if not inspect.isroutine(function) else None
     if inspect.iscoroutinefunction(function) or inspect.iscoroutinefunction(method):
@@ -248,7 +299,7 @@ def _check_oracles(checklist: Checklist, oracles: Mapping[str, Oracle]) -> None:
         raise ValueError(f"no oracle for: {', '.join(missing)}")
 
 
-def _accepted(name: str, asked: Collection[str], result: Any) -> dict[str, Answer]:
+def _accepted(name: str, asked: Collection[str], result: object) -> dict[str, Answer]:
     if not isinstance(result, Mapping):
         raise OracleError(
             f"oracle {name!r} returned {type(result).__name__}, expected a mapping "
@@ -268,32 +319,6 @@ def _accepted(name: str, asked: Collection[str], result: Any) -> dict[str, Answe
             )
         answers[qid] = answer if answer.by else replace(answer, by=name)
     return answers
-
-
-def _finish(
-    checklist: Checklist,
-    attempt: Attempt,
-    answers: dict[str, Answer],
-    rounds: list[tuple[str, ...]],
-    status: str | None = None,
-    reason: str = "",
-    waiting_on: tuple[str, ...] = (),
-) -> Evaluation:
-    assessment = assess(checklist, answers)
-    if status is None:
-        # plan() only stops once a requirement fails or none is left open.
-        assert assessment.status != "open", "evaluation stopped while undecided"
-        status = APPROVED if assessment.status == "approved" else CHANGES
-    return Evaluation(
-        attempt=attempt,
-        status=status,
-        answers=MappingProxyType(dict(answers)),
-        rounds=tuple(rounds),
-        requirements=MappingProxyType(dict(assessment.requirements)),
-        failures=assessment.failures,
-        reason=reason,
-        waiting_on=waiting_on,
-    )
 
 
 async def evaluate(
@@ -320,7 +345,8 @@ async def evaluate(
         facts = {qid: answer.is_met for qid, answer in known.items()}
         ask = plan(checklist, facts, last=lambda q: q.by in deferred)
         if not ask:
-            return _finish(checklist, attempt, known, done)
+            # plan() stops only once a requirement fails or none is left open.
+            return Evaluation.from_answers(checklist, attempt, known, done)
         groups = by_oracle(checklist, ask)
         context = Context(checklist, attempt, MappingProxyType(dict(known)), issue)
         names = list(groups)
@@ -352,11 +378,11 @@ async def evaluate(
             known.update(got)
             done.append(tuple(got))
         if escalations:
-            return _finish(
+            return Evaluation.from_answers(
                 checklist, attempt, known, done, ESCALATED, "; ".join(escalations)
             )
         if waiting:
-            return _finish(
+            return Evaluation.from_answers(
                 checklist,
                 attempt,
                 known,
@@ -369,7 +395,7 @@ async def evaluate(
 
 def _verdict(
     evaluations: Sequence[Evaluation], max_attempts: int, stop_on_regression: bool
-) -> tuple[str, str] | None:
+) -> tuple[RunStatus, str] | None:
     """Why the run stops after the latest evaluation, or ``None`` to go on."""
     latest = evaluations[-1]
     if latest.status == APPROVED:
@@ -454,7 +480,9 @@ async def run(
         if evaluations:
             verdict = _verdict(evaluations, max_attempts, stop_on_regression)
             if verdict is not None:
-                return Result(verdict[0], verdict[1], tuple(evaluations), checklist.digest)
+                return Result(
+                    verdict[0], verdict[1], tuple(evaluations), checklist.digest
+                )
         previous = evaluations[-1] if evaluations else None
         task = Task(
             issue=issue,
@@ -471,8 +499,10 @@ async def run(
         else:
             raise TypeError("the agent must return an Attempt or a non-empty ref")
         if diff is not None:
-            attempt = replace(attempt, diff=await _call(diff, attempt))
+            computed = await _call(diff, attempt)
+            if not isinstance(computed, str):
+                raise TypeError("the diff source must return the diff as a string")
+            attempt = replace(attempt, diff=computed)
         await finished(
             await evaluate(checklist, attempt, oracles, last=last, issue=issue)
         )
-

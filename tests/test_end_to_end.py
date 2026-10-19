@@ -85,9 +85,15 @@ class EndToEndTests(unittest.TestCase):
             async def judge(questions, context):
                 # Stands in for Judge: reads only the runner-computed diff.
                 seen_claims.append(context.attempt.claims)
-                files = [line for line in context.attempt.diff.splitlines() if line.startswith("diff --git")]
+                files = [
+                    line
+                    for line in context.attempt.diff.splitlines()
+                    if line.startswith("diff --git")
+                ]
                 return {
-                    q.id: sa.Answer(files == ["diff --git a/app.py b/app.py"], f"files: {files}")
+                    q.id: sa.Answer(
+                        files == ["diff --git a/app.py b/app.py"], f"files: {files}"
+                    )
                     for q in questions
                 }
 
@@ -97,7 +103,11 @@ class EndToEndTests(unittest.TestCase):
                     sa.run(
                         checklist,
                         agent=CommandAgent([sys.executable, "-c", AGENT], cwd=tmp),
-                        oracles={"ci": Checks(cwd=tmp), "llm": judge, "human": lambda q, c: {}},
+                        oracles={
+                            "ci": Checks(cwd=tmp),
+                            "llm": judge,
+                            "human": lambda q, c: {},
+                        },
                         max_attempts=3,
                         on_progress=lambda run: sa.record.save(run, checklist, saved),
                     )
@@ -108,8 +118,12 @@ class EndToEndTests(unittest.TestCase):
                 self.assertIn("exit 1", first.answers["prints_v2"].reasoning)
                 self.assertTrue(second.answers["prints_v2"].is_met)
                 self.assertTrue(second.answers["frozen_untouched"].is_met)
-                self.assertEqual(seen_claims[0], "attempt 1: I am confident this is correct")
-                self.assertEqual(sa.record.load(saved, checklist).evaluations[-1].status, sa.APPROVED)
+                self.assertEqual(
+                    seen_claims[0], "attempt 1: I am confident this is correct"
+                )
+                self.assertEqual(
+                    sa.record.load(saved, checklist).evaluations[-1].status, sa.APPROVED
+                )
             finally:
                 saved.unlink(missing_ok=True)
 

@@ -20,27 +20,25 @@ import asyncio
 import fnmatch
 import shlex
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
 
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
-from symbolic_acceptance.loop import Context, OracleError, Pending, _call
+from symbolic_acceptance.loop import Context, Oracle, OracleError, Pending, _call
 
-__all__ = ["Checks", "Commands", "frozen_files"]
+__all__ = ["Checks", "Commands", "Handler", "frozen_files"]
 
-Handler = Callable[[Question, Context], Any]
+Handler = Callable[[Question, Context], Answer | Awaitable[Answer]]
 
 
 def _patterns(question: Question, key: str) -> tuple[str, ...]:
     value = question.options.get(key, ())
-    if isinstance(value, str):
-        value = (value,)
-    if not all(isinstance(item, str) for item in value):
+    patterns = (value,) if isinstance(value, str) else value
+    if not isinstance(patterns, tuple) or not all(isinstance(p, str) for p in patterns):
         raise OracleError(f"q.{question.id}.{key} must be a list of glob patterns")
-    return tuple(value)
+    return patterns
 
 
 def _matches(path: str | None, patterns: Sequence[str]) -> bool:
@@ -72,17 +70,23 @@ def frozen_files(question: Question, context: Context) -> Answer:
             tuple(violations),
             by="ci:frozen",
         )
-    return Answer(True, f"no frozen file changed ({len(files)} file(s) touched)", by="ci:frozen")
+    return Answer(
+        True, f"no frozen file changed ({len(files)} file(s) touched)", by="ci:frozen"
+    )
 
 
 class Commands:
     """Run a question's ``run`` command in ``cwd``; exit status 0 is YES.
 
     ``cwd`` must be checked out at the attempt's commit; when it is a git
-    checkout at another commit the check refuses to run.
+    checkout at another commit the check refuses to run. A command that runs
+    past ``timeout`` counts as failing, but one that cannot start at all is
+    an :class:`OracleError`: that is for a person to fix, not the agent.
     """
 
-    def __init__(self, cwd: str | Path, *, timeout: float = 1800.0, tail: int = 30) -> None:
+    def __init__(
+        self, cwd: str | Path, *, timeout: float = 1800.0, tail: int = 30
+    ) -> None:
         self.cwd = Path(cwd)
         self.timeout = timeout
         self.tail = tail
@@ -105,7 +109,7 @@ class Commands:
         command = question.options.get("run")
         if isinstance(command, str):
             argv = shlex.split(command)
-        elif isinstance(command, Sequence) and all(isinstance(a, str) for a in command):
+        elif isinstance(command, tuple) and all(isinstance(a, str) for a in command):
             argv = list(command)
         else:
             raise OracleError(f"q.{question.id}.run must be a command string or list")
@@ -113,13 +117,13 @@ class Commands:
             raise OracleError(f"q.{question.id}.run is empty")
         head = self._head()
         ref = context.attempt.ref
-        if head is not None and ref and not head.startswith(ref) and not ref.startswith(head):
+        if head is not None and not head.startswith(ref):
             raise OracleError(
                 f"{self.cwd} is at {head[:12]}, not at the attempt's commit {ref[:12]}"
             )
         expect = question.options.get("expect", "pass")
         if expect not in ("pass", "fail"):
-            raise OracleError(f"q.{question.id}.expect must be \"pass\" or \"fail\"")
+            raise OracleError(f'q.{question.id}.expect must be "pass" or "fail"')
         shown = shlex.join(argv)
         try:
             done = subprocess.run(
@@ -131,9 +135,11 @@ class Commands:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            return Answer(False, f"`{shown}` timed out after {self.timeout:.0f}s", by="ci:run")
+            return Answer(
+                False, f"`{shown}` timed out after {self.timeout:.0f}s", by="ci:run"
+            )
         except OSError as error:
-            return Answer(False, f"`{shown}` could not start: {error}", by="ci:run")
+            raise OracleError(f"`{shown}` could not start: {error}") from None
         output = (done.stdout + done.stderr).strip().splitlines()[-self.tail :]
         passed = done.returncode == 0
         is_met = passed if expect == "pass" else not passed
@@ -149,7 +155,7 @@ class Checks:
         handlers: Mapping[str, Handler] | None = None,
         *,
         cwd: str | Path | None = None,
-        fallback: Callable[..., Any] | None = None,
+        fallback: Oracle | None = None,
         timeout: float = 1800.0,
     ) -> None:
         self.handlers: dict[str, Handler] = {"frozen": frozen_files, **(handlers or {})}
@@ -164,7 +170,10 @@ class Checks:
         for question in questions:
             name = question.options.get("check")
             if isinstance(name, str) and name in self.handlers:
-                answers[question.id] = await _call(self.handlers[name], question, context)
+                answer = await _call(self.handlers[name], question, context)
+                if not isinstance(answer, Answer):
+                    raise OracleError(f"the {name!r} check did not return an Answer")
+                answers[question.id] = answer
             elif "run" in question.options and self.commands is not None:
                 answers[question.id] = await asyncio.to_thread(
                     self.commands, question, context
@@ -179,7 +188,12 @@ class Checks:
                     "for its `check`, or pass a fallback such as GitHubChecks"
                 )
             try:
-                answers.update(await _call(self.fallback, tuple(rest), context))
+                more = await _call(self.fallback, tuple(rest), context)
             except Pending as pending:
-                raise Pending(str(pending), answers={**answers, **pending.answers}) from None
+                raise Pending(
+                    str(pending), answers={**answers, **pending.answers}
+                ) from None
+            if not isinstance(more, Mapping):
+                raise OracleError("the fallback did not return a mapping of answers")
+            answers.update(more)
         return answers

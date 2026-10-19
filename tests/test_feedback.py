@@ -54,14 +54,18 @@ class ExplainTests(unittest.TestCase):
             checklist.requirement("r").that, checklist, answers({"a": True, "b": False})
         )
         self.assertEqual(reason.fix, "each")
-        self.assertEqual([leaf.question.id for leaf in reason.leaves()], ["b"])
+        self.assertEqual([fact.question.id for fact in reason.facts()], ["b"])
 
     def test_any_lists_every_alternative(self):
         checklist = example()
         truth = dict(PASSING, locks_account=True, can_unlock=False, backs_off=False)
-        reason = sa.explain(checklist.requirement("protected").that, checklist, answers(truth))
+        reason = sa.explain(
+            checklist.requirement("protected").that, checklist, answers(truth)
+        )
         self.assertEqual(reason.fix, "one")
-        self.assertEqual([leaf.question.id for leaf in reason.leaves()], ["can_unlock", "backs_off"])
+        self.assertEqual(
+            [fact.question.id for fact in reason.facts()], ["can_unlock", "backs_off"]
+        )
 
     def test_not_reports_the_yes_that_caused_it(self):
         assessment = sa.assess(CHECKLIST, answers({"a": True, "b": True, "c": True}))
@@ -74,6 +78,15 @@ class ExplainTests(unittest.TestCase):
     def test_undecided_expression_cannot_be_explained(self):
         with self.assertRaises(ValueError):
             sa.explain(CHECKLIST.requirement("not_c").that, CHECKLIST, {})
+
+
+class AnswerTests(unittest.TestCase):
+    def test_types_are_checked(self):
+        with self.assertRaises(TypeError):
+            sa.Answer("yes")  # type: ignore[arg-type]
+        with self.assertRaisesRegex(TypeError, "not one string"):
+            sa.Answer(True, evidence="a quote")  # type: ignore[arg-type]
+        self.assertEqual(sa.Answer(True, evidence=["a", "b"]).evidence, ("a", "b"))  # type: ignore[arg-type]
 
 
 class AssessTests(unittest.TestCase):
@@ -94,14 +107,20 @@ class AssessTests(unittest.TestCase):
         checklist = example()
         ids = list(checklist.questions)
         for values in itertools.product((True, False), repeat=len(ids)):
-            assessment = sa.assess(checklist, answers(dict(zip(ids, values, strict=True))))
+            assessment = sa.assess(
+                checklist, answers(dict(zip(ids, values, strict=True)))
+            )
             self.assertIn(assessment.status, ("approved", "changes"))
             self.assertEqual(assessment.status == "changes", bool(assessment.failures))
 
     def test_render_mentions_the_gate(self):
         checklist = example()
         truth = dict(PASSING, touches_sso=True, sso_exempt=False)
-        text = sa.render_failures(sa.assess(checklist, answers(truth, sso_exempt="needs security review")).failures)
+        text = sa.render_failures(
+            sa.assess(
+                checklist, answers(truth, sso_exempt="needs security review")
+            ).failures
+        )
         self.assertIn("1. sso: Single sign-on changed without approval", text)
         self.assertIn("Applies because touches_sso is YES.", text)
         self.assertIn("Why: needs security review", text)

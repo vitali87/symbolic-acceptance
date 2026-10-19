@@ -68,10 +68,12 @@ def _retry_after(response: Response | None, attempt: int) -> float:
                 return max(0.0, float(value))
             except ValueError:
                 try:
-                    return max(0.0, parsedate_to_datetime(value).timestamp() - time.time())
+                    return max(
+                        0.0, parsedate_to_datetime(value).timestamp() - time.time()
+                    )
                 except (TypeError, ValueError):
                     pass
-    return min(60.0, 2.0 ** attempt)
+    return min(60.0, 2.0**attempt)
 
 
 def _detail(response: Response) -> str:

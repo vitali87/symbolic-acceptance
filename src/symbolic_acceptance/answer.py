@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 __all__ = ["Answer"]
@@ -19,18 +19,19 @@ class Answer:
 
     is_met: bool
     reasoning: str = ""
-    evidence: tuple[str, ...] = field(default=())
+    evidence: tuple[str, ...] = ()
     by: str = ""
 
     def __post_init__(self) -> None:
+        # Oracles wrap models, APIs and people, so the types are checked here
+        # rather than trusted: a "no" string must never read as a YES.
         if not isinstance(self.is_met, bool):
             raise TypeError(f"is_met must be a bool, got {type(self.is_met).__name__}")
         if not isinstance(self.reasoning, str) or not isinstance(self.by, str):
             raise TypeError("reasoning and by must be strings")
-        evidence = self.evidence
-        if isinstance(evidence, str):
-            evidence = (evidence,)
-        evidence = tuple(evidence)
+        if isinstance(self.evidence, str):
+            raise TypeError("evidence must be a sequence of strings, not one string")
+        evidence = tuple(self.evidence)
         if not all(isinstance(item, str) for item in evidence):
             raise TypeError("evidence must be strings")
         object.__setattr__(self, "evidence", evidence)
@@ -39,8 +40,8 @@ class Answer:
     def word(self) -> str:
         return "YES" if self.is_met else "NO"
 
-    def to_dict(self) -> dict[str, Any]:
-        data: dict[str, Any] = {"is_met": self.is_met}
+    def to_dict(self) -> dict[str, object]:
+        data: dict[str, object] = {"is_met": self.is_met}
         if self.reasoning:
             data["reasoning"] = self.reasoning
         if self.evidence:

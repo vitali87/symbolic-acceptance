@@ -1,4 +1,4 @@
-"""Command line: ``symbolic-acceptance <command>`` or ``python -m symbolic_acceptance``."""
+"""The ``symbolic-acceptance`` command (also ``python -m symbolic_acceptance``)."""
 
 from __future__ import annotations
 
@@ -10,14 +10,27 @@ import shlex
 import sys
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 from symbolic_acceptance import __version__, record
 from symbolic_acceptance.answer import Answer
-from symbolic_acceptance.checklist import Checklist, ChecklistError, load, render
+from symbolic_acceptance.checklist import (
+    Checklist,
+    ChecklistError,
+    Question,
+    load,
+    render,
+)
 from symbolic_acceptance.feedback import assess, render_failures
 from symbolic_acceptance.lint import lint
-from symbolic_acceptance.loop import APPROVED, WAITING, Context, Pending, Result, run
+from symbolic_acceptance.loop import (
+    APPROVED,
+    WAITING,
+    Context,
+    Oracle,
+    Pending,
+    Result,
+    run,
+)
 from symbolic_acceptance.report import markdown
 from symbolic_acceptance.templates import TEMPLATES
 
@@ -85,7 +98,9 @@ def _cmd_template(args: argparse.Namespace) -> int:
 def _answers(path: str) -> dict[str, Answer]:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise SystemExit("error: answers must be a JSON object of question id to answer")
+        raise SystemExit(
+            "error: answers must be a JSON object of question id to answer"
+        )
     answers = {}
     for qid, value in data.items():
         if isinstance(value, bool):
@@ -146,14 +161,19 @@ def _cmd_report(args: argparse.Namespace) -> int:
 class TerminalReviewer:
     """A ``human`` oracle that asks on the terminal."""
 
-    def __call__(self, questions: Sequence[Any], context: Context) -> dict[str, Answer]:
+    def __call__(
+        self, questions: Sequence[Question], context: Context
+    ) -> dict[str, Answer]:
         if not sys.stdin.isatty():
             raise Pending("no terminal to ask a person; pass --pr to ask on GitHub")
+        attempt = context.attempt
         answers = {}
-        print(f"\nQuestions about attempt {context.attempt.number} ({context.attempt.ref[:12]}):")
+        print(f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):")
         for question in questions:
             while True:
-                reply = input(f"  {question.id}: {question.ask} [y/n, then why] ").strip()
+                reply = input(
+                    f"  {question.id}: {question.ask} [y/n, then why] "
+                ).strip()
                 if reply[:1].lower() in ("y", "n"):
                     break
             answers[question.id] = Answer(
@@ -172,11 +192,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     checklist = _load(args.file)
     errors = [i for i in lint(checklist, oracles=ORACLES) if i.level == "error"]
     if errors:
-        raise SystemExit("error: the checklist has lint errors:\n" + "\n".join(map(str, errors)))
+        raise SystemExit(
+            "error: the checklist has lint errors:\n" + "\n".join(map(str, errors))
+        )
     issue = Path(args.issue).read_text(encoding="utf-8") if args.issue else ""
     github = GitHub(args.github) if args.github else None
     ci_fallback = GitHubChecks(github, wait=args.ci_wait) if github else None
-    human: Any = TerminalReviewer()
+    human: Oracle = TerminalReviewer()
     if github and args.pr:
         human = Reviews(
             github,
@@ -230,7 +252,9 @@ def _parser() -> argparse.ArgumentParser:
 
     sub = commands.add_parser("lint", help="check checklists before approving them")
     sub.add_argument("files", nargs="+")
-    sub.add_argument("--oracles", help="comma-separated oracle names (default ci,llm,human)")
+    sub.add_argument(
+        "--oracles", help="comma-separated oracle names (default ci,llm,human)"
+    )
     sub.add_argument("--strict", action="store_true", help="fail on warnings too")
     sub.set_defaults(handler=_cmd_lint)
 
@@ -251,7 +275,9 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("answers", help='JSON: {"question_id": true, ...}')
     sub.set_defaults(handler=_cmd_explain)
 
-    sub = commands.add_parser("draft", help="draft a checklist from an issue with Claude")
+    sub = commands.add_parser(
+        "draft", help="draft a checklist from an issue with Claude"
+    )
     sub.add_argument("issue", help="file with the issue text")
     sub.add_argument("--template", choices=sorted(TEMPLATES), default="bug")
     sub.add_argument("--out", default="acceptance.toml")
@@ -273,12 +299,18 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--record", help="save the run here after every attempt")
     sub.add_argument("--resume", help="continue a saved run (and keep saving to it)")
     sub.add_argument("--github", help="owner/name, for CI results and reviews")
-    sub.add_argument("--pr", type=int, help="pull request to ask people on and report to")
-    sub.add_argument("--ci-wait", type=float, default=1800.0, help="seconds to wait for CI")
+    sub.add_argument(
+        "--pr", type=int, help="pull request to ask people on and report to"
+    )
+    sub.add_argument(
+        "--ci-wait", type=float, default=1800.0, help="seconds to wait for CI"
+    )
     sub.add_argument("--reviewers", help="comma-separated logins allowed to answer")
     sub.add_argument("--exclude", help="comma-separated logins never allowed to answer")
     sub.add_argument("--model", help="Claude model for the judge")
-    sub.add_argument("--samples", type=int, default=1, help="judge samples per question")
+    sub.add_argument(
+        "--samples", type=int, default=1, help="judge samples per question"
+    )
     sub.add_argument(
         "--keep-going-on-regression",
         action="store_true",

@@ -66,14 +66,18 @@ class Scripted:
 class FakeHTTP:
     """A transport that replays canned responses and records requests."""
 
-    def __init__(self, *responses: Response | Callable[[urllib.request.Request], Response]):
+    def __init__(
+        self, *responses: Response | Callable[[urllib.request.Request], Response]
+    ):
         self.responses = list(responses)
         self.requests: list[urllib.request.Request] = []
 
     def __call__(self, request: urllib.request.Request, timeout: float) -> Response:
         self.requests.append(request)
         if not self.responses:
-            raise AssertionError(f"unexpected request {request.get_method()} {request.full_url}")
+            raise AssertionError(
+                f"unexpected request {request.get_method()} {request.full_url}"
+            )
         reply = self.responses.pop(0)
         return reply(request) if callable(reply) else reply
 
@@ -88,5 +92,7 @@ class FakeHTTP:
         return None
 
 
-def json_response(data: Any, status: int = 200, headers: Mapping[str, str] | None = None) -> Response:
+def json_response(
+    data: Any, status: int = 200, headers: Mapping[str, str] | None = None
+) -> Response:
     return Response(status, json.dumps(data).encode("utf-8"), dict(headers or {}))

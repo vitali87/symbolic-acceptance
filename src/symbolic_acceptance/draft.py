@@ -71,7 +71,7 @@ def draft(
         f"ISSUE-{boundary}\n{issue.strip()}\nEND-ISSUE-{boundary}\n\n"
         f"Start from this {template} template and replace every <...>:\n"
         f"```toml\n{TEMPLATES[template]}```\n"
-        "Return the complete checklist as TOML in \"checklist\"."
+        'Return the complete checklist as TOML in "checklist".'
     )
     content = request
     problems = ""

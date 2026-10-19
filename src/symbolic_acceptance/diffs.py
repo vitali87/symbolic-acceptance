@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Literal
 
 __all__ = ["DiffLine", "FileChange", "locate", "parse"]
 
@@ -13,10 +14,13 @@ _ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
 MIN_QUOTE = 8
 
 
+Change = Literal["added", "deleted", "modified", "renamed"]
+
+
 @dataclass(frozen=True)
 class FileChange:
     path: str
-    status: str  # "added", "deleted", "modified" or "renamed"
+    status: Change
     old_path: str | None = None
 
 
@@ -29,7 +33,7 @@ class DiffLine:
     """
 
     path: str
-    side: str
+    side: Literal["+", "-", " "]
     line: int
     text: str
 
@@ -62,65 +66,61 @@ def _strip_prefix(path: str) -> str | None:
     return path
 
 
+@dataclass
+class _File:
+    old: str | None = None
+    new: str | None = None
+    status: Change = "modified"
+
+    def change(self) -> FileChange | None:
+        path = self.new or self.old
+        if path is None:
+            return None
+        return FileChange(
+            path, self.status, self.old if self.status == "renamed" else None
+        )
+
+
 def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
     """Files the diff touches, and every hunk line with its location."""
-    files: list[FileChange] = []
+    files: list[_File] = []
     lines: list[DiffLine] = []
-    current: dict[str, str | None] | None = None
-
-    def flush() -> None:
-        if current is None:
-            return
-        path = current["new"] or current["old"]
-        if path is None:
-            return
-        status = current["status"] or "modified"
-        old = current["old"] if status == "renamed" else None
-        files.append(FileChange(path, status, old))
-
     rows = diff.splitlines()
     index = 0
     while index < len(rows):
         row = rows[index]
         index += 1
+        if row.startswith("diff --git ") or not files:
+            files.append(_File())
+        current = files[-1]
         if row.startswith("diff --git "):
-            flush()
-            current = {"old": None, "new": None, "status": None}
-            match = _GIT_HEADER.match(row)
-            if match:
-                old, new = match["old"], match["new"]
-                current["old"] = _strip_prefix(old)
-                current["new"] = _strip_prefix(new)
-            continue
-        if current is None:
-            current = {"old": None, "new": None, "status": None}
-        if row.startswith("new file mode"):
-            current["status"] = "added"
+            if match := _GIT_HEADER.match(row):
+                current.old = _strip_prefix(match["old"])
+                current.new = _strip_prefix(match["new"])
+        elif row.startswith("new file mode"):
+            current.status = "added"
         elif row.startswith("deleted file mode"):
-            current["status"] = "deleted"
+            current.status = "deleted"
         elif row.startswith("rename from "):
-            current["status"] = "renamed"
-            current["old"] = _unquote(row[len("rename from ") :])
+            current.status = "renamed"
+            current.old = _unquote(row[len("rename from ") :])
         elif row.startswith("rename to "):
-            current["new"] = _unquote(row[len("rename to ") :])
+            current.new = _unquote(row[len("rename to ") :])
         elif row.startswith("--- "):
             old = _strip_prefix(row[4:])
             if old is None:
-                current["status"] = "added"
+                current.status = "added"
             else:
-                current["old"] = old
+                current.old = old
         elif row.startswith("+++ "):
-            new = _strip_prefix(row[4:])
-            if new is None:
-                current["status"] = "deleted"
-                current["new"] = None
-            else:
-                current["new"] = new
+            current.new = _strip_prefix(row[4:])
+            if current.new is None:
+                current.status = "deleted"
         elif (match := _HUNK.match(row)) is not None:
             old_line, new_line = int(match[1]), int(match[3])
             old_left = int(match[2]) if match[2] is not None else 1
             new_left = int(match[4]) if match[4] is not None else 1
-            path = current["new"] or current["old"] or ""
+            path = current.new or current.old or ""
             # Count the hunk out, so content that looks like a header
             # ("+++ x" as an added line) is still read as content.
             while (old_left > 0 or new_left > 0) and index < len(rows):
@@ -136,7 +136,7 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
                     new_line += 1
                     new_left -= 1
                 elif side == "-":
-                    lines.append(DiffLine(current["old"] or path, "-", old_line, text))
+                    lines.append(DiffLine(current.old or path, "-", old_line, text))
                     old_line += 1
                     old_left -= 1
                 else:
@@ -145,8 +145,8 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
                     old_line += 1
                     new_left -= 1
                     old_left -= 1
-    flush()
-    return files, lines
+    changes = [change for file in files if (change := file.change()) is not None]
+    return changes, lines
 
 
 def locate(quote: str, lines: list[DiffLine]) -> list[DiffLine] | None:

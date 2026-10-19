@@ -66,7 +66,9 @@ class ParseTests(unittest.TestCase):
     def test_bad_hunk_counts_do_not_swallow_the_next_file(self):
         broken = DIFF.replace("@@ -10,3 +10,6 @@", "@@ -10,9 +10,9 @@")
         files, _ = parse(broken)
-        self.assertEqual([f.path for f in files][:2], ["src/auth.py", "tests/test_auth.py"])
+        self.assertEqual(
+            [f.path for f in files][:2], ["src/auth.py", "tests/test_auth.py"]
+        )
 
     def test_locate(self):
         _, lines = parse(DIFF)
@@ -78,7 +80,9 @@ class ParseTests(unittest.TestCase):
 
 
 def context(diff="", ref="abc"):
-    checklist = sa.loads('[q.x]\nask = "X?"\nby = "ci"\n[[require]]\nthat = "x"\nfail = "x"\n')
+    checklist = sa.loads(
+        '[q.x]\nask = "X?"\nby = "ci"\n[[require]]\nthat = "x"\nfail = "x"\n'
+    )
     return sa.Context(checklist, sa.Attempt(ref, 1, diff=diff), {})
 
 
@@ -87,7 +91,9 @@ class FrozenTests(unittest.TestCase):
         return sa.Question("frozen_untouched", "Untouched?", "ci", options=options)
 
     def test_new_regression_test_is_allowed(self):
-        q = self.question(check="frozen", paths=["tests/*.py"], allow_new=["tests/test_*.py"])
+        q = self.question(
+            check="frozen", paths=["tests/*.py"], allow_new=["tests/test_*.py"]
+        )
         diff = DIFF.split("diff --git a/old.py")[0]
         self.assertTrue(frozen_files(q, context(diff)).is_met)
 
@@ -95,20 +101,43 @@ class FrozenTests(unittest.TestCase):
         q = self.question(paths=["tests/*", "old.py"], allow_new=["tests/test_*.py"])
         answer = frozen_files(q, context(DIFF))
         self.assertFalse(answer.is_met)
-        self.assertEqual(answer.evidence, ("old.py -> new.py (renamed)", "tests/test_old.py (deleted)"))
+        self.assertEqual(
+            answer.evidence,
+            ("old.py -> new.py (renamed)", "tests/test_old.py (deleted)"),
+        )
 
     def test_needs_paths(self):
         with self.assertRaises(sa.OracleError):
             frozen_files(self.question(), context(DIFF))
+        with self.assertRaisesRegex(sa.OracleError, "list of glob patterns"):
+            frozen_files(self.question(paths=3), context(DIFF))
 
 
 class CommandsTests(unittest.TestCase):
     def test_exit_status_decides(self):
         with tempfile.TemporaryDirectory() as tmp:
             commands = Commands(tmp)
-            ok = sa.Question("ok", "OK?", "ci", options={"run": [sys.executable, "-c", "print('fine')"]})
-            bad = sa.Question("bad", "Bad?", "ci", options={"run": [sys.executable, "-c", "raise SystemExit(3)"]})
-            inverted = sa.Question("inv", "Inv?", "ci", options={"run": [sys.executable, "-c", "raise SystemExit(1)"], "expect": "fail"})
+            ok = sa.Question(
+                "ok",
+                "OK?",
+                "ci",
+                options={"run": [sys.executable, "-c", "print('fine')"]},
+            )
+            bad = sa.Question(
+                "bad",
+                "Bad?",
+                "ci",
+                options={"run": [sys.executable, "-c", "raise SystemExit(3)"]},
+            )
+            inverted = sa.Question(
+                "inv",
+                "Inv?",
+                "ci",
+                options={
+                    "run": [sys.executable, "-c", "raise SystemExit(1)"],
+                    "expect": "fail",
+                },
+            )
             self.assertTrue(commands(ok, context()).is_met)
             self.assertEqual(commands(ok, context()).evidence, ("fine",))
             answer = commands(bad, context())
@@ -116,13 +145,23 @@ class CommandsTests(unittest.TestCase):
             self.assertIn("exit 3", answer.reasoning)
             self.assertTrue(commands(inverted, context()).is_met)
 
+    def test_a_command_that_cannot_start_is_for_a_person(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = sa.Question(
+                "m", "M?", "ci", options={"run": "no-such-command-xyz --flag"}
+            )
+            with self.assertRaisesRegex(sa.OracleError, "could not start"):
+                Commands(tmp)(missing, context())
+
     def test_router_merges_local_answers_into_pending(self):
         async def github(questions, ctx):
             raise sa.Pending("CI running")
 
         with tempfile.TemporaryDirectory() as tmp:
             router = Checks(cwd=tmp, fallback=github)
-            local = sa.Question("local", "L?", "ci", options={"run": [sys.executable, "-c", "pass"]})
+            local = sa.Question(
+                "local", "L?", "ci", options={"run": [sys.executable, "-c", "pass"]}
+            )
             remote = sa.Question("remote", "R?", "ci", options={"check": "tests"})
             with self.assertRaises(sa.Pending) as caught:
                 asyncio.run(router([local, remote], context()))
@@ -130,7 +169,11 @@ class CommandsTests(unittest.TestCase):
 
     def test_router_without_fallback(self):
         with self.assertRaisesRegex(sa.OracleError, "no local check"):
-            asyncio.run(Checks()([sa.Question("r", "R?", "ci", options={"check": "x"})], context()))
+            asyncio.run(
+                Checks()(
+                    [sa.Question("r", "R?", "ci", options={"check": "x"})], context()
+                )
+            )
 
 
 if __name__ == "__main__":

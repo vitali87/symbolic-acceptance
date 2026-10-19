@@ -22,6 +22,7 @@ other      other       ``open``
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
+from typing import Literal
 
 from symbolic_acceptance.checklist import (
     AllOf,
@@ -34,21 +35,27 @@ from symbolic_acceptance.checklist import (
 )
 
 __all__ = [
+    "DEFAULT_LAST",
     "FAIL",
     "NA",
     "OPEN",
     "PASS",
-    "decided",
+    "Status",
+    "by_oracle",
     "plan",
     "status",
     "statuses",
     "value",
 ]
 
-PASS = "pass"
-FAIL = "fail"
-NA = "n/a"
-OPEN = "open"
+Status = Literal["pass", "fail", "n/a", "open"]
+PASS: Status = "pass"
+FAIL: Status = "fail"
+NA: Status = "n/a"
+OPEN: Status = "open"
+
+# The oracles asked only once nothing else is left: people, by default.
+DEFAULT_LAST = ("human",)
 
 Facts = Mapping[str, bool]
 
@@ -70,7 +77,7 @@ def value(expr: Expr, facts: Facts) -> bool | None:
     return None if None in values else False
 
 
-def status(requirement: Requirement, facts: Facts) -> str:
+def status(requirement: Requirement, facts: Facts) -> Status:
     """``pass``, ``fail``, ``n/a`` or ``open``; see the module docstring."""
     applies = True if requirement.when is None else value(requirement.when, facts)
     if applies is False:
@@ -83,14 +90,8 @@ def status(requirement: Requirement, facts: Facts) -> str:
     return OPEN
 
 
-def statuses(checklist: Checklist, facts: Facts) -> dict[str, str]:
+def statuses(checklist: Checklist, facts: Facts) -> dict[str, Status]:
     return {r.id: status(r, facts) for r in checklist.requirements}
-
-
-def decided(checklist: Checklist, facts: Facts) -> bool:
-    """Whether the answers in hand settle approval: a failure, or no open item."""
-    values = statuses(checklist, facts).values()
-    return FAIL in values or OPEN not in values
 
 
 def _deciding(expr: Expr, facts: Facts, out: dict[str, None]) -> None:
@@ -145,12 +146,9 @@ def plan(
     """
     early: dict[str, None] = {}
     for requirement in checklist.requirements:
-        applies = True if requirement.when is None else value(requirement.when, facts)
-        if applies is False:
-            continue
-        if applies is None:
-            assert requirement.when is not None
-            _deciding(requirement.when, facts, early)
+        when = requirement.when
+        if when is not None and value(when, facts) is not True:
+            _deciding(when, facts, early)  # nothing, once `when` is NO
         else:
             _unmet(requirement.that, True, facts, early)
     first = [qid for qid in early if not last(checklist.questions[qid])]
@@ -162,14 +160,10 @@ def plan(
         return []
     late: dict[str, None] = {}
     for requirement in checklist.requirements:
-        if current[requirement.id] != OPEN:
-            continue
-        applies = True if requirement.when is None else value(requirement.when, facts)
-        if applies is None:
-            assert requirement.when is not None
-            _deciding(requirement.when, facts, late)
-        else:
-            _deciding(requirement.that, facts, late)
+        if current[requirement.id] == OPEN:
+            when = requirement.when
+            gate_open = when is not None and value(when, facts) is None
+            _deciding(when if gate_open else requirement.that, facts, late)
     return list(late)
 
 

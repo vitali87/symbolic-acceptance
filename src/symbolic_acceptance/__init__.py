@@ -22,7 +22,9 @@ from symbolic_acceptance.checklist import (
 )
 from symbolic_acceptance.feedback import (
     Assessment,
+    Fact,
     Failure,
+    Group,
     Reason,
     assess,
     explain,
@@ -65,7 +67,9 @@ __all__ = [
     "Context",
     "Escalate",
     "Evaluation",
+    "Fact",
     "Failure",
+    "Group",
     "Issue",
     "Not",
     "OracleError",

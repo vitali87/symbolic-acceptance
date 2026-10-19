@@ -28,7 +28,13 @@ GIT_ENV = {
 
 def repo(tmp):
     def git(*args):
-        subprocess.run(["git", *args], cwd=tmp, check=True, capture_output=True, env={**os.environ, **GIT_ENV})
+        subprocess.run(
+            ["git", *args],
+            cwd=tmp,
+            check=True,
+            capture_output=True,
+            env={**os.environ, **GIT_ENV},
+        )
 
     git("init", "-q")
     Path(tmp, "app.py").write_text("print('v1')\n")
@@ -62,7 +68,12 @@ class CommandAgentTests(unittest.TestCase):
             self.assertIn("+print('v2')", attempt.diff)
             self.assertEqual(len(attempt.ref), 40)
             self.assertNotEqual(attempt.base, attempt.ref)
-            log = subprocess.run(["git", "log", "-1", "--format=%s"], cwd=tmp, capture_output=True, text=True).stdout
+            log = subprocess.run(
+                ["git", "log", "-1", "--format=%s"],
+                cwd=tmp,
+                capture_output=True,
+                text=True,
+            ).stdout
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(local_diff(tmp)(attempt), attempt.diff)
 
@@ -76,7 +87,9 @@ class CommandAgentTests(unittest.TestCase):
     def test_failing_agent_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
-            agent = CommandAgent([sys.executable, "-c", "raise SystemExit('boom')"], cwd=tmp)
+            agent = CommandAgent(
+                [sys.executable, "-c", "raise SystemExit('boom')"], cwd=tmp
+            )
             with self.assertRaisesRegex(AgentError, "exited with 1: boom"):
                 asyncio.run(agent(self.task()))
 
@@ -86,9 +99,13 @@ class DraftTests(unittest.TestCase):
         good = EXAMPLE.read_text()
         fake = FakeHTTP(
             message({"checklist": "[q.a\n", "questions_for_reporter": []}),
-            message({"checklist": good, "questions_for_reporter": ["Which lockout limit?"]}),
+            message(
+                {"checklist": good, "questions_for_reporter": ["Which lockout limit?"]}
+            ),
         )
-        result = draft("Logins are not throttled", claude=Claude(api_key="k", transport=fake))
+        result = draft(
+            "Logins are not throttled", claude=Claude(api_key="k", transport=fake)
+        )
         self.assertEqual(result.checklist.digest, example().digest)
         self.assertEqual(result.questions, ("Which lockout limit?",))
         retry = fake.body(1)["messages"][0]["content"]
@@ -121,7 +138,9 @@ class CLITests(unittest.TestCase):
     def test_lint_fails_on_errors(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp, "bad.toml")
-            path.write_text('[q.a]\nask = "A?"\nby = "robot"\n[[require]]\nthat = "a"\nfail = "x"\n')
+            path.write_text(
+                '[q.a]\nask = "A?"\nby = "robot"\n[[require]]\nthat = "a"\nfail = "x"\n'
+            )
             code, out = cli("lint", str(path))
             self.assertEqual(code, 1)
             self.assertIn("unknown-oracle", out)
@@ -130,9 +149,14 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             answers = Path(tmp, "answers.json")
             truth = {
-                "repro_fixed": True, "new_test": True, "suite_green": True,
-                "frozen_untouched": True, "locks_account": False, "can_unlock": False,
-                "backs_off": True, "touches_sso": False,
+                "repro_fixed": True,
+                "new_test": True,
+                "suite_green": True,
+                "frozen_untouched": True,
+                "locks_account": False,
+                "can_unlock": False,
+                "backs_off": True,
+                "touches_sso": False,
             }
             answers.write_text(json.dumps(truth))
             self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 0)

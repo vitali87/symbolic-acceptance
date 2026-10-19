@@ -38,7 +38,10 @@ __all__ = [
 
 API_VERSION = "2026-03-10"
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
-_REPLY = re.compile(r"^/(yes|no)\s+([A-Za-z_][A-Za-z0-9_]*)\b[ \t:—-]*(.*)$", re.I | re.M)
+_REPLY = re.compile(r"^/(yes|no)\s+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$", re.I | re.M | re.A)
+_ASKED = re.compile(
+    r"<!-- symbolic-acceptance:ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.A
+)
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 _FAILED = frozenset(
     {"failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"}
@@ -61,7 +64,9 @@ class GitHub:
             "x-github-api-version": API_VERSION,
             "user-agent": "symbolic-acceptance",
         }
-        token = self.token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        token = (
+            self.token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        )
         if token:
             headers["authorization"] = f"Bearer {token}"
         return headers
@@ -110,13 +115,17 @@ class GitHub:
         return items
 
     def check_runs(self, ref: str) -> list[dict[str, Any]]:
-        return self.pages(f"/commits/{urllib.parse.quote(ref)}/check-runs", key="check_runs")
+        return self.pages(
+            f"/commits/{urllib.parse.quote(ref)}/check-runs", key="check_runs"
+        )
 
     def comments(self, number: int) -> list[dict[str, Any]]:
         return self.pages(f"/issues/{number}/comments")
 
     def comment(self, number: int, body: str) -> dict[str, Any]:
-        return self.call("POST", f"/issues/{number}/comments", body={"body": body}).json()
+        return self.call(
+            "POST", f"/issues/{number}/comments", body={"body": body}
+        ).json()
 
     def edit_comment(self, comment_id: int, body: str) -> dict[str, Any]:
         return self.call(
@@ -149,19 +158,23 @@ class GitHubChecks:
     up to ``wait`` seconds and then reported as :class:`Pending`.
     """
 
-    def __init__(self, github: GitHub, *, wait: float = 0.0, poll: float = 15.0) -> None:
+    def __init__(
+        self, github: GitHub, *, wait: float = 0.0, poll: float = 15.0
+    ) -> None:
         self.github = github
         self.wait = wait
         self.poll = poll
 
-    def _read(self, questions: Sequence[Question], ref: str) -> tuple[dict[str, Answer], list[str]]:
+    def _read(
+        self, questions: Sequence[Question], ref: str
+    ) -> tuple[dict[str, Answer], list[str]]:
         runs = self.github.check_runs(ref)
         answers: dict[str, Answer] = {}
         waiting: list[str] = []
         for question in questions:
             name = question.options.get("check")
             if not isinstance(name, str):
-                raise OracleError(f"q.{question.id} needs check = \"<check run name>\"")
+                raise OracleError(f'q.{question.id} needs check = "<check run name>"')
             matching = [run for run in runs if run.get("name") == name]
             if not matching:
                 waiting.append(f"{question.id} (no check run named {name!r} yet)")
@@ -185,7 +198,9 @@ class GitHubChecks:
                 )
         return answers, waiting
 
-    async def __call__(self, questions: Sequence[Question], context: Context) -> dict[str, Answer]:
+    async def __call__(
+        self, questions: Sequence[Question], context: Context
+    ) -> dict[str, Answer]:
         deadline = time.monotonic() + self.wait
         while True:
             answers, waiting = await asyncio.to_thread(
@@ -201,11 +216,12 @@ class GitHubChecks:
 class Reviews:
     """A ``human`` oracle asking on a pull request and reading the replies.
 
-    Answers count only from ``reviewers`` when given, otherwise from the
-    repository's owners, members and collaborators, never from bots or from
-    ``exclude`` (the agent's own account). Only replies posted after the
-    questions for this attempt's commit count, and the latest reply for a
-    question wins.
+    Each question is posted once per commit, in a comment that names the
+    commit and the question ids; a later round posts only the new ones. A
+    reply counts only if it comes after the comment that asked it, from
+    ``reviewers`` when given and otherwise from the repository's owners,
+    members and collaborators, never from bots or from ``exclude`` (the
+    agent's own account). The latest reply to a question wins.
     """
 
     def __init__(
@@ -221,23 +237,21 @@ class Reviews:
         self.reviewers = {r.lower() for r in reviewers} if reviewers else None
         self.exclude = {e.lower() for e in exclude}
 
-    def _marker(self, ref: str) -> str:
-        return f"<!-- symbolic-acceptance:ask ref={ref} -->"
-
     def _allowed(self, comment: dict[str, Any]) -> bool:
         user = comment.get("user") or {}
         login = str(user.get("login", "")).lower()
-        if not login or login in self.exclude or user.get("type") == "Bot":
+        if not login or login in self.exclude:
             return False
-        if login.endswith("[bot]"):
+        if user.get("type") == "Bot" or login.endswith("[bot]"):
             return False
         if self.reviewers is not None:
             return login in self.reviewers
         return comment.get("author_association") in _TRUSTED
 
     def _ask_body(self, questions: Sequence[Question], ref: str) -> str:
+        ids = ",".join(q.id for q in questions)
         lines = [
-            self._marker(ref),
+            f"<!-- symbolic-acceptance:ask ref={ref} ids={ids} -->",
             f"**Questions for a person** about commit `{ref[:12]}`",
             "",
             "Reply with one line per question: `/yes <id> <why>` or `/no <id> <why>`.",
@@ -250,33 +264,36 @@ class Reviews:
         return "\n".join(lines)
 
     def _read(self, questions: Sequence[Question], ref: str) -> dict[str, Answer]:
-        comments = self.github.comments(self.number)
-        marker = self._marker(ref)
-        asked_at = None
+        comments = sorted(
+            self.github.comments(self.number),
+            key=lambda c: (c.get("created_at", ""), c.get("id", 0)),
+        )
+        asked_at: dict[str, str] = {}
         for comment in comments:
-            if marker in (comment.get("body") or ""):
-                asked_at = comment.get("created_at")
-                break
-        if asked_at is None:
-            self.github.comment(self.number, self._ask_body(questions, ref))
-            return {}
-        wanted = {q.id for q in questions}
+            for match in _ASKED.finditer(comment.get("body") or ""):
+                if match["ref"] == ref:
+                    for qid in match["ids"].split(","):
+                        asked_at.setdefault(qid, comment["created_at"])
+        new = [q for q in questions if q.id not in asked_at]
+        if new:
+            self.github.comment(self.number, self._ask_body(new, ref))
         answers: dict[str, Answer] = {}
-        for comment in sorted(comments, key=lambda c: (c.get("created_at", ""), c.get("id", 0))):
-            if comment.get("created_at", "") < asked_at or not self._allowed(comment):
+        for comment in comments:
+            if not self._allowed(comment):
                 continue
-            login = comment["user"]["login"]
             for verdict, qid, why in _REPLY.findall(comment.get("body") or ""):
-                if qid in wanted:
+                if qid in asked_at and comment["created_at"] >= asked_at[qid]:
                     answers[qid] = Answer(
                         verdict.lower() == "yes",
                         why.strip(),
                         tuple(x for x in (comment.get("html_url"),) if x),
-                        by=f"human:@{login}",
+                        by=f"human:@{comment['user']['login']}",
                     )
-        return answers
+        return {q.id: answers[q.id] for q in questions if q.id in answers}
 
-    async def __call__(self, questions: Sequence[Question], context: Context) -> dict[str, Answer]:
+    async def __call__(
+        self, questions: Sequence[Question], context: Context
+    ) -> dict[str, Answer]:
         answers = await asyncio.to_thread(self._read, questions, context.attempt.ref)
         missing = [q.id for q in questions if q.id not in answers]
         if missing:
@@ -294,4 +311,3 @@ def diff_source(github: GitHub, base: str) -> Callable[[Attempt], str]:
         return compare_diff(github, attempt.base or base, attempt.ref)
 
     return source
-

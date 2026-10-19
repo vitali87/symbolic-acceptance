@@ -24,7 +24,14 @@ class LoadTests(unittest.TestCase):
         self.assertEqual(len(checklist.questions), 9)
         self.assertEqual(
             [r.id for r in checklist.requirements],
-            ["repro_fixed", "new_test", "suite_green", "frozen_untouched", "protected", "sso"],
+            [
+                "repro_fixed",
+                "new_test",
+                "suite_green",
+                "frozen_untouched",
+                "protected",
+                "sso",
+            ],
         )
         protected = checklist.requirement("protected")
         self.assertEqual(
@@ -79,7 +86,9 @@ class RejectTests(unittest.TestCase):
         )
 
     def test_unknown_question_reference(self):
-        self.assertRejected(MINIMAL.replace('that = "a"', 'that = "b"'), "'b' is not a question")
+        self.assertRejected(
+            MINIMAL.replace('that = "a"', 'that = "b"'), "'b' is not a question"
+        )
 
     def test_requirement_needs_fail(self):
         self.assertRejected(MINIMAL.replace('fail = "A is not done"', ""), "fail")
@@ -92,12 +101,14 @@ class RejectTests(unittest.TestCase):
         self.assertRejected(text, "needs an id")
 
     def test_duplicate_requirement(self):
-        self.assertRejected(MINIMAL + '\n[[require]]\nthat = "a"\nfail = "again"\n', "twice")
+        self.assertRejected(
+            MINIMAL + '\n[[require]]\nthat = "a"\nfail = "again"\n', "twice"
+        )
 
     def test_bad_expressions(self):
         for that, pattern in [
             ('{ some = ["a"] }', "unknown operator"),
-            ('{ all = [] }', "non-empty list"),
+            ("{ all = [] }", "non-empty list"),
             ('{ all = ["a"], any = ["a"] }', "one of"),
             ("3", "question id or a table"),
         ]:
@@ -106,21 +117,32 @@ class RejectTests(unittest.TestCase):
                 self.assertRejected(text, pattern)
 
     def test_identifiers(self):
-        self.assertRejected(MINIMAL.replace("[q.a]", '[q."a-b"]').replace('"a"', '"a-b"'), "identifier")
+        self.assertRejected(
+            MINIMAL.replace("[q.a]", '[q."a-b"]').replace('"a"', '"a-b"'), "identifier"
+        )
 
 
 class DigestTests(unittest.TestCase):
     def test_comments_and_layout_do_not_change_the_digest(self):
-        reformatted = "# a comment\n" + MINIMAL.replace('ask = "Is A done?"', 'ask   =   "Is A done?"   # same')
+        reformatted = "# a comment\n" + MINIMAL.replace(
+            'ask = "Is A done?"', 'ask   =   "Is A done?"   # same'
+        )
         self.assertEqual(sa.loads(MINIMAL).digest, sa.loads(reformatted).digest)
 
     def test_meaning_changes_the_digest(self):
         changed = MINIMAL.replace('by = "ci"', 'by = "llm"')
         self.assertNotEqual(sa.loads(MINIMAL).digest, sa.loads(changed).digest)
 
+    def test_dates_in_options_have_a_digest(self):
+        dated = MINIMAL.replace('by = "ci"', 'by = "ci"\nsince = 2026-10-01')
+        self.assertNotEqual(sa.loads(dated).digest, sa.loads(MINIMAL).digest)
+
     def test_to_dict_matches_the_source_shape(self):
         data = example().to_dict()
-        self.assertEqual(data["q"]["suite_green"], {"ask": "Does the existing test suite pass?", "by": "ci", "check": "tests"})
+        self.assertEqual(
+            data["q"]["suite_green"],
+            {"ask": "Does the existing test suite pass?", "by": "ci", "check": "tests"},
+        )
         self.assertEqual(data["require"][-1]["when"], "touches_sso")
 
 

@@ -16,7 +16,9 @@ def _cell(text: str) -> str:
 
 def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
     attempt = evaluation.attempt
-    lines = [f"### Attempt {attempt.number} · `{attempt.ref[:12]}` · {evaluation.status}"]
+    lines = [
+        f"### Attempt {attempt.number} · `{attempt.ref[:12]}` · {evaluation.status}"
+    ]
     if evaluation.reason:
         lines += ["", f"> {_cell(evaluation.reason)}"]
     lines += ["", "| Requirement | Status | If it fails |", "|---|---|---|"]

@@ -4,7 +4,16 @@ from helpers import PASSING, example
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.checklist import AllOf, AnyOf, Not, Ref
-from symbolic_acceptance.logic import FAIL, NA, OPEN, PASS, decided, plan, status, value
+from symbolic_acceptance.logic import (
+    FAIL,
+    NA,
+    OPEN,
+    PASS,
+    plan,
+    status,
+    statuses,
+    value,
+)
 
 T, F, U = True, False, None
 
@@ -64,8 +73,16 @@ class PlanTests(unittest.TestCase):
         asked = self.plan({})
         self.assertEqual(
             asked,
-            ["repro_fixed", "new_test", "suite_green", "frozen_untouched",
-             "locks_account", "can_unlock", "backs_off", "touches_sso"],
+            [
+                "repro_fixed",
+                "new_test",
+                "suite_green",
+                "frozen_untouched",
+                "locks_account",
+                "can_unlock",
+                "backs_off",
+                "touches_sso",
+            ],
         )
 
     def test_gated_question_waits_for_its_condition(self):
@@ -76,7 +93,7 @@ class PlanTests(unittest.TestCase):
     def test_moot_person_is_never_asked(self):
         known = {k: v for k, v in PASSING.items() if k != "sso_exempt"}
         self.assertEqual(self.plan(known), [])
-        self.assertTrue(decided(self.checklist, known))
+        self.assertNotIn(OPEN, statuses(self.checklist, known).values())
 
     def test_failure_is_not_held_up_by_people(self):
         known = {k: v for k, v in PASSING.items() if k != "sso_exempt"}

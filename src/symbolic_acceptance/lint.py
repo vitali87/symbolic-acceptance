@@ -12,9 +12,10 @@ from __future__ import annotations
 import itertools
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
+from typing import Literal
 
 from symbolic_acceptance.checklist import Checklist, Expr, Requirement, refs, render
-from symbolic_acceptance.logic import FAIL, status, value
+from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
 
 __all__ = ["MAX_EXHAUSTIVE", "Issue", "lint"]
 
@@ -25,7 +26,7 @@ MAX_EXHAUSTIVE = 16
 
 @dataclass(frozen=True)
 class Issue:
-    level: str  # "error", "warning" or "info"
+    level: Literal["error", "warning", "info"]
     code: str
     message: str
     where: str | None = None
@@ -83,19 +84,18 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
                     rid,
                 )
             )
-    results = [(facts, status(requirement, facts)) for facts in _assignments(ids)]
-    applicable = [(facts, s) for facts, s in results if s != "n/a"]
-    if applicable and all(s == FAIL for _, s in applicable):
+    results = [status(requirement, facts) for facts in _assignments(ids)]
+    applicable = [result for result in results if result != NA]
+    if applicable and all(result == FAIL for result in applicable):
         issues.append(
             Issue(
                 "error",
                 "never-passes",
-                "fails under every answer set where it applies, so it can never "
-                "be met",
+                "fails under every answer set where it applies, so it can never be met",
                 rid,
             )
         )
-    elif not any(s == FAIL for _, s in results):
+    elif FAIL not in results:
         issues.append(
             Issue(
                 "warning",
@@ -112,7 +112,7 @@ def lint(
     checklist: Checklist,
     *,
     oracles: Collection[str] | None = None,
-    last: Collection[str] = ("human",),
+    last: Collection[str] = DEFAULT_LAST,
 ) -> list[Issue]:
     """Return issues, errors first. ``oracles`` lists the oracle names known."""
     issues: list[Issue] = []
@@ -177,7 +177,7 @@ def lint(
                     )
                 )
 
-    ordered = tuple(qid for qid in checklist.used())
+    ordered = checklist.used()
     if len(ordered) <= MAX_EXHAUSTIVE:
         approvable = any(
             all(status(r, facts) != FAIL for r in checklist.requirements)
@@ -201,4 +201,3 @@ def lint(
         )
     rank = {"error": 0, "warning": 1, "info": 2}
     return sorted(issues, key=lambda issue: rank[issue.level])
-

@@ -46,7 +46,9 @@ def local_diff(cwd: str | Path) -> Callable[[Attempt], str]:
     def source(attempt: Attempt) -> str:
         if not attempt.base:
             raise AgentError("the attempt has no base commit to diff against")
-        return git(cwd, "diff", "--no-color", "--no-ext-diff", attempt.base, attempt.ref)
+        return git(
+            cwd, "diff", "--no-color", "--no-ext-diff", attempt.base, attempt.ref
+        )
 
     return source
 
