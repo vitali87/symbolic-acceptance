@@ -1,4 +1,4 @@
-"""GitHub over its REST API: CI results, reviewers' answers, diffs, reports.
+"""GitHub over its REST API: CI results, reviewers' answers, reports.
 
 * :class:`GitHubChecks` answers ``ci`` questions from the check runs of the
   attempt's commit; a question names its run with ``check = "<name>"``.
@@ -23,7 +23,7 @@ from typing import TypedDict
 from symbolic_acceptance import http
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
-from symbolic_acceptance.loop import Context, OracleError, Pending
+from symbolic_acceptance.loop import Context, Pending
 
 __all__ = [
     "API_VERSION",
@@ -256,8 +256,8 @@ class GitHubChecks:
         waiting: list[str] = []
         for question in questions:
             name = question.options.get("check")
-            if not isinstance(name, str):
-                raise OracleError(f'q.{question.id} needs check = "<check run name>"')
+            if not isinstance(name, str) or not name:
+                raise ValueError(f'q.{question.id} needs check = "<check run name>"')
             matching = [
                 run
                 for run in runs

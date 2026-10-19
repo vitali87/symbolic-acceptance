@@ -86,13 +86,13 @@ class PlanTests(unittest.TestCase):
                 "locks_account",
                 "can_unlock",
                 "backs_off",
-                "touches_sso",
+                "sso_untouched",
             ],
         )
 
     def test_gated_question_waits_for_its_condition(self):
         known = {k: v for k, v in PASSING.items() if k != "sso_exempt"}
-        known["touches_sso"] = True
+        known["sso_untouched"] = False
         self.assertEqual(self.plan(known), ["sso_exempt"])
 
     def test_moot_person_is_never_asked(self):
@@ -102,7 +102,7 @@ class PlanTests(unittest.TestCase):
 
     def test_failure_is_not_held_up_by_people(self):
         known = {k: v for k, v in PASSING.items() if k != "sso_exempt"}
-        known.update(touches_sso=True, new_test=False)
+        known.update(sso_untouched=False, new_test=False)
         self.assertEqual(self.plan(known), [])
 
     def test_satisfied_alternative_skips_the_rest(self):

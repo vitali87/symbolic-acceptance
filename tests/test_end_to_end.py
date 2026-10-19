@@ -42,8 +42,7 @@ run = {json.dumps([python, "-c", check])}
 [q.frozen_untouched]
 ask = "Is the checklist left alone?"
 by = "ci"
-check = "frozen"
-paths = ["acceptance.toml"]
+frozen = ["acceptance.toml"]
 
 [q.small_change]
 ask = "Does the change only touch app.py?"

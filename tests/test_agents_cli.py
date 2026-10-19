@@ -212,7 +212,7 @@ class CLITests(unittest.TestCase):
                 "locks_account": False,
                 "can_unlock": False,
                 "backs_off": True,
-                "touches_sso": False,
+                "sso_untouched": True,
             }
             answers.write_text(json.dumps(truth))
             self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 0)

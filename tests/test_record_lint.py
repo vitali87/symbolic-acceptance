@@ -89,6 +89,8 @@ class RecordTests(unittest.TestCase):
         # Only the newest attempt shows its answers; the record has the rest.
         self.assertEqual(text.count("<summary>Answers</summary>"), 1)
         self.assertNotIn("Feedback sent to the agent", text)
+        self.assertIn("What the agent says it did", text)
+        self.assertIn("I fixed it", text)
         sent_back = sa.Result(
             sa.ESCALATED, "", self.result.evaluations[:1], self.result.digest
         )
@@ -167,7 +169,7 @@ class LintTests(unittest.TestCase):
 
     def test_bad_options(self):
         c = sa.loads(
-            '[q.a]\nask = "A?"\nby = "ci"\ncheck = "frozen"\n'
+            '[q.a]\nask = "A?"\nby = "ci"\nfrozen = []\n'
             '[q.b]\nask = "B?"\nby = "ci"\nrun = 3\n'
             '[q.c]\nask = "C?"\nby = "llm"\nkind = "maybe"\n'
             '[q.d]\nask = "D?"\nby = "ci"\nrun = "pytest -k \'x"\n'
@@ -180,13 +182,13 @@ class LintTests(unittest.TestCase):
         self.assertEqual(
             [(i.where, i.message) for i in issues],
             [
-                ("a", 'check = "frozen" needs paths = [<frozen globs>]'),
+                ("a", "q.a.frozen lists no paths"),
                 ("b", "q.b.run must be a string or a list of strings"),
-                ("c", 'kind must be "presence" or "absence"'),
+                ("c", 'q.c.kind must be "presence" or "absence"'),
                 ("d", "q.d.run: No closing quotation"),
+                ("e", 'q.e.expect must be "pass" or "fail"'),
                 ("e", "q.e.run is empty"),
-                ("e", 'expect must be "pass" or "fail"'),
-                ("f", "check must be a string"),
+                ("f", "q.f.check must be a string"),
             ],
         )
         self.assertTrue(all(i.level == "error" for i in issues))

@@ -39,7 +39,7 @@ class LoadTests(unittest.TestCase):
             protected.that,
             AnyOf((AllOf((Ref("locks_account"), Ref("can_unlock"))), Ref("backs_off"))),
         )
-        self.assertEqual(checklist.requirement("sso").when, Ref("touches_sso"))
+        self.assertEqual(checklist.requirement("sso").when, Not(Ref("sso_untouched")))
 
     def test_options_are_kept_and_frozen(self):
         question = example().questions["suite_green"]

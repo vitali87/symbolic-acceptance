@@ -27,7 +27,7 @@ PASSING = {
     "locks_account": True,
     "can_unlock": True,
     "backs_off": True,
-    "touches_sso": False,
+    "sso_untouched": True,
     "sso_exempt": True,
 }
 

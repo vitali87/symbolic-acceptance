@@ -169,6 +169,8 @@ class TerminalReviewer:
         answers = {}
         print(f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):")
         for question in questions:
+            if question.context:
+                print(f"  ({' '.join(question.context.split())})")
             while True:
                 reply = input(
                     f"  {question.id}: {question.ask} [y/n, then why] "

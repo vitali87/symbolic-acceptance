@@ -52,8 +52,9 @@ second language to keep in step with symbolic-reasoning's grammar. Rules 1,
 Instead of an authoring rule ("human predicates sit behind the automated
 gate"), the planner (`logic.plan`) decides:
 
-- `ci` and `llm` questions are asked with full coverage, in parallel, so all
-  failures come back at once; parts that already hold are skipped.
+- `ci` and `llm` questions are asked with full coverage, the oracles in
+  parallel, so all failures come back at once; parts that already hold are
+  skipped.
 - A `when` is settled before the `that` it gates.
 - `human` questions come only when nothing automated is left, nothing has
   failed, and the answer can still change a requirement. A failure never
@@ -86,7 +87,7 @@ The judge instead:
   have let a misquoted YES on a `when` gate skip a person's review. A
   question about absence (`kind = "absence"`) has nothing to quote for its
   YES, so its NO quotes what breaks it;
-- with `samples > 1`, needs every sample to say YES;
+- with `samples > 1`, needs every sample to give the answer that helps;
 - escalates on text addressed to the reviewer, on a refusal, and on a diff
   too large to read whole (it never truncates);
 - reads a diff the runner computed, never one the agent supplied, and never
@@ -104,7 +105,8 @@ hours later, or a GitHub Action with a time limit. An oracle raises
 conclusions: statuses are re-derived on load and must match. A resume
 needs the checkout at the last attempt, and one run must not be resumed
 twice at once. Every outcome is saved, including an agent that fails or
-changes nothing, which escalates rather than crashing the run.
+changes nothing, which escalates rather than crashing the run; an error in
+the runner itself stops it, with the record left as it was.
 
 ### 6. Stop conditions on requirements, not raw answers
 
@@ -118,11 +120,13 @@ off (`stop_on_regression=False`).
 
 ### 7. Integrity, made concrete
 
-- `check = "frozen"` fails any change to frozen paths; `allow_new` lets the
-  new regression test in.
-- The bug template's `new_test` says a test failing on the base branch for an
-  unrelated reason (an import error) does not count, and `test_targets_bug`
-  asks the judge whether it exercises the reported behaviour.
+- `frozen = [<globs>]` fails any change to frozen paths; `allow_new` lets
+  the new regression test in.
+- The bug template's `new_test` tells the agent, and whoever writes the CI
+  check behind it, that a test failing on the base branch for an unrelated
+  reason (an import error) does not count; `test_targets_bug` asks the
+  judge whether it exercises the reported behaviour, and `tests_intact`
+  whether tests were skipped, deselected or loosened.
 - On GitHub, only owners, members and collaborators (or an allowlist) answer,
   never bots or the accounts in `exclude`, and only after the question was
   asked about that commit. The runner cannot tell the agent's account from

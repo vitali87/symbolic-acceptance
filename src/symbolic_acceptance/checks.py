@@ -2,10 +2,10 @@
 
 :class:`Checks` answers each question by its options:
 
-* ``check = "frozen"``: the attempt leaves the frozen files alone. ``paths``
-  lists the frozen glob patterns, and ``allow_new`` the patterns a new file
-  may match anyway (the regression test). Patterns use :mod:`fnmatch`, where
-  ``*`` also matches ``/``, and ignore case.
+* ``frozen = [<globs>]``: the attempt leaves the files matching these
+  patterns alone; ``allow_new`` lists the patterns a new file may match
+  anyway (the regression test). Patterns use :mod:`fnmatch`, where ``*``
+  also matches ``/``, and ignore case.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
   attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts it.
   Commands run without a shell.
@@ -31,7 +31,7 @@ from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Context, Oracle, OracleError, Pending, _call
 
-__all__ = ["Checks", "Commands", "command", "frozen_files", "matches"]
+__all__ = ["Checks", "Commands", "command", "frozen_files", "frozen_paths", "matches"]
 
 # Lines of a command's output kept as evidence.
 TAIL = 30
@@ -52,19 +52,25 @@ def command(question: Question) -> list[str]:
         try:
             argv = shlex.split(run)
         except ValueError as error:  # an unclosed quote
-            raise OracleError(f"q.{question.id}.run: {error}") from None
+            raise ValueError(f"q.{question.id}.run: {error}") from None
     else:
         argv = list(question.strings("run"))
     if not argv:
-        raise OracleError(f"q.{question.id}.run is empty")
+        raise ValueError(f"q.{question.id}.run is empty")
     return argv
+
+
+def frozen_paths(question: Question) -> tuple[str, ...]:
+    """The glob patterns of the question's ``frozen`` option."""
+    paths = question.strings("frozen")
+    if not paths:
+        raise ValueError(f"q.{question.id}.frozen lists no paths")
+    return paths
 
 
 def frozen_files(question: Question, context: Context) -> Answer:
     """YES when no frozen path is added, changed, renamed or deleted."""
-    frozen = question.strings("paths")
-    if not frozen:
-        raise OracleError(f"q.{question.id} needs paths = [<frozen globs>]")
+    frozen = frozen_paths(question)
     allow_new = question.strings("allow_new")
     diff = context.attempt.diff
     if diff is None:
@@ -121,9 +127,7 @@ class Commands:
 
     def __call__(self, question: Question, context: Context) -> Answer:
         argv = command(question)
-        expect = question.options.get("expect", "pass")
-        if expect not in ("pass", "fail"):
-            raise OracleError(f'q.{question.id}.expect must be "pass" or "fail"')
+        expect = question.choice("expect", "pass", "fail")
         with tempfile.TemporaryDirectory(prefix="symbolic-acceptance-") as scratch:
             tree = str(Path(scratch, "tree"))
             source = str(self.repo.resolve())
@@ -179,7 +183,7 @@ class Checks:
     def _local(
         self, question: Question
     ) -> Callable[[Question, Context], Answer] | None:
-        if question.options.get("check") == "frozen":
+        if "frozen" in question.options:
             return frozen_files
         return self.commands if "run" in question.options else None
 

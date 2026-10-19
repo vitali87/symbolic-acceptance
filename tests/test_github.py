@@ -171,7 +171,7 @@ class ChecksTests(unittest.TestCase):
 
     def test_question_needs_a_check_name(self):
         github, _ = gh(json_response({"check_runs": []}))
-        with self.assertRaises(sa.OracleError):
+        with self.assertRaisesRegex(ValueError, "needs check"):
             asyncio.run(GitHubChecks(github)([sa.Question("x", "X?", "ci")], context()))
 
 

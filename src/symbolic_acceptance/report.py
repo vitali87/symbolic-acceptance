@@ -21,7 +21,8 @@ def _cut(text: str, limit: int) -> str:
 
 
 def _cell(text: str) -> str:
-    """One table cell: a single line, with nothing that could become markup."""
+    """One table cell: a single line, with no HTML and nothing that ends the
+    cell; long text is cut."""
     return _cut(" ".join(text.split()), CELL).replace("<", "&lt;").replace("|", "\\|")
 
 
@@ -64,6 +65,9 @@ def _evaluation(
                 f"| `{qid}` | {answer.word} | {_cell(answer.by)} | {_cell(why)} |"
             )
         lines += ["", "</details>"]
+    if detailed and attempt.claims:
+        lines += ["", "<details><summary>What the agent says it did</summary>", ""]
+        lines += [*_fenced(_cut(attempt.claims, FEEDBACK)), "", "</details>"]
     if detailed and evaluation.failures:
         lines += ["", "<details><summary>Feedback sent to the agent</summary>", ""]
         feedback = _cut(evaluation.feedback.rstrip(), FEEDBACK)

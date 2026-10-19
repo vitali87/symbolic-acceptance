@@ -57,7 +57,7 @@ whole lines, copied character for character without the leading "+", "-" or \
 space, each item one line or a run of consecutive lines. At least one quoted \
 line must be one the change adds or removes: \
 unchanged lines alone do not show what the change does. Quotes are checked \
-against the change, and a YES without matching quotes counts as NO. Answer NO \
+against the change, and a YES without matching quotes may not count. Answer NO \
 when the change does not show it, and say in "missing" what is missing and \
 where it belongs (file and function), so the author can fix it.
 
@@ -85,10 +85,7 @@ CONCURRENCY = 4
 
 def _about_absence(question: Question) -> bool:
     """Whether YES means the change avoids something (``kind = "absence"``)."""
-    kind = question.options.get("kind", "presence")
-    if kind not in ("presence", "absence"):
-        raise OracleError(f'q.{question.id}.kind must be "presence" or "absence"')
-    return kind == "absence"
+    return question.choice("kind", "presence", "absence") == "absence"
 
 
 class Judge:

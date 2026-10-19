@@ -27,8 +27,7 @@ check = "tests"
 [q.frozen_untouched]
 ask = "Does the commit leave the checklist, CI configuration and existing tests unchanged?"
 by = "ci"
-check = "frozen"
-paths = ["acceptance/*", ".github/*", "tests/*"]
+frozen = ["acceptance/*", ".github/*", "tests/*"]
 allow_new = ["tests/test_*.py"]
 
 [q.locks_account]
@@ -43,9 +42,10 @@ by = "llm"
 ask = "Does the change add an increasing delay between failed login attempts?"
 by = "llm"
 
-[q.touches_sso]
-ask = "Does the diff change single sign-on code?"
-by = "llm"
+[q.sso_untouched]
+ask = "Does the change leave the single sign-on code alone?"
+by = "ci"
+frozen = ["src/auth/sso/*"]
 
 [q.sso_exempt]
 ask = "Is this change to single sign-on acceptable without a security review?"
@@ -74,6 +74,6 @@ fail = "Neither lockout with a way to unlock, nor back-off between attempts"
 
 [[require]]
 id = "sso"
-when = "touches_sso"
+when = { not = "sso_untouched" }
 that = "sso_exempt"
 fail = "Single sign-on changed without approval"

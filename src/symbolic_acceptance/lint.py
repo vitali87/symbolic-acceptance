@@ -3,14 +3,23 @@
 Loading already rejects anything malformed, and the format rules out the
 silent cases (an attempt that is neither approved nor told what failed). Lint
 looks for checklists that load but cannot mean what their author intended:
-requirements that can never fail or never pass, a checklist that can never
-be approved, unknown oracles, and checks held up behind a person.
+
+* errors: unknown oracles (``unknown-oracle``), options the built-in oracles
+  cannot read (``bad-option``), requirements that can never pass
+  (``never-passes``), and checklists that can never be approved
+  (``never-approved``);
+* warnings: requirements that can never fail (``never-fails``), ``when``
+  conditions that are always or never YES (``when-always``, ``when-never``),
+  checks held up behind a person (``gated-by-person``), questions nothing
+  reads (``unused-question``) or asked twice (``duplicate-question``), and
+  CI check runs an attempt could fake (``unfrozen-workflows``);
+* info: checklists too large for the exhaustive checks (``not-exhaustive``).
 """
 
 from __future__ import annotations
 
 import itertools
-from collections.abc import Collection, Iterator
+from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from typing import Literal
 
@@ -22,9 +31,8 @@ from symbolic_acceptance.checklist import (
     refs,
     render,
 )
-from symbolic_acceptance.checks import command, matches
+from symbolic_acceptance.checks import command, frozen_paths, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
-from symbolic_acceptance.loop import OracleError
 
 __all__ = ["MAX_EXHAUSTIVE", "Issue", "lint"]
 
@@ -116,31 +124,33 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
 
 def _option_issues(question: Question) -> list[Issue]:
     """Options the built-in oracles read, checked before any run needs them."""
-    problems: list[str] = []
     options = question.options
-    try:
-        if options.get("check") == "frozen" and not question.strings("paths"):
-            problems.append('check = "frozen" needs paths = [<frozen globs>]')
-        question.strings("allow_new")
-        if "run" in options:
-            command(question)
-    except (ValueError, OracleError) as error:
-        problems.append(str(error))
+    reads: list[Callable[[], object]] = [
+        lambda: question.strings("allow_new"),
+        lambda: question.choice("expect", "pass", "fail"),
+        lambda: question.choice("kind", "presence", "absence"),
+    ]
+    if "frozen" in options:
+        reads.append(lambda: frozen_paths(question))
+    if "run" in options:
+        reads.append(lambda: command(question))
+    problems: list[str] = []
+    for read in reads:
+        try:
+            read()
+        except ValueError as error:
+            problems.append(str(error))
     if not isinstance(options.get("check", ""), str):
-        problems.append("check must be a string")
-    if options.get("expect", "pass") not in ("pass", "fail"):
-        problems.append('expect must be "pass" or "fail"')
-    if options.get("kind", "presence") not in ("presence", "absence"):
-        problems.append('kind must be "presence" or "absence"')
+        problems.append(f"q.{question.id}.check must be a string")
     return [Issue("error", "bad-option", problem, question.id) for problem in problems]
 
 
 def _freezes(question: Question, path: str) -> bool:
     """Whether ``question`` is a frozen check that fails a new file at ``path``."""
-    if question.options.get("check") != "frozen":
+    if "frozen" not in question.options:
         return False
     try:
-        frozen, allowed = question.strings("paths"), question.strings("allow_new")
+        frozen, allowed = frozen_paths(question), question.strings("allow_new")
     except ValueError:
         return False  # reported as a bad option
     return matches(path, frozen) and not matches(path, allowed)
@@ -164,8 +174,8 @@ def _check_runs_issues(checklist: Checklist) -> list[Issue]:
         for q in used
         if q.by == "ci"
         and "run" not in q.options
+        and "frozen" not in q.options
         and isinstance(q.options.get("check"), str)
-        and q.options["check"] != "frozen"
     ]
 
 

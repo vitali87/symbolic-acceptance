@@ -38,14 +38,14 @@ class EvaluateTests(unittest.TestCase):
         self.assertIn("fix any one of", result.feedback)
 
     def test_asks_people_last(self):
-        script = Scripted(dict(PASSING, touches_sso=True))
+        script = Scripted(dict(PASSING, sso_untouched=False))
         result = evaluate(self.checklist, script.oracles())
         self.assertEqual(result.status, sa.APPROVED)
         self.assertEqual(script.asked[-1], ("human", ("sso_exempt",)))
         self.assertEqual(result.answers["sso_exempt"].by, "human")
 
     def test_waits_for_people_and_resumes(self):
-        script = Scripted(dict(PASSING, touches_sso=True), silent={"human"})
+        script = Scripted(dict(PASSING, sso_untouched=False), silent={"human"})
         waiting = evaluate(self.checklist, script.oracles())
         self.assertEqual(waiting.status, sa.WAITING)
         self.assertEqual(waiting.waiting_on, ("sso_exempt",))
@@ -75,7 +75,7 @@ class EvaluateTests(unittest.TestCase):
 
     def test_failure_does_not_wait_for_people(self):
         script = Scripted(
-            dict(PASSING, touches_sso=True, new_test=False), silent={"human"}
+            dict(PASSING, sso_untouched=False, new_test=False), silent={"human"}
         )
         result = evaluate(self.checklist, script.oracles())
         self.assertEqual(result.status, sa.CHANGES)
@@ -205,6 +205,7 @@ class RunTests(unittest.TestCase):
         )
         prompt = agent.tasks[1].prompt()
         self.assertIn("Brute force logins", prompt)
+        self.assertIn("  A test that fails on the base branch for an unrelated", prompt)
         self.assertIn("Attempt 1 (commit1) was not accepted", prompt)
         self.assertIn("new_test: needs YES, got NO", prompt)
 
@@ -215,9 +216,8 @@ class RunTests(unittest.TestCase):
             "(new files matching `tests/test_*.py` are allowed).",
             prompt,
         )
-        # Only a frozen check's paths are files not to change.
         bare = sa.loads(
-            '[q.a]\nask = "A?"\nby = "llm"\npaths = { include = "docs" }\n'
+            '[q.a]\nask = "A?"\nby = "ci"\ncheck = "tests"\n'
             '[[require]]\nthat = "a"\nfail = "x"\n'
         )
         self.assertNotIn(
@@ -244,7 +244,7 @@ class RunTests(unittest.TestCase):
             self.checklist,
             [
                 dict(PASSING, new_test=False),
-                dict(PASSING, touches_sso=True, sso_exempt=False),
+                dict(PASSING, sso_untouched=False, sso_exempt=False),
                 PASSING,
             ],
         )
@@ -271,7 +271,7 @@ class RunTests(unittest.TestCase):
         self.assertIn("attempt cap", result.reason)
 
     def test_waiting_run_resumes(self):
-        truth = dict(PASSING, touches_sso=True)
+        truth = dict(PASSING, sso_untouched=False)
         script = Scripted(truth, silent={"human"})
         agent = Agent(script, [truth])
         first = asyncio.run(
@@ -286,7 +286,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(len(agent.tasks), 1)
 
     def test_resume_keeps_the_issue(self):
-        truth = dict(PASSING, touches_sso=True)
+        truth = dict(PASSING, sso_untouched=False)
         script = Scripted(truth, silent={"human"})
         agent = Agent(script, [truth])
         first = asyncio.run(

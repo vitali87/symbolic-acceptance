@@ -199,7 +199,7 @@ class VerdictTests(unittest.TestCase):
     def test_unknown_kind(self):
         j, _ = judge()
         odd = sa.Question("x", "X?", "llm", options={"kind": "maybe"})
-        with self.assertRaisesRegex(sa.OracleError, "kind must be"):
+        with self.assertRaisesRegex(ValueError, "kind must be"):
             ask(j, question=odd)
 
     def test_an_unbacked_yes_to_a_gate_stands(self):

@@ -120,14 +120,16 @@ class AssessTests(unittest.TestCase):
 
     def test_render_mentions_the_gate(self):
         checklist = example()
-        truth = dict(PASSING, touches_sso=True, sso_exempt=False)
+        truth = dict(PASSING, sso_untouched=False, sso_exempt=False)
         text = sa.render_failures(
             sa.assess(
                 checklist, answers(truth, sso_exempt="needs security review")
             ).failures
         )
         self.assertIn("1. sso: Single sign-on changed without approval", text)
-        self.assertIn("Applies because touches_sso is YES.", text)
+        self.assertIn(
+            "Applies because not(sso_untouched) is YES (sso_untouched is NO).", text
+        )
         self.assertIn("Why: needs security review", text)
 
     def test_render_names_each_part_of_a_compound_gate(self):

@@ -22,8 +22,8 @@ An acceptance checklist is TOML with two parts.
   any other key is an option for that oracle: for "ci", check = "<name>"
   names the CI check that answers it, run = "<command>" runs a command
   whose success is YES (with expect = "fail", whose failure is), and
-  check = "frozen" with paths = [<globs>] and allow_new = [<globs>] checks
-  that frozen files are left alone. For "llm", kind = "absence" marks a
+  frozen = [<globs>] is YES when no file matching them changes, except new
+  files matching allow_new = [<globs>]. For "llm", kind = "absence" marks a
   question whose YES means the change avoids something ("Does it leave the
   public API unchanged?"): there is nothing to quote for that YES, so the
   judge quotes what breaks it for a NO instead.
@@ -49,8 +49,8 @@ Rules:
 - One fact per question. Split "fixed and tested" into two questions.
 - Put conditions in `when`, not in the question: "does it touch SSO" is a
   question of its own that gates the SSO requirement. When the condition is
-  about files, decide it with check = "frozen" over their paths, under
-  `not`, rather than asking the judge.
+  about files, decide it with frozen = [<their paths>], under `not`, rather
+  than asking the judge.
 - Ids are letters, digits and underscores.
 """
 
@@ -90,8 +90,7 @@ kind = "absence"
 [q.frozen_untouched]
 ask = "Does the commit leave the checklist, CI configuration and existing tests unchanged?"
 by = "ci"
-check = "frozen"
-paths = ["acceptance/*", ".github/*", "tests/*"]
+frozen = ["acceptance/*", ".github/*", "tests/*"]
 allow_new = ["tests/test_*.py"]
 
 [[require]]
@@ -155,8 +154,7 @@ kind = "absence"
 [q.frozen_untouched]
 ask = "Does the commit leave the checklist, CI configuration and existing tests unchanged?"
 by = "ci"
-check = "frozen"
-paths = ["acceptance/*", ".github/*", "tests/*"]
+frozen = ["acceptance/*", ".github/*", "tests/*"]
 allow_new = ["tests/test_*.py"]
 
 [[require]]

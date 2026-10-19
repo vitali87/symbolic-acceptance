@@ -35,9 +35,10 @@ by = "llm"
 ask = "Does the change add an increasing delay between failed login attempts?"
 by = "llm"
 
-[q.touches_sso]
-ask = "Does the diff change single sign-on code?"
-by = "llm"
+[q.sso_untouched]
+ask = "Does the change leave the single sign-on code alone?"
+by = "ci"
+frozen = ["src/auth/sso/*"]
 
 [q.sso_exempt]
 ask = "Is this change to single sign-on acceptable without a security review?"
@@ -54,7 +55,7 @@ fail = "Neither lockout with a way to unlock, nor back-off between attempts"
 
 [[require]]
 id = "sso"
-when = "touches_sso"
+when = { not = "sso_untouched" }
 that = "sso_exempt"
 fail = "Single sign-on changed without approval"
 ```
@@ -73,8 +74,8 @@ template bug` and `template feature` print starting points.
 ## How an attempt is checked
 
 1. **Automated questions first, all of them.** Every `ci` and `llm` question
-   that could show a requirement unmet is asked, in parallel, so the agent
-   hears about every failure at once, not just the first. A `when` condition
+   that could show a requirement unmet is asked, the oracles in parallel, so
+   the agent hears about every failure at once, not just the first. A `when` condition
    is settled before the checks it gates.
 2. **People last, and only when it matters.** `human` questions are asked
    only once nothing automated is left, no requirement has failed, and their
@@ -105,7 +106,7 @@ for example from the next GitHub event, rather than holding a process open.
 
 | `by` | Built in | Answers from |
 |---|---|---|
-| `ci` | `Checks`, `GitHubChecks` | `run = "<command>"` in a checkout, `check = "frozen"`, or the GitHub check run named by `check` |
+| `ci` | `Checks`, `GitHubChecks` | `run = "<command>"` in a checkout, `frozen = [<globs>]`, or the GitHub check run named by `check` |
 | `llm` | `Judge` | Claude, reading the diff |
 | `human` | `Reviews`, terminal | `/yes <id> <why>` replies on the pull request |
 
@@ -115,7 +116,7 @@ hand the attempt to a person.
 
 **The agent is treated as adversarial.** It writes what the oracles read, so:
 
-- The judge gets the diff, computed by the runner from git or GitHub, inside
+- The judge gets the diff, computed by the runner with git, inside
   a block with a boundary the agent cannot predict. The agent's own account
   of its change is never shown to it. The runner's git overrides whatever the
   checkout's configuration could change (hooks, replace refs, textconv and
@@ -134,8 +135,8 @@ hand the attempt to a person.
   in the checkout outside the commit can change their result.
 - Text in the change addressed to a reviewer escalates instead of being
   answered, and so does a diff too large to judge whole.
-- `check = "frozen"` fails any change to the checklist, CI configuration or
-  existing tests; a new regression test can be allowed with `allow_new`.
+- `frozen = [<globs>]` fails any change to the checklist, CI configuration
+  or existing tests; a new regression test can be allowed with `allow_new`.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
   answer, never bots or the accounts in `exclude` (put the agent's there if
   it has one), only after the question was asked about that commit, and
@@ -219,7 +220,9 @@ symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 A resumed run needs the agent's checkout at its last attempt, and one run
 must not be resumed twice at once: the resumes would share the checkout
 and the record. An agent that fails, times out or changes nothing
-escalates the run, which is saved like any other outcome.
+escalates the run, which is saved like any other outcome. An error in the
+runner itself (git, the network, a misconfigured oracle) stops it instead,
+and the record keeps the run as it was, ready to resume.
 
 `explain acceptance.toml answers.json` decides a checklist from answers you
 supply, which is handy for checking a checklist by hand.

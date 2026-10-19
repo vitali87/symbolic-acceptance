@@ -79,7 +79,7 @@ class ParseTests(unittest.TestCase):
             [(f.path, f.status) for f in files],
             [("app.py", "modified"), ("docs/naïve café.md", "added")],
         )
-        q = sa.Question("frozen", "Frozen?", "ci", options={"paths": ["docs/*"]})
+        q = sa.Question("frozen", "Frozen?", "ci", options={"frozen": ["docs/*"]})
         self.assertFalse(frozen_files(q, context(diff)).is_met)
 
     def test_header_only_changes_from_real_git(self):
@@ -96,7 +96,7 @@ class ParseTests(unittest.TestCase):
             git("rm", "-q", "tests/empty one.py")
             git("commit", "-qam", "change")
             changed = diff(tmp, "HEAD~1", "HEAD")
-        q = sa.Question("frozen", "Frozen?", "ci", options={"paths": ["tests/*"]})
+        q = sa.Question("frozen", "Frozen?", "ci", options={"frozen": ["tests/*"]})
         self.assertEqual(
             frozen_files(q, context(changed)).evidence,
             ("tests/empty one.py (deleted)", "tests/my test.py (modified)"),
@@ -129,15 +129,13 @@ class FrozenTests(unittest.TestCase):
         return sa.Question("frozen_untouched", "Untouched?", "ci", options=options)
 
     def test_new_regression_test_is_allowed(self):
-        q = self.question(
-            check="frozen", paths=["tests/*.py"], allow_new=["tests/test_*.py"]
-        )
+        q = self.question(frozen=["tests/*.py"], allow_new=["tests/test_*.py"])
         diff = DIFF.split("diff --git a/old.py")[0]
         self.assertTrue(frozen_files(q, context(diff)).is_met)
 
     def test_frozen_paths_ignore_case(self):
         # On a case-insensitive file system TESTS/ is tests/.
-        q = self.question(paths=["tests/*"], allow_new=["tests/test_*.py"])
+        q = self.question(frozen=["tests/*"], allow_new=["tests/test_*.py"])
         diff = (
             "diff --git a/TESTS/conftest.py b/TESTS/conftest.py\nnew file mode 100644\n"
         )
@@ -146,7 +144,7 @@ class FrozenTests(unittest.TestCase):
         )
 
     def test_deleting_or_renaming_frozen_files_fails(self):
-        q = self.question(paths=["tests/*", "old.py"], allow_new=["tests/test_*.py"])
+        q = self.question(frozen=["tests/*", "old.py"], allow_new=["tests/test_*.py"])
         answer = frozen_files(q, context(DIFF))
         self.assertFalse(answer.is_met)
         self.assertEqual(
@@ -156,13 +154,13 @@ class FrozenTests(unittest.TestCase):
 
     def test_an_attempt_without_a_diff_is_an_error(self):
         with self.assertRaisesRegex(sa.OracleError, "has none"):
-            frozen_files(self.question(paths=["tests/*"]), context(diff=None))
+            frozen_files(self.question(frozen=["tests/*"]), context(diff=None))
 
     def test_needs_paths(self):
-        with self.assertRaises(sa.OracleError):
-            frozen_files(self.question(), context(DIFF))
+        with self.assertRaisesRegex(ValueError, "frozen lists no paths"):
+            frozen_files(self.question(frozen=[]), context(DIFF))
         with self.assertRaisesRegex(ValueError, "a string or a list of strings"):
-            frozen_files(self.question(paths=3), context(DIFF))
+            frozen_files(self.question(frozen=3), context(DIFF))
 
 
 def run_question(name, code, **options):

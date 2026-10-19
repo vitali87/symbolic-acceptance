@@ -106,7 +106,8 @@ class Escalate(Exception):
 
 
 class OracleError(RuntimeError):
-    """An oracle broke its contract: no answers, or answers it was not asked."""
+    """An oracle cannot answer: it broke its contract (no answers, or answers
+    it was not asked), or the attempt lacks what it needs."""
 
 
 Answers = Mapping[str, Answer]
@@ -197,12 +198,12 @@ class Task:
             "",
         ]
         for question in checklist.questions.values():
-            if question.options.get("check") != "frozen":
+            if "frozen" not in question.options:
                 continue
             allowed = _globs(question, "allow_new")
             note = f" (new files matching {allowed} are allowed)" if allowed else ""
             lines += [
-                f"Do not change files matching {_globs(question, 'paths')}{note}.",
+                f"Do not change files matching {_globs(question, 'frozen')}{note}.",
                 "",
             ]
         for requirement in checklist.requirements:
@@ -217,6 +218,8 @@ class Task:
         for qid in checklist.used():
             question = checklist.questions[qid]
             lines.append(f"- {qid} [{question.by}]: {question.ask}")
+            if question.context:
+                lines.append(f"  {' '.join(question.context.split())}")
         if self.feedback:
             ref = self.previous.ref if self.previous else ""
             lines += [

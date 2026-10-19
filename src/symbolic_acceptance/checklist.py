@@ -125,6 +125,14 @@ class Question:
         frozen = MappingProxyType({k: _freeze(v) for k, v in self.options.items()})
         object.__setattr__(self, "options", frozen)
 
+    def choice(self, key: str, *allowed: str) -> str:
+        """An option that must be one of ``allowed``; the first when absent."""
+        value = self.options.get(key, allowed[0])
+        if not isinstance(value, str) or value not in allowed:
+            listed = " or ".join(f'"{option}"' for option in allowed)
+            raise ValueError(f"q.{self.id}.{key} must be {listed}")
+        return value
+
     def strings(self, key: str) -> tuple[str, ...]:
         """An option given as a string or a list of strings; empty if absent."""
         value = self.options.get(key, ())
