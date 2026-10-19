@@ -198,15 +198,6 @@ class Task:
             "not evidence.",
             "",
         ]
-        for question in checklist.questions.values():
-            if "frozen" not in question.options:
-                continue
-            allowed = _globs(question, "allow_new")
-            note = f" (new files matching {allowed} are allowed)" if allowed else ""
-            lines += [
-                f"Do not change files matching {_globs(question, 'frozen')}{note}.",
-                "",
-            ]
         for requirement in checklist.requirements:
             gate = ""
             if requirement.when is not None:
@@ -219,6 +210,11 @@ class Task:
         for qid in checklist.used():
             question = checklist.questions[qid]
             lines.append(f"- {qid} [{question.by}]: {question.ask}")
+            if "frozen" in question.options:
+                allowed = _globs(question, "allow_new")
+                but = f" (new files matching {allowed} excepted)" if allowed else ""
+                frozen = _globs(question, "frozen")
+                lines.append(f"  YES only when no file matching {frozen} changes{but}.")
             if question.context:
                 lines.append(f"  {' '.join(question.context.split())}")
         if self.feedback:

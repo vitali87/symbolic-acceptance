@@ -295,20 +295,21 @@ class RunTests(unittest.TestCase):
         self.assertIn("Attempt 1 (commit1) was not accepted", prompt)
         self.assertIn("new_test: needs YES, got NO", prompt)
 
-    def test_prompt_names_the_frozen_files(self):
+    def test_prompt_says_which_files_each_frozen_check_watches(self):
         prompt = sa.Task(issue="", checklist=self.checklist, number=1).prompt()
         self.assertIn(
-            "Do not change files matching `acceptance/*`, `.github/*`, `tests/*` "
-            "(new files matching `tests/test_*.py` are allowed).",
+            "\n  YES only when no file matching `acceptance/*`, `.github/*`, "
+            "`tests/*` changes (new files matching `tests/test_*.py` excepted).\n",
             prompt,
         )
-        bare = sa.loads(
-            '[q.a]\nask = "A?"\nby = "ci"\ncheck = "tests"\n'
-            '[[require]]\nthat = "a"\nfail = "x"\n'
+        # The SSO check decides whether a person must approve; it forbids
+        # nothing, and the prompt does not say it does.
+        self.assertIn(
+            "- sso_untouched [ci]: Does the change leave the single sign-on code "
+            "alone?\n  YES only when no file matching `src/auth/sso/*` changes.\n",
+            prompt,
         )
-        self.assertNotIn(
-            "Do not change", sa.Task(issue="", checklist=bare, number=1).prompt()
-        )
+        self.assertNotIn("Do not change", prompt)
 
     def test_no_progress_escalates(self):
         failing = dict(PASSING, new_test=False)
