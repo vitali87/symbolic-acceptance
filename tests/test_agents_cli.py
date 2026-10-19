@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import http.server
 import io
 import json
 import os
@@ -7,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -857,6 +859,57 @@ class CLITests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "exists; pass --force"):
                 cli("draft", str(issue), "--out", str(out))
             self.assertEqual(out.read_text(), "approved already")
+
+    def test_draft_asks_claude_over_http_and_writes_the_checklist(self):
+        checklist = '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n[[require]]\nthat = "a"\nfail = "x"\n'
+        reply = message({"checklist": checklist, "questions_for_reporter": ["Why?"]})
+        asked = []
+
+        class MessagesAPI(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers["content-length"])
+                asked.append(
+                    (self.path, self.headers["x-api-key"], self.rfile.read(length))
+                )
+                self.send_response(200)
+                self.send_header("content-length", str(len(reply.body)))
+                self.end_headers()
+                self.wfile.write(reply.body)
+
+            def log_message(self, *args):
+                pass
+
+        # A server on this machine stands in for the Messages API.
+        with (
+            http.server.ThreadingHTTPServer(("127.0.0.1", 0), MessagesAPI) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            issue, out = Path(tmp, "issue.md"), Path(tmp, "acceptance.toml")
+            issue.write_text("Logins are not throttled\n")
+            done = subprocess.run(
+                [sys.executable, "-m", "symbolic_acceptance", "draft", str(issue)]
+                + ["--out", str(out)],
+                env=dict(
+                    os.environ,
+                    ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+                    ANTHROPIC_API_KEY="key",
+                    NO_PROXY="127.0.0.1",
+                    no_proxy="127.0.0.1",
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            server.shutdown()
+            written = out.read_text()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(written, checklist)
+        self.assertIn("Questions for the reporter:\n  - Why?", done.stdout)
+        ((path, key, body),) = asked
+        self.assertEqual((path, key), ("/v1/messages", "key"))
+        self.assertIn("Logins are not throttled", body.decode())
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):
