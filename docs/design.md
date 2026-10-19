@@ -158,7 +158,9 @@ off (`stop_on_regression=False`).
 - The diff ignores what the checkout's or the user's git configuration says
   about submodules, renames and context, so a gitlink cannot drop out of it
   nor a new file pass for a changed one, and frozen paths match whatever
-  their case.
+  their case. A new file whose name differs from a frozen one only in case
+  still replaces it when checked out on a case-insensitive file system, so
+  local `run` checks and CI belong on case-sensitive ones.
 - The agent, and the `run` commands that execute its code, run without the
   runner's GitHub token, so they cannot report a check run or comment as
   the runner. Runner and agent still share a user and a machine, so what
