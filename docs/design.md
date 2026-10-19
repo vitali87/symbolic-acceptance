@@ -131,9 +131,18 @@ off (`stop_on_regression=False`).
   never bots or the accounts in `exclude`, and only after the question was
   asked about that commit. The runner cannot tell the agent's account from
   a person's, so an agent with a GitHub account of its own needs it in
-  `exclude` (or answers limited to `reviewers`). The runner's markers count
+  `exclude` (or answers limited to `reviewers`), and that account must not
+  have write access, with which it could delete a reviewer's NO. A reply
+  answers the latest question with its id posted before it, so a reply
+  given for one commit never counts for another. The runner's markers count
   only at the start of a comment it could have written, and its own
   comments, which quote the agent, are never answers.
+- A paused oracle's answers decide the attempt only if they can; otherwise
+  it is asked again on resume, so a person's correction made meanwhile
+  counts.
+- The runner never pushes an attempt that changes `.github/`, since pushing
+  runs its workflows at once; workflows that run the attempt's code get a
+  read-only token, so that code cannot report checks or comment.
 - The runner's git overrides what the agent's checkout configuration and
   attributes could change (hooks, replace refs, textconv, binary files,
   diff format); `run` commands execute in a fresh clone of the commit that

@@ -139,15 +139,24 @@ hand the attempt to a person.
   or existing tests; a new regression test can be allowed with `allow_new`.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
   answer, never bots or the accounts in `exclude` (put the agent's there if
-  it has one), only after the question was asked about that commit, and
-  never in an edited comment (anyone with write access can edit someone
-  else's). The runner's own markers count only at the start of a comment
-  it could have written, and its own comments, which quote the agent, are
-  never answers, whoever's token posted them.
+  it has one), and never in an edited comment (anyone with write access can
+  edit someone else's). A reply answers the latest question with its id
+  posted before it, so it counts for that commit alone. The runner's own
+  markers count only at the start of a comment it could have written, and
+  its own comments, which quote the agent, are never answers, whoever's
+  token posted them. An agent account needs no write access, and must not
+  have it: it could delete a reviewer's NO.
 - Freeze `.github/` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.
   Only runs from GitHub Actions count, unless `GitHubChecks(app=...)` names
   another CI app, whose configuration should then be frozen too.
+- `CommandAgent` never pushes an attempt that changes `.github/`: pushing
+  runs the workflows a commit holds, with the token they ask for, before
+  any check could refuse them. It hands such an attempt to a person.
+- The workflows that run on the agent's branch run its code. Give them a
+  read-only token (`permissions: contents: read`); a token that can write
+  checks or comments would let that code report a check run or post a
+  comment as `github-actions[bot]`.
 - Keep the run record outside the agent's checkout; inside it, the record
   would be committed with the attempt. The command line refuses to.
 - The agent, and the `run` commands that execute its code, get no GitHub

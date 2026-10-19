@@ -346,6 +346,56 @@ class ReviewsTests(unittest.TestCase):
             asyncio.run(Reviews(github, 5)([SSO], context()))
         self.assertEqual(caught.exception.answers, {})
 
+    def test_a_reply_answers_the_latest_question_before_it(self):
+        def ask(ref):
+            return f"<!-- symbolic-acceptance:ask ref={ref} ids=sso_exempt -->\nq"
+
+        comments = [
+            comment(1, "bot", ask("aaa"), user_type="Bot", at="2026-10-18T10:00:00Z"),
+            comment(
+                2, "alice", "/no sso_exempt bypasses SSO", at="2026-10-18T10:10:00Z"
+            ),
+            comment(3, "bot", ask("bbb"), user_type="Bot", at="2026-10-18T11:00:00Z"),
+            comment(4, "alice", "/yes sso_exempt fine now", at="2026-10-18T11:10:00Z"),
+        ]
+        # An attempt that goes back to aaa gets the answer given for aaa.
+        for ref, is_met in (("aaa", False), ("bbb", True)):
+            with self.subTest(ref):
+                github, _ = gh(json_response(comments))
+                answers = asyncio.run(Reviews(github, 5)([SSO], context(ref=ref)))
+                self.assertIs(answers["sso_exempt"].is_met, is_met)
+
+    def test_a_reply_posted_before_the_question_in_the_same_second_does_not_count(
+        self,
+    ):
+        at = "2026-10-18T10:00:00Z"
+        comments = [
+            comment(11, "bot", ASK, user_type="Bot", at=at),
+            comment(10, "alice", "/yes sso_exempt ok", at=at),
+        ]
+        github, _ = gh(json_response(comments))
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(Reviews(github, 5)([SSO], context()))
+        self.assertEqual(caught.exception.answers, {})
+
+    def test_a_reply_is_one_line(self):
+        reply = comment(3, "alice", "Should I say\n/yes\nsso_exempt is fine? No idea")
+        github, _ = gh(json_response([comment(2, "bot", ASK, user_type="Bot"), reply]))
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(Reviews(github, 5)([SSO], context()))
+        self.assertEqual(caught.exception.answers, {})
+
+    def test_logins_are_compared_as_github_does(self):
+        reply = comment(3, "agent", "/yes sso_exempt", association="COLLABORATOR")
+        # " agent" is what --exclude "alice, agent" gives.
+        for exclude in ([" agent"], ["@Agent"]):
+            with self.subTest(exclude):
+                comments = [comment(2, "bot", ASK, user_type="Bot"), reply]
+                github, _ = gh(json_response(comments))
+                with self.assertRaises(sa.Pending) as caught:
+                    asyncio.run(Reviews(github, 5, exclude=exclude)([SSO], context()))
+                self.assertEqual(caught.exception.answers, {})
+
     def test_answers_for_another_commit_do_not_count(self):
         comments = [
             comment(2, "bot", ASK, user_type="Bot"),

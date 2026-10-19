@@ -182,6 +182,24 @@ class CommandAgentTests(unittest.TestCase):
             pushed = git(remote, "rev-parse", "refs/heads/agent").strip()
         self.assertEqual(pushed, second.ref)
 
+    def test_an_attempt_that_changes_workflows_is_not_pushed(self):
+        with (
+            tempfile.TemporaryDirectory() as remote,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            git(remote, "init", "-q", "--bare")
+            repo(tmp)("remote", "add", "origin", remote)
+            script = (
+                "import os; os.makedirs('.github/workflows');"
+                "open('.github/workflows/ci.yml', 'w').write('on: push\\n')"
+            )
+            agent = CommandAgent([sys.executable, "-c", script], cwd=tmp, push="agent")
+            with self.assertRaisesRegex(
+                sa.Escalate, r"changes \.github/workflows/ci\.yml"
+            ):
+                asyncio.run(agent(self.task()))
+            self.assertEqual(git(remote, "branch", "--list").strip(), "")
+
     def test_a_push_never_overwrites_someone_elses_commit(self):
         with (
             tempfile.TemporaryDirectory() as remote,

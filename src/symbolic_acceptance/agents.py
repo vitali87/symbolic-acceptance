@@ -27,6 +27,7 @@ import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Attempt, Escalate, Task
 
 __all__ = [
@@ -138,8 +139,11 @@ class CommandAgent:
     which the checkout must have checked out. With ``push``, each attempt is
     pushed to that branch of ``origin``, so CI runs on it; the agent may
     rewrite its earlier attempts, and the branch follows as long as nobody
-    else has pushed to it. The agent gets ``env`` (by default this process's
-    environment) without :data:`RUNNER_SECRETS`.
+    else has pushed to it. An attempt that changes ``.github/`` is not
+    pushed but handed to a person: pushing would run the workflows it holds,
+    with whatever token they ask for, before any check could refuse them.
+    The agent gets ``env`` (by default this process's environment) without
+    :data:`RUNNER_SECRETS`.
 
     An agent that fails, runs past ``timeout`` or changes nothing hands the
     run to a person (:class:`Escalate`).
@@ -202,7 +206,21 @@ class CommandAgent:
         after = self._head()
         if after == before:
             raise Escalate(f"attempt {task.number} changed nothing")
+        changed = diff(self.cwd, self.base, after)
         if self.push is not None:
+            workflows = sorted(
+                {
+                    path
+                    for change in parse(changed)[0]
+                    for path in (change.path, change.old_path)
+                    if path and path.casefold().split("/")[0] == ".github"
+                }
+            )
+            if workflows:
+                raise Escalate(
+                    f"attempt {task.number} changes {', '.join(workflows)}, which "
+                    "pushing would run; a person must review it first"
+                )
             branch = f"refs/heads/{self.push}"
             # The branch holds the previous attempt, which the agent may have
             # rewritten; anything else on it is someone else's and stays.
@@ -214,7 +232,7 @@ class CommandAgent:
             git(self.cwd, "push", "--quiet", *lease, "origin", f"{after}:{branch}")
         return Attempt(
             ref=after,
-            diff=diff(self.cwd, self.base, after),
+            diff=changed,
             claims=done.stdout.strip()[-4000:],
             base=self.base,
         )

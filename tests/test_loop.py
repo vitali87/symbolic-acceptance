@@ -81,16 +81,33 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result.status, sa.CHANGES)
         self.assertNotIn("human", [who for who, _ in script.asked])
 
-    def test_pending_keeps_partial_answers(self):
-        async def ci(questions, context):
-            raise sa.Pending("still running", answers={"repro_fixed": sa.Answer(True)})
+    def test_a_paused_oracle_is_asked_again_so_corrections_count(self):
+        checklist = sa.loads(
+            '[q.ux]\nask = "UX ok?"\nby = "human"\n'
+            '[q.docs]\nask = "Docs ok?"\nby = "human"\n'
+            '[[require]]\nid = "r"\nthat = { all = ["ux", "docs"] }\nfail = "x"\n'
+        )
+        # A person says YES to ux while docs waits, then takes it back.
+        replies = [
+            {"ux": sa.Answer(True, "fine")},
+            {"ux": sa.Answer(False, "I misread it"), "docs": sa.Answer(True)},
+        ]
 
-        script = Scripted(PASSING)
-        oracles = dict(script.oracles(), ci=ci)
-        result = evaluate(self.checklist, oracles)
-        self.assertEqual(result.status, sa.WAITING)
-        self.assertIn("repro_fixed", result.answers)
-        self.assertNotIn("repro_fixed", result.waiting_on)
+        async def human(questions, context):
+            reply = replies.pop(0)
+            answers = {q.id: reply[q.id] for q in questions if q.id in reply}
+            if len(answers) < len(questions):
+                raise sa.Pending("asked", answers=answers)
+            return answers
+
+        waiting = evaluate(checklist, {"human": human})
+        self.assertEqual(waiting.status, sa.WAITING)
+        self.assertEqual(waiting.waiting_on, ("docs",))
+        resumed = evaluate(
+            checklist, {"human": human}, answers=waiting.answers, rounds=waiting.rounds
+        )
+        self.assertEqual(resumed.status, sa.CHANGES)
+        self.assertEqual(resumed.answers["ux"].reasoning, "I misread it")
 
     def test_an_escalation_wins_over_a_pause_in_the_same_round(self):
         async def ci(questions, context):

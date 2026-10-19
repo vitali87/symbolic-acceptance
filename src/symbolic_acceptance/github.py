@@ -42,7 +42,7 @@ __all__ = [
 API_VERSION = "2026-03-10"
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 _REPLY = re.compile(
-    r"^/(yes|no)\s+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$",
+    r"^/(yes|no)[ \t]+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$",
     re.IGNORECASE | re.MULTILINE | re.ASCII,
 )
 # The runner's comments start with a marker. Markers count only at the very
@@ -200,6 +200,11 @@ def _edited(comment: Comment) -> bool:
     return comment["updated_at"] != comment["created_at"]
 
 
+def _logins(names: Collection[str]) -> set[str]:
+    """Logins as GitHub compares them: no spaces or "@", any case."""
+    return {name.strip().removeprefix("@").lower() for name in names if name.strip()}
+
+
 def _by_runner(comment: Comment, exclude: Collection[str]) -> bool:
     """Whether the runner could have written it: a bot, or a trusted account."""
     login, bot, association = _author(comment)
@@ -219,7 +224,7 @@ def post_report(
     if len(body) > MAX_COMMENT:
         cut = "\n\n…(cut to fit a comment; the run record has the rest)"
         body = body[: MAX_COMMENT - len(cut)] + cut
-    excluded = {login.lower() for login in exclude}
+    excluded = _logins(exclude)
     for existing in github.comments(number):
         if existing["body"].startswith(REPORT_MARKER) and _by_runner(
             existing, excluded
@@ -303,14 +308,14 @@ class Reviews:
 
     Each question is posted once per commit, in a comment that names the
     commit and the question ids; a later round posts only the new ones. A
-    reply counts only if it comes after the comment that asked it, from
-    ``reviewers`` when given and otherwise from the repository's owners,
-    members and collaborators, never from bots or from ``exclude`` (the
-    agent's own account). Edited comments never count, since anyone with
-    write access can edit another person's comment; correct an answer with
-    a new reply. Nor do the runner's own comments, whoever posts them: a
-    report quotes what the agent printed. The latest reply to a question
-    wins.
+    reply answers the latest question with its id posted before it, so it
+    counts for that question's commit alone. It must come from ``reviewers``
+    when given and otherwise from the repository's owners, members and
+    collaborators, never from bots or from ``exclude`` (the agent's own
+    account). Edited comments never count, since anyone with write access
+    can edit another person's comment; correct an answer with a new reply.
+    Nor do the runner's own comments, whoever posts them: a report quotes
+    what the agent printed. The latest reply to a question wins.
     """
 
     def __init__(
@@ -323,8 +328,8 @@ class Reviews:
     ) -> None:
         self.github = github
         self.number = number
-        self.reviewers = {r.lower() for r in reviewers} if reviewers else None
-        self.exclude = {e.lower() for e in exclude}
+        self.reviewers = _logins(reviewers) if reviewers else None
+        self.exclude = _logins(exclude)
 
     def _allowed(self, comment: Comment) -> bool:
         login, bot, association = _author(comment)
@@ -353,36 +358,28 @@ class Reviews:
         comments = sorted(
             self.github.comments(self.number), key=lambda c: (c["created_at"], c["id"])
         )
-        asked_at: dict[str, str] = {}
-        for comment in comments:
-            match = _ASKED.match(comment["body"])
-            if (
-                match
-                and match["ref"] == ref
-                and _by_runner(comment, self.exclude)
-                and not _edited(comment)
-            ):
-                for qid in match["ids"].split(","):
-                    asked_at.setdefault(qid, comment["created_at"])
-        new = [q for q in questions if q.id not in asked_at]
-        if new:
-            self.github.comment(self.number, self._ask_body(new, ref))
+        # The commit each question was last asked about, comment by comment.
+        latest: dict[str, str] = {}
         answers: dict[str, Answer] = {}
         for comment in comments:
-            if (
-                _edited(comment)
-                or comment["body"].startswith(_MARKER)
-                or not self._allowed(comment)
-            ):
+            if _edited(comment):
                 continue
-            for verdict, qid, why in _REPLY.findall(comment["body"]):
-                if qid in asked_at and comment["created_at"] >= asked_at[qid]:
-                    answers[qid] = Answer(
-                        verdict.lower() == "yes",
-                        why.strip(),
-                        (comment["html_url"],),
-                        by=f"human:@{_author(comment)[0]}",
-                    )
+            if comment["body"].startswith(_MARKER):
+                match = _ASKED.match(comment["body"])
+                if match and _by_runner(comment, self.exclude):
+                    latest.update(dict.fromkeys(match["ids"].split(","), match["ref"]))
+            elif self._allowed(comment):
+                for verdict, qid, why in _REPLY.findall(comment["body"]):
+                    if latest.get(qid) == ref:
+                        answers[qid] = Answer(
+                            verdict.lower() == "yes",
+                            why.strip(),
+                            (comment["html_url"],),
+                            by=f"human:@{_author(comment)[0]}",
+                        )
+        new = [q for q in questions if q.id not in answers and latest.get(q.id) != ref]
+        if new:
+            self.github.comment(self.number, self._ask_body(new, ref))
         return {q.id: answers[q.id] for q in questions if q.id in answers}
 
     async def __call__(

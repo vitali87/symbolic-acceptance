@@ -87,7 +87,10 @@ class Context:
 class Pending(Exception):
     """An oracle has asked (a person, a CI run still going) and must wait.
 
-    Answers it already has can be passed along and are kept.
+    Answers it already has can be passed along. They decide the attempt if
+    they can, as a person's NO may; if not, the oracle is asked all its
+    questions again when the run resumes, so a correction made meanwhile (a
+    person's later reply) counts.
     """
 
     def __init__(
@@ -338,10 +341,12 @@ async def evaluate(
     done = list(rounds)
     waiting: list[str] = []
     notes: list[str] = []
+    # Answers passed with a pause, kept only if they decide the attempt.
+    provisional: dict[str, Answer] = {}
     # plan() stops once a requirement fails or none is left open; answers in
     # hand can decide the attempt (a person's NO), and then nobody is waited
     # for.
-    while ask := plan(checklist, facts(known), last=last):
+    while ask := plan(checklist, facts(known | provisional), last=last):
         if waiting:
             return Evaluation.from_answers(
                 checklist,
@@ -364,7 +369,7 @@ async def evaluate(
             asked = [q.id for q in groups[name]]
             if isinstance(result, Pending):
                 partial = _accepted(name, asked, result.answers)
-                got.update(partial)
+                provisional.update(partial)
                 waiting += [qid for qid in asked if qid not in partial]
                 notes.append(f"{name}: {result}")
             elif isinstance(result, Escalate):
@@ -381,6 +386,9 @@ async def evaluate(
             return Evaluation.from_answers(
                 checklist, attempt, known, done, ESCALATED, "; ".join(escalations)
             )
+    if provisional:
+        known.update(provisional)
+        done.append(tuple(provisional))
     return Evaluation.from_answers(checklist, attempt, known, done)
 
 
