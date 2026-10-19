@@ -209,6 +209,13 @@ class RequestTests(unittest.TestCase):
             "server-side-fallback-2026-07-01,oauth-2025-04-20",
         )
 
+    def test_without_fallbacks_for_an_endpoint_that_has_none(self):
+        fake = FakeHTTP(verdict("NO", missing="x"))
+        claude = Claude(api_key="test-key", fallbacks=False, transport=fake)
+        ask(Judge(claude))
+        self.assertNotIn("fallbacks", fake.body())
+        self.assertIsNone(fake.header("anthropic-beta"))
+
 
 class VerdictTests(unittest.TestCase):
     def test_the_answer_is_read_whatever_its_case(self):
