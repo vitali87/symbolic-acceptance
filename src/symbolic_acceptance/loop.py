@@ -339,15 +339,26 @@ async def evaluate(
     _check_oracles(checklist, oracles)
     known = dict(answers or {})
     done = list(rounds)
+    # Oracles that paused, the questions they owe and why: they are not asked
+    # again until the run resumes.
+    paused: set[str] = set()
     waiting: list[str] = []
     notes: list[str] = []
-    # Answers passed with a pause, kept only if they decide the attempt.
+    # Answers passed with a pause. They count if the attempt is decided now;
+    # if it must wait, they are asked for again on resume, so a correction
+    # made meanwhile (a person's later reply) counts.
     provisional: dict[str, Answer] = {}
+    escalations: list[str] = []
     # plan() stops once a requirement fails or none is left open; answers in
     # hand can decide the attempt (a person's NO), and then nobody is waited
     # for.
     while ask := plan(checklist, facts(known | provisional), last=last):
-        if waiting:
+        groups = {
+            name: questions
+            for name, questions in by_oracle(checklist, ask).items()
+            if name not in paused
+        }
+        if not groups:
             return Evaluation.from_answers(
                 checklist,
                 attempt,
@@ -357,19 +368,20 @@ async def evaluate(
                 "; ".join(notes),
                 tuple(waiting),
             )
-        groups = by_oracle(checklist, ask)
-        context = Context(checklist, attempt, MappingProxyType(dict(known)), issue)
+        context = Context(
+            checklist, attempt, MappingProxyType(known | provisional), issue
+        )
         names = list(groups)
         results = await asyncio.gather(
             *(_put(oracles[name], tuple(groups[name]), context) for name in names)
         )
         got: dict[str, Answer] = {}
-        escalations: list[str] = []
         for name, result in zip(names, results, strict=True):
             asked = [q.id for q in groups[name]]
             if isinstance(result, Pending):
                 partial = _accepted(name, asked, result.answers)
                 provisional.update(partial)
+                paused.add(name)
                 waiting += [qid for qid in asked if qid not in partial]
                 notes.append(f"{name}: {result}")
             elif isinstance(result, Escalate):
@@ -383,12 +395,14 @@ async def evaluate(
             known.update(got)
             done.append(tuple(got))
         if escalations:
-            return Evaluation.from_answers(
-                checklist, attempt, known, done, ESCALATED, "; ".join(escalations)
-            )
+            break
     if provisional:
         known.update(provisional)
         done.append(tuple(provisional))
+    if escalations:
+        return Evaluation.from_answers(
+            checklist, attempt, known, done, ESCALATED, "; ".join(escalations)
+        )
     return Evaluation.from_answers(checklist, attempt, known, done)
 
 

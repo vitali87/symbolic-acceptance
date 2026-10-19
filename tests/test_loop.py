@@ -73,6 +73,46 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result.status, sa.CHANGES)
         self.assertEqual(result.failing, {"r"})
 
+    def test_a_persons_no_decides_once_what_their_answers_unlocked_is_asked(self):
+        checklist = sa.loads(
+            '[q.ok]\nask = "OK?"\nby = "human"\n'
+            '[q.risky]\nask = "Risky?"\nby = "human"\n'
+            '[q.docs]\nask = "Docs ok?"\nby = "human"\n'
+            '[q.load]\nask = "Load test written?"\nby = "llm"\n'
+            '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            '[[require]]\nid = "gated"\nwhen = "risky"\nthat = "load"\nfail = "x"\n'
+            '[[require]]\nthat = "docs"\nfail = "no docs"\n'
+        )
+        answers = {"ok": sa.Answer(False, "no"), "risky": sa.Answer(True)}
+
+        async def human(questions, context):
+            raise sa.Pending("asked", answers=answers)
+
+        script = Scripted({"load": True})
+        result = evaluate(checklist, {"human": human, "llm": script.oracle("llm")})
+        self.assertEqual(result.status, sa.CHANGES)
+        self.assertEqual(result.failing, {"ok"})
+        self.assertEqual(script.asked_ids("llm"), ["load"])
+
+    def test_an_escalation_keeps_the_answers_given_with_a_pause(self):
+        checklist = sa.loads(
+            '[q.ux]\nask = "UX ok?"\nby = "human"\n'
+            '[q.docs]\nask = "Docs ok?"\nby = "human"\n'
+            '[q.api]\nask = "API kept?"\nby = "llm"\n'
+            '[[require]]\nid = "r"\nthat = { all = ["ux", "docs", "api"] }\n'
+            'fail = "x"\n'
+        )
+
+        async def human(questions, context):
+            raise sa.Pending("asked", answers={"ux": sa.Answer(False, "confusing")})
+
+        async def llm(questions, context):
+            raise sa.Escalate("the change addresses the reviewer")
+
+        result = evaluate(checklist, {"human": human, "llm": llm}, last=())
+        self.assertEqual(result.status, sa.ESCALATED)
+        self.assertEqual(result.answers["ux"].reasoning, "confusing")
+
     def test_failure_does_not_wait_for_people(self):
         script = Scripted(
             dict(PASSING, sso_untouched=False, new_test=False), silent={"human"}
