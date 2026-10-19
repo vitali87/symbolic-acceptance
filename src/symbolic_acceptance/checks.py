@@ -125,15 +125,15 @@ class Commands:
     the commit (ignored files, skip-worktree edits, a filter set up to
     rewrite files on checkout) nor bytes rewritten in its object store can
     change the result, and no command sees another's checkout. Submodules
-    are left empty: their files are not the commit's. The command runs the
-    attempt's code, so like the agent it gets ``env`` (by default this
-    process's environment) without the runner's GitHub token, and no input;
-    whatever it starts is stopped when it ends, but for a daemon, which
-    leaves its session. A command that runs past ``timeout`` answers NO,
-    whatever ``expect`` says, as does a program of the attempt's own (a
-    relative path, like ``./repro.sh``) that is gone or cannot run; a
-    program the machine lacks is an :class:`OracleError`, for a person to
-    fix.
+    are left empty and Git LFS files as their pointers: their contents are
+    not the commit's. The command runs the attempt's code, so like the agent
+    it gets ``env`` (by default this process's environment) without the
+    runner's GitHub token, and no input; whatever it starts is stopped when
+    it ends, but for a daemon, which leaves its session. A command that runs
+    past ``timeout`` answers NO, whatever ``expect`` says, as does a program
+    of the attempt's own (a relative path, like ``./repro.sh``) that is gone
+    or cannot run; a program the machine lacks is an :class:`OracleError`,
+    for a person to fix.
     """
 
     def __init__(
