@@ -130,10 +130,10 @@ hand the attempt to a person.
   with a boundary the agent cannot predict. The agent's own account of its
   change is never shown to it. The diff ignores whatever the checkout's
   configuration, which the agent can write, could change in it (hooks,
-  replace refs, textconv and diff drivers, path prefixes, submodules, how
-  hunks are cut and what their headers name); the runner's own commit and
-  push still read that configuration (see
-  [`docs/design.md`](docs/design.md)).
+  replace refs, textconv and diff drivers, path prefixes, submodules, the
+  diff algorithm and file order, how hunks are cut and what their headers
+  name); the runner's own commit and push still read that configuration
+  (see [`docs/design.md`](docs/design.md)).
 - An answer from the judge that helps the attempt pass must be backed by the
   diff wherever it can be: each quote of a YES names a file and gives whole
   lines of it, consecutive in the diff, and together they hold more than a

@@ -14,10 +14,10 @@ a check run or comment as the runner. It can write to the checkout's git
 configuration and attributes, so every git command here overrides what they
 could change: hooks, replace refs, the file monitor, and in the diff
 textconv and external drivers, binary files, path prefixes, quoting,
-renames, submodules, context lines and the function names in hunk
-headers, which it leaves out. A filter can still rewrite what the
-agent's changes are committed as, which is the agent's to decide anyway:
-everyone judges the commit.
+renames, submodules, context lines, how lines are matched up and files
+ordered, and the function names in hunk headers, which it leaves out. A
+filter can still rewrite what the agent's changes are committed as, which
+is the agent's to decide anyway: everyone judges the commit.
 """
 
 from __future__ import annotations
@@ -143,6 +143,9 @@ _DIFF = (
     "--find-renames",
     "--unified=3",
     "--inter-hunk-context=0",
+    "--diff-algorithm=myers",
+    "--indent-heuristic",
+    "-O/dev/null",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 )
