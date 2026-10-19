@@ -7,6 +7,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -260,11 +261,26 @@ class CommandAgentTests(unittest.TestCase):
                 asyncio.run(agent(self.task()))
 
     def test_no_change_is_an_error(self):
+        empty = "git commit -q --allow-empty -m nothing"
+        undone = "git commit -qam v2 && git revert --no-edit HEAD >/dev/null"
+        # The agent's own git, like the test's, reads no one's settings.
+        env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+        for script in ("true", empty, f"echo v2 > app.py && {undone}"):
+            with self.subTest(script), tempfile.TemporaryDirectory() as tmp:
+                repo(tmp)
+                agent = CommandAgent(["sh", "-c", script], cwd=tmp, env=env)
+                with self.assertRaisesRegex(sa.Escalate, "changed nothing"):
+                    asyncio.run(agent(self.task()))
+
+    def test_what_the_agent_leaves_running_does_not_hold_the_runner_up(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
-            agent = CommandAgent([sys.executable, "-c", "pass"], cwd=tmp)
-            with self.assertRaisesRegex(sa.Escalate, "changed nothing"):
-                asyncio.run(agent(self.task()))
+            script = "echo v2 > app.py; sleep 30 & echo done"
+            agent = CommandAgent(["sh", "-c", script], cwd=tmp, timeout=20)
+            started = time.monotonic()
+            attempt = asyncio.run(agent(self.task()))
+            self.assertLess(time.monotonic() - started, 10)
+            self.assertEqual(attempt.claims, "done")
 
     def test_failing_agent_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:

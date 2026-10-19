@@ -19,17 +19,14 @@ Anything else goes to ``fallback``, such as
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fnmatch
 import os
 import shlex
-import signal
-import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from symbolic_acceptance.agents import for_agent, git
+from symbolic_acceptance.agents import for_agent, git, run_program
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
@@ -148,35 +145,15 @@ class Commands:
 
     def _run(self, argv: list[str], tree: str, wanted: bool) -> Answer:
         shown = shlex.join(argv)
-        with tempfile.TemporaryFile() as log:
-            try:
-                process = subprocess.Popen(
-                    argv,
-                    cwd=tree,
-                    env=for_agent(self.env) | {"PWD": tree},
-                    stdin=subprocess.DEVNULL,
-                    # A file rather than a pipe, so a child left running with
-                    # the output open cannot hold the check up.
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            except OSError as error:
-                # A program the commit holds (./repro.sh) is the attempt's
-                # to keep working; one the machine lacks is not.
-                if "/" not in argv[0] or os.path.isabs(argv[0]):
-                    raise OracleError(f"`{shown}` could not start: {error}") from None
-                return Answer(False, f"`{shown}` could not start: {error}", by="ci:run")
-            try:
-                status: int | None = process.wait(timeout=self.timeout)
-            except subprocess.TimeoutExpired:
-                status = None
-            finally:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
-            log.seek(0)
-            text = log.read().decode("utf-8", errors="replace")
+        env = for_agent(self.env) | {"PWD": tree}
+        try:
+            status, text = run_program(argv, cwd=tree, env=env, timeout=self.timeout)
+        except OSError as error:
+            # A program the commit holds (./repro.sh) is the attempt's to keep
+            # working; one the machine lacks is not.
+            if "/" not in argv[0] or os.path.isabs(argv[0]):
+                raise OracleError(f"`{shown}` could not start: {error}") from None
+            return Answer(False, f"`{shown}` could not start: {error}", by="ci:run")
         output = tuple(text.strip().splitlines()[-TAIL:])
         if status is None:
             reason = f"`{shown}` timed out after {self.timeout:g}s"

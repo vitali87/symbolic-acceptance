@@ -22,8 +22,11 @@ everyone judges the commit.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
 import subprocess
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -37,6 +40,7 @@ __all__ = [
     "diff",
     "for_agent",
     "git",
+    "run_program",
 ]
 
 _OVERRIDES = (
@@ -82,6 +86,46 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
     """``env`` for running code the agent wrote: without
     :data:`RUNNER_SECRETS`, and without git variables pointing elsewhere."""
     return {k: v for k, v in env.items() if k not in RUNNER_SECRETS | _ELSEWHERE}
+
+
+def run_program(
+    argv: Sequence[str],
+    *,
+    cwd: str | Path,
+    env: Mapping[str, str],
+    timeout: float,
+    given: str = "",
+) -> tuple[int | None, str]:
+    """Run ``argv`` to its end and return its exit status (``None`` past
+    ``timeout``) and its output, errors mixed in where they came.
+
+    It reads ``given`` and nothing else. It runs in a session of its own, so
+    whatever it starts is stopped when it ends, and writes to a file, so a
+    child it leaves running with the output open cannot hold the runner up.
+    A program that cannot start raises :class:`OSError`.
+    """
+    with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as log:
+        stdin.write(given.encode("utf-8"))
+        stdin.seek(0)
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=dict(env),
+            stdin=stdin,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            status: int | None = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            status = None
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            process.wait()
+        log.seek(0)
+        return status, log.read().decode("utf-8", errors="replace")
 
 
 _DIFF = (
@@ -175,6 +219,9 @@ class CommandAgent:
     def _head(self) -> str:
         return git(self.cwd, "rev-parse", "HEAD").strip()
 
+    def _tree(self, commit: str) -> str:
+        return git(self.cwd, "rev-parse", f"{commit}^{{tree}}").strip()
+
     def _attempt(self, task: Task) -> Attempt:
         before = self._head()
         if task.previous is not None and before != task.previous.ref:
@@ -183,30 +230,26 @@ class CommandAgent:
                 f"{task.number - 1} ({task.previous.ref[:12]}); check that out "
                 "to continue"
             )
-        try:
-            done = subprocess.run(
-                self.argv,
-                cwd=self.cwd,
-                input=task.prompt(),
-                env=for_agent(self.env),
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            raise Escalate(f"the agent ran past {self.timeout:.0f}s") from None
-        if done.returncode != 0:
-            tail = (done.stderr or done.stdout).strip()[-2000:]
-            raise Escalate(f"the agent exited with {done.returncode}: {tail}")
+        status, output = run_program(
+            self.argv,
+            cwd=self.cwd,
+            env=for_agent(self.env) | {"PWD": str(self.cwd.resolve())},
+            timeout=self.timeout,
+            given=task.prompt(),
+        )
+        if status is None:
+            raise Escalate(f"the agent ran past {self.timeout:g}s")
+        if status != 0:
+            raise Escalate(f"the agent exited with {status}: {output.strip()[-2000:]}")
         # Untracked files and submodules count, whatever the checkout says.
-        status = ("status", "--porcelain", "--untracked-files=all")
-        if git(self.cwd, *status, "--ignore-submodules=none").strip():
+        changes = ("status", "--porcelain", "--untracked-files=all")
+        if git(self.cwd, *changes, "--ignore-submodules=none").strip():
             git(self.cwd, "add", "--all")
             git(self.cwd, "commit", "--quiet", "-m", f"Attempt {task.number}")
         after = self._head()
-        if after == before:
+        # The tree, not the commit: an empty commit, or one and its revert,
+        # change nothing either.
+        if self._tree(after) == self._tree(before):
             raise Escalate(f"attempt {task.number} changed nothing")
         changed = diff(self.cwd, self.base, after)
         if self.push is not None:
@@ -235,7 +278,7 @@ class CommandAgent:
         return Attempt(
             ref=after,
             diff=changed,
-            claims=done.stdout.strip()[-4000:],
+            claims=output.strip()[-4000:],
         )
 
     async def __call__(self, task: Task) -> Attempt:
