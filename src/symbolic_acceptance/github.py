@@ -45,15 +45,17 @@ _REPLY = re.compile(
     r"^/(yes|no)\s+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$",
     re.IGNORECASE | re.MULTILINE | re.ASCII,
 )
-# Markers count only at the very start of a comment, so text quoted inside a
-# comment (CI output in a report, say) can never pose as one.
+# The runner's comments start with a marker. Markers count only at the very
+# start of a comment, so text quoted inside a comment (CI output in a report,
+# say) can never pose as one.
+_MARKER = "<!-- symbolic-acceptance:"
 _ASKED = re.compile(
-    r"<!-- symbolic-acceptance:ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
+    re.escape(_MARKER) + r"ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
 )
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 # Seconds between reads of check runs still going.
 POLL = 15.0
-REPORT_MARKER = "<!-- symbolic-acceptance:report -->"
+REPORT_MARKER = f"{_MARKER}report -->"
 # GitHub refuses a comment over 65,536 characters; this leaves room for
 # however it counts them.
 MAX_COMMENT = 60_000
@@ -306,7 +308,9 @@ class Reviews:
     members and collaborators, never from bots or from ``exclude`` (the
     agent's own account). Edited comments never count, since anyone with
     write access can edit another person's comment; correct an answer with
-    a new reply. The latest reply to a question wins.
+    a new reply. Nor do the runner's own comments, whoever posts them: a
+    report quotes what the agent printed. The latest reply to a question
+    wins.
     """
 
     def __init__(
@@ -365,7 +369,11 @@ class Reviews:
             self.github.comment(self.number, self._ask_body(new, ref))
         answers: dict[str, Answer] = {}
         for comment in comments:
-            if _edited(comment) or not self._allowed(comment):
+            if (
+                _edited(comment)
+                or comment["body"].startswith(_MARKER)
+                or not self._allowed(comment)
+            ):
                 continue
             for verdict, qid, why in _REPLY.findall(comment["body"]):
                 if qid in asked_at and comment["created_at"] >= asked_at[qid]:

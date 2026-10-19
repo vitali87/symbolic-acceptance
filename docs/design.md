@@ -132,7 +132,8 @@ off (`stop_on_regression=False`).
   asked about that commit. The runner cannot tell the agent's account from
   a person's, so an agent with a GitHub account of its own needs it in
   `exclude` (or answers limited to `reviewers`). The runner's markers count
-  only at the start of a comment it could have written.
+  only at the start of a comment it could have written, and its own
+  comments, which quote the agent, are never answers.
 - The runner's git overrides what the agent's checkout configuration and
   attributes could change (hooks, replace refs, textconv, binary files,
   diff format); `run` commands execute in a fresh clone of the commit that
@@ -144,8 +145,9 @@ off (`stop_on_regression=False`).
   from GitHub Actions count by default, since another installed CI app
   could run a configuration the attempt added.
 - The diff ignores what the checkout's or the user's git configuration says
-  about submodules and context, so a gitlink cannot drop out of it, and
-  frozen paths match whatever their case.
+  about submodules, renames and context, so a gitlink cannot drop out of it
+  nor a new file pass for a changed one, and frozen paths match whatever
+  their case.
 - The agent, and the `run` commands that execute its code, run without the
   runner's GitHub token, so they cannot report a check run or comment as
   the runner. Runner and agent still share a user and a machine, so what

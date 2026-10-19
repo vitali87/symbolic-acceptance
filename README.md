@@ -93,7 +93,7 @@ template bug` and `template feature` print starting points.
             Q: Can a locked account be unlocked by its owner or an administrator?
             Why: lock() has no inverse; add unlock() in src/auth.py
         - backs_off: needs YES, got NO [llm:claude-opus-5-5]
-            ...
+          Q: Does the change add an increasing delay between failed login attempts?
    ```
 
 A run stops when an attempt is **approved**, and **escalates** to a person on
@@ -142,7 +142,8 @@ hand the attempt to a person.
   it has one), only after the question was asked about that commit, and
   never in an edited comment (anyone with write access can edit someone
   else's). The runner's own markers count only at the start of a comment
-  it could have written.
+  it could have written, and its own comments, which quote the agent, are
+  never answers, whoever's token posted them.
 - Freeze `.github/` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.
   Only runs from GitHub Actions count, unless `GitHubChecks(app=...)` names
