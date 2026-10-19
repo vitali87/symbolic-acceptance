@@ -113,6 +113,17 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(result.status, sa.ESCALATED)
         self.assertEqual(result.answers["ux"].reasoning, "confusing")
 
+    def test_an_answer_that_cannot_matter_is_not_waited_for(self):
+        checklist = sa.loads(
+            '[q.tests]\nask = "Tests pass?"\nby = "ci"\n'
+            '[q.risky]\nask = "Risky?"\nby = "github"\n'
+            '[[require]]\nthat = "tests"\nfail = "x"\n'
+            '[[require]]\nid = "r"\nwhen = "risky"\nthat = "tests"\nfail = "y"\n'
+        )
+        script = Scripted({"tests": True}, silent={"github"})
+        result = evaluate(checklist, script.oracles(("ci", "github")))
+        self.assertEqual(result.status, sa.APPROVED)
+
     def test_failure_does_not_wait_for_people(self):
         script = Scripted(
             dict(PASSING, sso_untouched=False, new_test=False), silent={"human"}
