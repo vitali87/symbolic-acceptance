@@ -8,6 +8,7 @@ from helpers import DIFF, FakeHTTP, json_response, message
 import symbolic_acceptance as sa
 from symbolic_acceptance import http
 from symbolic_acceptance.claude import Claude, ClaudeError
+from symbolic_acceptance.diffs import MIN_QUOTE
 from symbolic_acceptance.github import GitHub
 from symbolic_acceptance.judge import Judge, Verdict
 
@@ -293,6 +294,8 @@ class VerdictTests(unittest.TestCase):
         answer = ask(j, diff=head + "+    }\n")
         self.assertFalse(answer.is_met)
         self.assertIn("too little of what the change adds", answer.reasoning)
+        j, _ = judge(*[verdict("YES", [quote + "    }"] * MIN_QUOTE)] * 2)
+        self.assertFalse(ask(j, diff=head + "+    }\n").is_met, "a line counts once")
 
     def test_evidence_names_what_the_change_did_to_each_quoted_line(self):
         quote = "if not check(user, password):\n-        return False\n+record_failure(user)"

@@ -202,7 +202,8 @@ class Judge:
             return answer, "quoted nothing"
         if len(windows) < len(quotes):
             return answer, "quoted lines that are not in the diff"
-        changed = [line for window in windows for line in window if line.side != " "]
+        # Each line once, however many quotes repeat it.
+        changed = {line for window in windows for line in window if line.side != " "}
         if sum(len(line.text.strip()) for line in changed) < MIN_QUOTE:
             return answer, "quoted too little of what the change adds or removes"
         return answer, None
