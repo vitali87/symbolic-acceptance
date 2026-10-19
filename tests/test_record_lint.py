@@ -271,10 +271,17 @@ class LintTests(unittest.TestCase):
             '[q.i]\nask = "I?"\nby = "llm"\nfrozen = ["x"]\n'
             '[q.j]\nask = "J?"\nby = "human"\nkind = "absence"\n'
             '[q.k]\nask = "K?"\nby = "scanner"\nfrozen = ["x"]\n'
-            '[[require]]\nid = "r"\nthat = { all = '
-            '["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"] }\nfail = "x"\n'
+            '[q.l]\nask = "L?"\nby = "ci"\nrun = "./repro.sh | grep -q ok"\n'
+            '[q.m]\nask = "M?"\nby = "ci"\nrun = "make test 2>&1 > log"\n'
+            '[q.n]\nask = "N?"\nby = "ci"\nrun = ["sh", "-c", "a | b"]\n'
+            '[q.o]\nask = "O?"\nby = "ci"\nrun = ["tr", "|", ","]\n'
+            '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", '
+            '"f", "g", "h", "i", "j", "k", "l", "m", "n", "o"] }\nfail = "x"\n'
         )
         findings = [f for f in sa.lint(c) if f.code == "bad-option"]
+        shell = (
+            ' but runs without a shell; for one, write run = ["sh", "-c", "<script>"]'
+        )
         self.assertEqual(
             [(f.where, f.message) for f in findings],
             [
@@ -289,6 +296,8 @@ class LintTests(unittest.TestCase):
                 ("h", "q.h has both frozen and run; split it in two"),
                 ("i", 'q.i.frozen works only with by = "ci"'),
                 ("j", 'q.j.kind works only with by = "llm"'),
+                ("l", "q.l.run has |" + shell),
+                ("m", "q.m.run has 2>&1 >" + shell),
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))

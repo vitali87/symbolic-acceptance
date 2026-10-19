@@ -24,12 +24,14 @@ such as which issue to judge against. Then come two parts.
   any other key is an option for that oracle: for "ci", check = "<name>"
   names the CI check that answers it, run = "<command>" runs a command whose
   success is YES (with expect = "fail", whose failure is; a timeout is NO
-  either way), and frozen = [<globs>] is YES when no file matching them
-  changes, except new files matching allow_new = [<globs>], where * stays
-  within a directory. For "llm", kind = "absence" marks a question whose YES
-  means the change avoids something ("Does it leave the public API
-  unchanged?"): there is nothing to quote for that YES, so the judge quotes
-  what breaks it for a NO instead.
+  either way) without a shell, so no pipes, && or redirections: write
+  run = ["sh", "-c", "<script>"] for those, and frozen = [<globs>] is YES
+  when no file matching them changes, except new files matching
+  allow_new = [<globs>], where * stays within a directory. For "llm",
+  kind = "absence" marks a question whose YES means the change avoids
+  something ("Does it leave the public API unchanged?"): there is nothing
+  to quote for that YES, so the judge quotes what breaks it for a NO
+  instead.
 
 [[require]] declares one requirement. Every requirement must hold for the
 attempt to be approved; each one that fails is reported to the coding agent

@@ -19,6 +19,7 @@ looks for checklists that load but cannot mean what their author intended:
 from __future__ import annotations
 
 import itertools
+import re
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from typing import Literal
@@ -51,6 +52,8 @@ _READERS = {
     "allow_new": "ci",
     "kind": "llm",
 }
+# Shell syntax: a pipe, a list of commands or a redirection.
+_SHELL = re.compile(r"[|&;]+|[0-9]*[<>].*")
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,18 @@ def _requirement_findings(requirement: Requirement) -> list[Finding]:
     return findings
 
 
+def _run_command(question: Question) -> None:
+    """Read the question's ``run`` command. It runs without a shell, so shell
+    syntax in a command given as one string would reach the program as
+    arguments, and ``prog | grep -q x`` would pass whatever ``prog`` says."""
+    syntax = [arg for arg in command(question) if _SHELL.fullmatch(arg)]
+    if syntax and isinstance(question.options["run"], str):
+        raise ValueError(
+            f"q.{question.id}.run has {' '.join(syntax)} but runs without a shell;"
+            ' for one, write run = ["sh", "-c", "<script>"]'
+        )
+
+
 def _option_findings(question: Question) -> list[Finding]:
     """Options the built-in oracles read, checked before any run needs them."""
     options = question.options
@@ -147,7 +162,7 @@ def _option_findings(question: Question) -> list[Finding]:
     if "frozen" in options:
         reads.append(lambda: frozen_paths(question))
     if "run" in options:
-        reads.append(lambda: command(question))
+        reads.append(lambda: _run_command(question))
     problems: list[str] = []
     for read in reads:
         try:
