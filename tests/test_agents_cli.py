@@ -911,6 +911,103 @@ class CLITests(unittest.TestCase):
         self.assertEqual((path, key), ("/v1/messages", "key"))
         self.assertIn("Logins are not throttled", body.decode())
 
+    def test_run_asks_on_a_pull_request_and_resumes_from_the_reply(self):
+        comments = []
+
+        class GitHubAPI(http.server.BaseHTTPRequestHandler):
+            def reply(self, data):
+                body = json.dumps(data).encode()
+                self.send_response(200)
+                self.send_header("content-length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def sent(self):
+                length = int(self.headers["content-length"])
+                return json.loads(self.rfile.read(length))["body"]
+
+            def do_GET(self):
+                self.reply(comments)
+
+            def do_POST(self):
+                at = f"2026-10-19T10:00:{len(comments):02d}Z"
+                comments.append(
+                    {
+                        "id": len(comments) + 1,
+                        "body": self.sent(),
+                        "user": {"login": "runner[bot]", "type": "Bot"},
+                        "author_association": "NONE",
+                        "created_at": at,
+                        "updated_at": at,
+                        "html_url": f"https://example.test/{len(comments) + 1}",
+                    }
+                )
+                self.reply(comments[-1])
+
+            def do_PATCH(self):
+                comment = comments[int(self.path.rsplit("/", 1)[1]) - 1]
+                comment |= {"body": self.sent(), "updated_at": "2026-10-19T11:00:00Z"}
+                self.reply(comment)
+
+            def log_message(self, *args):
+                pass
+
+        # A server on this machine stands in for GitHub's API.
+        with (
+            http.server.ThreadingHTTPServer(("127.0.0.1", 0), GitHubAPI) as server,
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            saved = str(Path(outside, "run.json"))
+            env = dict(
+                os.environ,
+                GITHUB_API_URL=f"http://127.0.0.1:{server.server_port}",
+                GITHUB_TOKEN="token",
+                NO_PROXY="127.0.0.1",
+                no_proxy="127.0.0.1",
+                PYTHONPATH=str(Path(sa.__file__).parents[1]),
+            )
+
+            def run(*more):
+                return subprocess.run(
+                    [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                    + ["--agent", shlex.join(write), "--cwd", tmp]
+                    + ["--github", "owner/repo", "--pr", "5", *more],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+            first = run("--record", saved)
+            comments.append(
+                {
+                    "id": 3,
+                    "body": "/yes ok looks right",
+                    "user": {"login": "alice", "type": "User"},
+                    "author_association": "MEMBER",
+                    "created_at": "2026-10-19T10:30:00Z",
+                    "updated_at": "2026-10-19T10:30:00Z",
+                    "html_url": "https://example.test/3",
+                }
+            )
+            second = run("--resume", saved)
+            server.shutdown()
+        self.assertEqual(first.returncode, 3, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        # One report, kept up to date; the question, asked once; the reply.
+        report, asked, _ = comments
+        self.assertIn("**approved**", report["body"])
+        self.assertIn("`ok`: Is it ok?", asked["body"])
+
     def test_templates_load(self):
         for kind in ("bug", "feature"):
             code, out = cli("template", kind)

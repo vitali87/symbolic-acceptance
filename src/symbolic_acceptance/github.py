@@ -109,7 +109,8 @@ class _CheckRuns(TypedDict):
 @dataclass(frozen=True)
 class GitHub:
     """A repository, ``owner/name``; the token defaults to ``GITHUB_TOKEN``
-    (or ``GH_TOKEN``)."""
+    (or ``GH_TOKEN``), and the API to ``GITHUB_API_URL``, which GitHub
+    Actions sets to its server's (GitHub Enterprise Server's, say)."""
 
     repo: str
     token: str | None = field(
@@ -118,7 +119,11 @@ class GitHub:
         ),
         repr=False,
     )
-    api: str = "https://api.github.com"
+    api: str = field(
+        default_factory=lambda: (
+            os.environ.get("GITHUB_API_URL") or "https://api.github.com"
+        )
+    )
     transport: http.Transport | None = None
 
     def _headers(self, accept: str) -> dict[str, str]:

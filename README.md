@@ -198,7 +198,8 @@ positive is retried on another model instead of failing the check; if every
 model declines, a person answers it. It sends no sampling parameters, which
 current models reject. Set `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
 and for `--pr` a token in `GITHUB_TOKEN` or `GH_TOKEN`; `run` checks them
-before the agent starts.
+before the agent starts. `GITHUB_API_URL`, which GitHub Actions sets, names
+the API of a server other than github.com.
 
 ## Use it
 
