@@ -1,6 +1,6 @@
 # Tests, lint and a reproducible build, with no third-party actions and no
-# downloads: the checkout is plain git, the runner's Python runs the tests,
-# and the package has no dependencies to install.
+# downloads: the checkout is plain git, the Pythons the runner image holds
+# run the tests, and the package has no dependencies to install.
 name: ci
 
 on:
@@ -30,11 +30,14 @@ jobs:
           git -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
 
-      - name: Show Python
-        run: python3 --version
-
-      - name: Test
-        run: PYTHONPATH=src:tests python3 -m unittest discover -s tests -t tests -v
+      # Every Python the package supports is in the runner image's tool cache.
+      - name: Test on Python 3.11 to 3.14
+        run: |
+          for minor in 11 12 13 14; do
+            python=$(ls -d "$RUNNER_TOOL_CACHE"/Python/3."$minor".*/x64/bin/python3."$minor" | sort -V | tail -n 1)
+            "$python" --version
+            PYTHONPATH=src:tests "$python" -m unittest discover -s tests -t tests
+          done
 
       - name: Lint the example checklists
         run: PYTHONPATH=src python3 -m symbolic_acceptance lint --strict examples/*.toml
