@@ -83,7 +83,7 @@ The judge instead:
 - must back the answer that helps the attempt pass wherever it can: each
   quote of a YES names a file of the diff and gives whole lines,
   consecutive within a hunk, and together the quotes hold more than a
-  trivial line the change adds or removes, not merely reindents or reorders;
+  trivial line the change adds or removes, not merely respaces;
   they are checked. An unbacked
   helpful answer is asked for again, then gives way to the other one, or
   goes to a person when the checklist reads the question both ways. Which

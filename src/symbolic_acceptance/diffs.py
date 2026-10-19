@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 __all__ = ["DiffLine", "FileChange", "locate", "parse"]
@@ -42,6 +42,8 @@ class DiffLine:
     file). ``line`` is the new file's line number for added and context
     lines, and the old file's for removed lines. ``hunk`` counts the hunks
     of the diff, so lines with the same one are consecutive in their file.
+    ``respaced`` marks an added or removed line whose text is on the other
+    side of its hunk too, spaced otherwise: only its whitespace changed.
     """
 
     path: str
@@ -49,13 +51,21 @@ class DiffLine:
     line: int
     text: str
     hunk: int
+    respaced: bool = False
 
     @property
     def where(self) -> str:
         return f"{self.path}:{'-' if self.side == '-' else ''}{self.line}"
 
     @property
-    def kind(self) -> Literal["added", "removed", "context"]:
+    def changed(self) -> bool:
+        """Whether the change adds or removes the line, not just its spacing."""
+        return self.side != " " and not self.respaced
+
+    @property
+    def kind(self) -> Literal["added", "removed", "respaced", "context"]:
+        if self.respaced:
+            return "respaced"
         if self.side == "+":
             return "added"
         return "removed" if self.side == "-" else "context"
@@ -193,7 +203,25 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
                     new_left -= 1
                     old_left -= 1
     changes = [change for file in files if (change := file.change()) is not None]
-    return changes, lines
+    return changes, _respaced(lines)
+
+
+def _respaced(lines: list[DiffLine]) -> list[DiffLine]:
+    """``lines``, each one whose change is only its whitespace marked so."""
+    spacings: dict[tuple[int, str], set[tuple[str, str]]] = {}
+    for line in lines:
+        key = line.hunk, line.text.strip()
+        spacings.setdefault(key, set()).add((line.side, line.text))
+    return [
+        replace(line, respaced=True)
+        if line.side != " "
+        and any(
+            side not in (line.side, " ") and text != line.text
+            for side, text in spacings[line.hunk, line.text.strip()]
+        )
+        else line
+        for line in lines
+    ]
 
 
 def _same(part: str, line: DiffLine) -> bool:
@@ -207,7 +235,7 @@ def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | Non
     The quote's non-blank lines must be whole non-blank lines of one hunk,
     one after another; surrounding whitespace and a leading ``+`` or ``-``
     copied from the diff don't count. A place where the change adds or
-    removes one of them is preferred.
+    removes one of them, rather than respacing it, is preferred.
     """
     parts = [part.strip() for part in quote.split("\n") if part.strip()]
     # The path as the diff names it, with or without the a/ or b/ before it;
@@ -224,7 +252,7 @@ def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | Non
             map(_same, parts, window)
         ):
             continue
-        if any(line.side != " " for line in window):
+        if any(line.changed for line in window):
             return window
         unchanged = unchanged or window
     return unchanged

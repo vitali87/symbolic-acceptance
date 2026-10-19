@@ -8,16 +8,15 @@ as adversarial:
 * An answer that helps the attempt pass must be backed by the diff wherever
   it can be. For most questions that is a YES, which must quote the lines
   of a file that show it, among them more than a trivial line the change
-  adds or removes (rather than reindents or reorders); for a ``when``
-  condition it is a NO, and ``not`` turns either around. Quotes are
-  checked against the diff; an unbacked helpful answer is asked for again,
-  then gives way to the other one, or goes to a person when the checklist
-  reads the question both ways, so the judge cannot be talked into a pass
-  it cannot point at. A question with
-  ``kind = "absence"`` ("does it leave the API unchanged?") has nothing to
-  quote for its YES; its NO quotes what breaks it. A question read one way
-  tells the judge which answer helps, so that when unsure it gives the
-  other.
+  adds or removes (rather than only respaces); for a ``when`` condition it
+  is a NO, and ``not`` turns either around. Quotes are checked against the
+  diff; an unbacked helpful answer is asked for again, then gives way to
+  the other one, or goes to a person when the checklist reads the question
+  both ways, so the judge cannot be talked into a pass it cannot point at.
+  A question with ``kind = "absence"`` ("does it leave the API
+  unchanged?") has nothing to quote for its YES; its NO quotes what breaks
+  it. A question read one way tells the judge which answer helps, so that
+  when unsure it gives the other.
 * Text in the change that addresses the reviewer escalates the attempt to a
   person instead of being answered, as does a question the judge declines
   or cannot finish answering.
@@ -70,8 +69,8 @@ quote names one file in "path", as the diff names it after "b/" (after "a/" \
 for a deleted file), and gives in "lines" one line or a run of lines as the \
 diff shows them within one hunk, removed and added lines included, each whole \
 and copied character for character without the leading "+", "-" or space. \
-Quote lines the change adds or removes: unchanged lines alone, or lines it \
-only reindents or reorders, do not show what the change does, and together \
+Quote lines the change adds or removes: unchanged lines alone, or lines whose \
+only change is their spacing, do not show what the change does, and together \
 the added and removed lines you quote must hold at least {MIN_QUOTE} \
 characters. Quotes are checked against the change, and a YES without \
 matching quotes may not count. Answer NO when the change does not show it, \
@@ -105,7 +104,6 @@ class Verdict(TypedDict):
 
 # Questions put to Claude at once.
 CONCURRENCY = 4
-_OTHER_SIDE = {"+": "-", "-": "+"}
 
 
 def _about_absence(question: Question) -> bool:
@@ -211,16 +209,8 @@ class Judge:
             return answer, "quoted nothing"
         if len(windows) < len(quotes):
             return answer, "quoted lines that are not in the diff"
-        # Each line once, however many quotes repeat it; a line also on the
-        # other side of its hunk was only reindented or reordered.
-        sides = {(line.hunk, line.side, line.text.strip()) for line in lines}
-        changed = {
-            line
-            for window in windows
-            for line in window
-            if line.side != " "
-            and (line.hunk, _OTHER_SIDE[line.side], line.text.strip()) not in sides
-        }
+        # Each line once, however many quotes repeat it.
+        changed = {line for window in windows for line in window if line.changed}
         if sum(len(line.text.strip()) for line in changed) < MIN_QUOTE:
             return answer, "quoted too little of what the change adds or removes"
         return answer, None
