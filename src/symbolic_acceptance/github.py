@@ -52,7 +52,9 @@ _MARKER = "<!-- symbolic-acceptance:"
 _ASKED = re.compile(
     re.escape(_MARKER) + r"ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
 )
-_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
+# A code fence as GitHub reads one (CommonMark): a fence of backticks takes
+# no backtick after it, and only spaces and tabs may follow a closing one.
+_FENCE = re.compile(r" {0,3}(`{3,}(?!.*`)|~{3,})(.*)$")
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 # Seconds between reads of check runs still going.
 POLL = 15.0
@@ -209,14 +211,14 @@ def _logins(names: Collection[str]) -> set[str]:
 def _outside_code(body: str) -> str:
     """The comment's own lines: a fenced code block quotes, it never replies."""
     lines, fence = [], ""
-    for line in body.split("\n"):
+    for line in re.split(r"\r\n|\r|\n", body):
         match = _FENCE.match(line)
         if not fence:
             if match:
                 fence = match[1]
             else:
                 lines.append(line)
-        elif match and match[1].startswith(fence) and not match[2].strip():
+        elif match and match[1].startswith(fence) and not match[2].strip(" \t"):
             fence = ""
     return "\n".join(lines)
 

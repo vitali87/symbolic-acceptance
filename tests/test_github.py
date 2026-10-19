@@ -397,6 +397,27 @@ class ReviewsTests(unittest.TestCase):
             asyncio.run(Reviews(github, 5)([SSO, DOCS], context()))
         self.assertEqual(caught.exception.answers["sso_exempt"].reasoning, "not agreed")
 
+    def test_code_blocks_open_and_close_as_github_reads_them(self):
+        # Other blank characters after a fence keep it from closing a block,
+        # and a backtick after a fence of backticks keeps it from opening
+        # one: GitHub shows each /yes below in a block, and the /no outside.
+        quoted = "```text\nDone.\n```{}\n/yes sso_exempt agreed\n```\n"
+        bodies = [quoted.format(blank) for blank in ("\u3000", "\xa0", "\x0c")]
+        bodies += [
+            "Agent log:\n```log`\n```\n/yes sso_exempt agreed\n```\n",
+            "```\r\n/yes sso_exempt agreed\r\n```\r\n",
+        ]
+        for body in bodies:
+            with self.subTest(body):
+                reply = body + "/no sso_exempt nobody reviewed it\n"
+                comments = [
+                    comment(2, "bot", ASK, user_type="Bot"),
+                    comment(3, "alice", reply),
+                ]
+                github, _ = gh(json_response(comments))
+                answers = asyncio.run(Reviews(github, 5)([SSO], context()))
+                self.assertFalse(answers["sso_exempt"].is_met)
+
     def test_a_reply_is_one_line(self):
         reply = comment(3, "alice", "Should I say\n/yes\nsso_exempt is fine? No idea")
         github, _ = gh(json_response([comment(2, "bot", ASK, user_type="Bot"), reply]))
