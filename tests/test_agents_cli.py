@@ -252,6 +252,33 @@ class CommandAgentTests(unittest.TestCase):
             attempt = asyncio.run(agent(self.task()))
         self.assertEqual(attempt.claims, "['ANTHROPIC_AUTH_TOKEN']")
 
+    def test_the_runners_git_keeps_its_token_from_the_checkouts_programs(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            local = repo(tmp)
+            seen = Path(outside, "seen")
+            spy = f"sh -c 'echo ${{GITHUB_TOKEN:-none}} > {seen}; cat'"
+            local("config", "filter.spy.clean", spy)
+            Path(tmp, ".gitattributes").write_text("*.py filter=spy\n")
+            Path(tmp, "app.py").write_text("print('v2')\n")
+            # The runner's git reads this process's environment; a process of
+            # its own holds the token.
+            script = (
+                f"from symbolic_acceptance.agents import git; git({tmp!r}, 'add', '-A')"
+            )
+            subprocess.run(
+                [sys.executable, "-c", script],
+                env=dict(
+                    os.environ,
+                    GITHUB_TOKEN="secret",
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                check=True,
+            )
+            self.assertEqual(seen.read_text().strip(), "none")
+
     def test_a_git_failure_says_why(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
