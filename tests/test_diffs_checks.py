@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -372,6 +373,45 @@ class CommandsTests(unittest.TestCase):
         self.git("config", "filter.f.smudge", "sed s/v1/v2/")
         sees = run_question("sees", "print(open('app.py').read().strip())")
         self.assertEqual(self.check(sees).evidence, ("print('v1')",))
+
+    def test_the_users_git_configuration_cannot_reach_the_checkout(self):
+        # The agent can write the user's configuration as well: a template
+        # that sets up a filter in every new repository, a filter for every
+        # repository, and a rewrite that sends the fetch elsewhere.
+        with tempfile.TemporaryDirectory() as user:
+            template = Path(user, "template")
+            Path(template, "info").mkdir(parents=True)
+            Path(template, "info", "attributes").write_text("*.py filter=f\n")
+            smudge = '[filter "f"]\n\tsmudge = sed s/v1/v2/\n'
+            Path(template, "config").write_text(smudge)
+            Path(user, "attributes").write_text("*.py filter=f\n")
+            Path(user, "gitconfig").write_text(
+                f"[init]\n\ttemplateDir = {template}\n"
+                f"[core]\n\tattributesFile = {Path(user, 'attributes')}\n"
+                f'{smudge}[url "file:///nowhere/"]\n\tinsteadOf = file:///\n'
+            )
+            script = (
+                "import sys, symbolic_acceptance as sa\n"
+                "from symbolic_acceptance.checks import Commands\n"
+                "checklist = sa.loads(sys.stdin.read())\n"
+                "context = sa.Context(checklist, sa.Attempt(sys.argv[2]), {})\n"
+                "answer = Commands(sys.argv[1])(checklist.questions['sees'], context)\n"
+                "print(*answer.evidence)\n"
+            )
+            done = subprocess.run(
+                [sys.executable, "-c", script, self.tmp.name, self.head],
+                input='[q.sees]\nask = "What is in app.py?"\nby = "ci"\n'
+                'run = "cat app.py"\n[[require]]\nthat = "sees"\nfail = "x"\n',
+                env=dict(
+                    os.environ,
+                    GIT_CONFIG_GLOBAL=str(Path(user, "gitconfig")),
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        self.assertEqual(done.stdout, "print('v1')\n")
 
     def test_commands_never_get_the_runners_github_token(self):
         env = {"PATH": os.environ["PATH"], "GITHUB_TOKEN": "t", "GH_TOKEN": "t"}
