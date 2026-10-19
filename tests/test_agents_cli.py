@@ -412,7 +412,13 @@ class CLITests(unittest.TestCase):
                 )
 
     def test_usage_errors_exit_2(self):
-        for args in ((), ("run", str(EXAMPLE))):
+        run = ("run", str(EXAMPLE), "--agent", "x")
+        for args in (
+            (),
+            run[:2],
+            (*run, "--samples", "0"),
+            (*run, "--max-attempts", "x"),
+        ):
             with (
                 self.subTest(args),
                 contextlib.redirect_stderr(io.StringIO()),

@@ -296,6 +296,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.status == APPROVED else 3 if result.status == WAITING else 1
 
 
+def _count(text: str) -> int:
+    """A whole number from 1 up, for an option."""
+    number = int(text)
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {number}")
+    return number
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="symbolic-acceptance",
@@ -351,13 +359,13 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--agent", required=True, help='agent command, e.g. "claude -p"')
     sub.add_argument("--issue", help="file with the issue text")
     sub.add_argument("--cwd", default=".", help="the agent's checkout")
-    sub.add_argument("--max-attempts", type=int, default=5)
+    sub.add_argument("--max-attempts", type=_count, default=5)
     sub.add_argument("--record", help="save the run here after every attempt")
     sub.add_argument("--resume", help="continue a saved run (and keep saving to it)")
     sub.add_argument("--github", help="owner/name, for CI results and reviews")
     sub.add_argument("--push", help="push each attempt to this branch, for CI")
     sub.add_argument(
-        "--pr", type=int, help="pull request to ask people on and report to"
+        "--pr", type=_count, help="pull request to ask people on and report to"
     )
     sub.add_argument(
         "--ci-wait", type=float, default=1800.0, help="seconds to wait for CI"
@@ -368,7 +376,7 @@ def _parser() -> argparse.ArgumentParser:
         "--model", default=DEFAULT_MODEL, help="Claude model for the judge"
     )
     sub.add_argument(
-        "--samples", type=int, default=1, help="judge samples per question"
+        "--samples", type=_count, default=1, help="judge samples per question"
     )
     sub.add_argument(
         "--keep-going-on-regression",
