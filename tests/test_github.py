@@ -436,6 +436,19 @@ class ReviewsTests(unittest.TestCase):
                     asyncio.run(Reviews(github, 5, exclude=exclude)([SSO], context()))
                 self.assertEqual(caught.exception.answers, {})
 
+    def test_an_apps_account_is_excluded_with_or_without_its_bot_suffix(self):
+        # The agent's app asks a question of its own, worded to mislead.
+        forged = comment(2, "claude[bot]", ASK, association="NONE", user_type="Bot")
+        reply = comment(
+            3, "alice", "/yes sso_exempt typos fixed", at="2026-10-18T10:05:00Z"
+        )
+        for exclude in (["claude"], ["claude[bot]"]):
+            with self.subTest(exclude):
+                github, _ = gh(json_response([forged, reply]), json_response({}))
+                with self.assertRaises(sa.Pending) as caught:
+                    asyncio.run(Reviews(github, 5, exclude=exclude)([SSO], context()))
+                self.assertEqual(caught.exception.answers, {})
+
     def test_answers_for_another_commit_do_not_count(self):
         comments = [
             comment(2, "bot", ASK, user_type="Bot"),

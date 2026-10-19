@@ -184,14 +184,15 @@ class GitHub:
 
 
 def _author(comment: Comment) -> tuple[str, bool, str]:
-    """The comment's login (lowercased), whether a bot wrote it, its association.
+    """The comment's login as :func:`_logins` gives it, whether a bot wrote
+    it, and its association.
 
     A deleted account has no user, so its login is empty.
     """
     user = comment["user"]
     login = user["login"].lower() if user else ""
     bot = user is not None and (user["type"] == "Bot" or login.endswith("[bot]"))
-    return login, bot, comment["author_association"]
+    return login.removesuffix("[bot]"), bot, comment["author_association"]
 
 
 def _edited(comment: Comment) -> bool:
@@ -204,8 +205,13 @@ def _edited(comment: Comment) -> bool:
 
 
 def _logins(names: Collection[str]) -> set[str]:
-    """Logins as GitHub compares them: no spaces or "@", any case."""
-    return {name.strip().removeprefix("@").lower() for name in names if name.strip()}
+    """Logins as GitHub compares them: no spaces or "@", any case, and an
+    app's account by its name, with or without the "[bot]" GitHub adds."""
+    return {
+        name.strip().removeprefix("@").lower().removesuffix("[bot]")
+        for name in names
+        if name.strip()
+    }
 
 
 def _outside_code(body: str) -> str:
