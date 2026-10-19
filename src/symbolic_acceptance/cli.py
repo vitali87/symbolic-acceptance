@@ -398,8 +398,13 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("file", help="the approved checklist")
     sub.add_argument("--agent", required=True, help='agent command, e.g. "claude -p"')
     sub.add_argument("--issue", help="file with the issue text")
-    sub.add_argument("--cwd", default=".", help="the agent's checkout")
-    sub.add_argument("--max-attempts", type=_count, default=5)
+    sub.add_argument("--cwd", default=".", help="the agent's checkout (default .)")
+    sub.add_argument(
+        "--max-attempts",
+        type=_count,
+        default=5,
+        help="attempts before a person must decide (default 5)",
+    )
     sub.add_argument("--record", help="save the run here after every attempt")
     sub.add_argument("--resume", help="continue a saved run (and keep saving to it)")
     sub.add_argument("--github", help="owner/name, for CI results and reviews")
@@ -408,15 +413,24 @@ def _parser() -> argparse.ArgumentParser:
         "--pr", type=_count, help="pull request to ask people on and report to"
     )
     sub.add_argument(
-        "--ci-wait", type=float, default=1800.0, help="seconds to wait for CI"
+        "--ci-wait",
+        type=float,
+        default=1800.0,
+        help="seconds to wait for CI before pausing the run (default 1800)",
     )
     sub.add_argument("--reviewers", help="comma-separated logins allowed to answer")
     sub.add_argument("--exclude", help="comma-separated logins never allowed to answer")
     sub.add_argument(
-        "--model", default=DEFAULT_MODEL, help="Claude model for the judge"
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"Claude model for the judge (default {DEFAULT_MODEL})",
     )
     sub.add_argument(
-        "--samples", type=_count, default=1, help="judge samples per question"
+        "--samples",
+        type=_count,
+        default=1,
+        help="times the judge answers each question, all to agree for a pass "
+        "(default 1)",
     )
     sub.add_argument(
         "--keep-going-on-regression",
