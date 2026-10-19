@@ -32,7 +32,15 @@ from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Context, Oracle, OracleError, Pending, _call
 
-__all__ = ["Checks", "Commands", "command", "frozen_files", "frozen_paths", "matches"]
+__all__ = [
+    "Checks",
+    "Commands",
+    "admits",
+    "command",
+    "frozen_files",
+    "frozen_paths",
+    "matches",
+]
 
 # Lines of a command's output kept as evidence.
 TAIL = 30
@@ -44,6 +52,13 @@ def matches(path: str | None, patterns: Sequence[str]) -> bool:
     return path is not None and any(
         fnmatch.fnmatchcase(path.casefold(), pattern.casefold()) for pattern in patterns
     )
+
+
+def admits(path: str, allow_new: Sequence[str]) -> bool:
+    """Whether ``allow_new`` lets a new file at ``path`` in: a pattern matches
+    only paths as deep as itself, so its ``*`` stays within a directory."""
+    depth = path.count("/")
+    return matches(path, [p for p in allow_new if p.count("/") == depth])
 
 
 def command(question: Question) -> list[str]:
@@ -81,9 +96,7 @@ def frozen_files(question: Question, context: Context) -> Answer:
     for change in files:
         if not (matches(change.path, frozen) or matches(change.old_path, frozen)):
             continue
-        depth = change.path.count("/")
-        allowed = [pattern for pattern in allow_new if pattern.count("/") == depth]
-        if change.status == "added" and matches(change.path, allowed):
+        if change.status == "added" and admits(change.path, allow_new):
             continue
         violations.append(
             f"{change.old_path} -> {change.path} (renamed)"

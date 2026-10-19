@@ -31,7 +31,7 @@ from symbolic_acceptance.checklist import (
     refs,
     render,
 )
-from symbolic_acceptance.checks import command, frozen_paths, matches
+from symbolic_acceptance.checks import admits, command, frozen_paths, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
 
 __all__ = ["MAX_EXHAUSTIVE", "Finding", "lint"]
@@ -160,7 +160,7 @@ def _freezes(question: Question, path: str) -> bool:
         frozen, allowed = frozen_paths(question), question.strings("allow_new")
     except ValueError:
         return False  # reported as a bad option
-    return matches(path, frozen) and not matches(path, allowed)
+    return matches(path, frozen) and not admits(path, allowed)
 
 
 def _check_runs_findings(checklist: Checklist) -> list[Finding]:

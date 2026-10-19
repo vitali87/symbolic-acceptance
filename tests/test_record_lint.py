@@ -292,6 +292,14 @@ class LintTests(unittest.TestCase):
                     '[[require]]\nid = "r"\nthat = { all = ["t", "f"] }\nfail = "x"\n'
                 )
                 self.assertIn("unfrozen-workflows", self.codes(elsewhere))
+        # A pattern in allow_new lets in only files as deep as itself.
+        shallow = sa.loads(
+            '[q.t]\nask = "Tests pass?"\nby = "ci"\ncheck = "tests"\n'
+            '[q.f]\nask = "Frozen?"\nby = "ci"\nfrozen = [".github/*"]\n'
+            'allow_new = ["*.yml"]\n'
+            '[[require]]\nid = "r"\nthat = { all = ["t", "f"] }\nfail = "x"\n'
+        )
+        self.assertNotIn("unfrozen-workflows", self.codes(shallow))
 
     def test_large_checklists_skip_exhaustive_checks(self):
         ids = [f"q{n}" for n in range(MAX_EXHAUSTIVE + 1)]
