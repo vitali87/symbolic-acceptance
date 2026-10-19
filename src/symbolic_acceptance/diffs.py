@@ -217,12 +217,12 @@ def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | Non
     unchanged = None
     for start in range(len(candidates) - len(parts) + 1):
         window = candidates[start : start + len(parts)]
-        if len({line.hunk for line in window}) > 1 or not all(
-            map(_same, parts, window)
+        if (
+            len({line.hunk for line in window}) > 1
+            or not all(map(_same, parts, window))
+            or sum(len(line.text.strip()) for line in window) < MIN_QUOTE
         ):
             continue
-        if sum(len(line.text.strip()) for line in window) < MIN_QUOTE:
-            return None
         if any(line.side != " " for line in window):
             return window
         unchanged = unchanged or window

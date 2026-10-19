@@ -195,6 +195,21 @@ class ParseTests(unittest.TestCase):
             "a copy in another file is not this file's line",
         )
 
+    def test_a_line_that_starts_with_a_plus_is_found_whole(self):
+        # "+retries" also reads as "retries" with the diff's "+", which is
+        # too short to prove anything; the line itself is long enough.
+        _, lines = parse(
+            "diff --git a/fix.patch b/fix.patch\n"
+            "--- a/fix.patch\n"
+            "+++ b/fix.patch\n"
+            "@@ -1 +1,2 @@\n"
+            " retries\n"
+            "++retries\n"
+        )
+        found = locate("+retries", "fix.patch", lines)
+        assert found is not None
+        self.assertEqual([d.where for d in found], ["fix.patch:2"])
+
     def test_locate_prefers_where_the_line_changes(self):
         _, lines = parse(RENAMED)
         found = locate("value = compute()", "new.py", lines)
