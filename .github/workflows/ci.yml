@@ -37,6 +37,7 @@ jobs:
       - name: Build twice and compare
         run: |
           for out in one two; do
+            mkdir "$out"
             python3 -c "import sys; sys.path.insert(0, '_build'); import backend; print(backend.build_wheel('$out'), backend.build_sdist('$out'))" >/dev/null
           done
           cmp one/*.whl two/*.whl
