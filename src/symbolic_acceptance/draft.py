@@ -15,7 +15,7 @@ from typing import TypedDict
 from symbolic_acceptance.checklist import Checklist, ChecklistError, loads
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.lint import Issue, lint
-from symbolic_acceptance.templates import FORMAT_GUIDE, TEMPLATES
+from symbolic_acceptance.templates import FORMAT_GUIDE, ORACLES, TEMPLATES
 
 __all__ = ["Draft", "DraftError", "draft"]
 
@@ -53,7 +53,6 @@ def draft(
     *,
     template: str = "bug",
     claude: Claude | None = None,
-    oracles: tuple[str, ...] = ("ci", "llm", "human"),
     tries: int = 3,
 ) -> Draft:
     """Draft a checklist for ``issue`` starting from a template."""
@@ -79,7 +78,7 @@ def draft(
         except ChecklistError as error:
             problems = str(error)
         else:
-            issues = tuple(lint(checklist, oracles=oracles))
+            issues = tuple(lint(checklist, oracles=ORACLES))
             errors = [str(i) for i in issues if i.level == "error"]
             if not errors:
                 return Draft(text, checklist, issues, questions)

@@ -28,6 +28,7 @@ class CommandAgentTests(unittest.TestCase):
             script = "import sys; prompt = sys.stdin.read(); open('app.py', 'w').write(\"print('v2')\\n\"); print('done:', 'make it v2' in prompt)"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
             attempt = asyncio.run(agent(self.task()))
+            assert attempt.diff is not None
             self.assertEqual(attempt.claims, "done: True")
             self.assertIn("+print('v2')", attempt.diff)
             self.assertEqual(len(attempt.ref), 40)
@@ -56,6 +57,7 @@ class CommandAgentTests(unittest.TestCase):
             script = "open('tests/test_app.py', 'w').write('assert False or True\\n')"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
             attempt = asyncio.run(agent(self.task()))
+        assert attempt.diff is not None
         self.assertIn(
             "diff --git a/tests/test_app.py b/tests/test_app.py", attempt.diff
         )
@@ -96,6 +98,14 @@ class CommandAgentTests(unittest.TestCase):
             )
             attempt = asyncio.run(agent(self.task()))
         self.assertEqual(attempt.claims, "['ANTHROPIC_AUTH_TOKEN']")
+
+    def test_an_agent_past_its_timeout_is_an_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            sleeper = [sys.executable, "-c", "import time; time.sleep(5)"]
+            agent = CommandAgent(sleeper, cwd=tmp, timeout=0.5)
+            with self.assertRaisesRegex(AgentError, "ran past"):
+                asyncio.run(agent(self.task()))
 
     def test_no_change_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -197,6 +207,8 @@ class CLITests(unittest.TestCase):
             # The example's ci questions need GitHub check runs.
             with self.assertRaisesRegex(SystemExit, "--github and --push"):
                 cli("run", str(EXAMPLE), "--agent", "true", "--cwd", tmp)
+            with self.assertRaisesRegex(SystemExit, "--pr needs --github"):
+                cli("run", str(EXAMPLE), "--agent", "true", "--cwd", tmp, "--pr", "5")
             local = Path(tmp, "local.toml")
             local.write_text(
                 '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'

@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 
 from helpers import EXAMPLE, PASSING, Scripted, example
@@ -108,6 +109,19 @@ class EvaluateTests(unittest.TestCase):
             ):
                 evaluate(self.checklist, dict(script.oracles(), ci=bad))
 
+    def test_an_oracle_error_does_not_wait_for_the_others(self):
+        async def slow(questions, context):
+            await asyncio.sleep(30)
+
+        async def broken(questions, context):
+            raise RuntimeError("the judge is down")
+
+        oracles = dict(Scripted(PASSING).oracles(), ci=slow, llm=broken)
+        started = time.monotonic()
+        with self.assertRaisesRegex(RuntimeError, "the judge is down"):
+            evaluate(self.checklist, oracles)
+        self.assertLess(time.monotonic() - started, 10)
+
     def test_sync_oracles_run_in_a_thread(self):
         def ci(questions, context):
             return {q.id: sa.Answer(True) for q in questions}
@@ -187,8 +201,10 @@ class RunTests(unittest.TestCase):
             "(new files matching `tests/test_*.py` are allowed).",
             prompt,
         )
+        # Only a frozen check's paths are files not to change.
         bare = sa.loads(
-            '[q.a]\nask = "A?"\nby = "ci"\n[[require]]\nthat = "a"\nfail = "x"\n'
+            '[q.a]\nask = "A?"\nby = "llm"\npaths = { include = "docs" }\n'
+            '[[require]]\nthat = "a"\nfail = "x"\n'
         )
         self.assertNotIn(
             "Do not change", sa.Task(issue="", checklist=bare, number=1).prompt()

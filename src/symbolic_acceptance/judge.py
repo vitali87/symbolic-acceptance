@@ -78,6 +78,10 @@ class Verdict(TypedDict):
     tampering: bool
 
 
+# Questions put to Claude at once.
+CONCURRENCY = 4
+
+
 def _about_absence(question: Question) -> bool:
     """Whether YES means the change avoids something (``kind = "absence"``)."""
     kind = question.options.get("kind", "presence")
@@ -100,14 +104,12 @@ class Judge:
         *,
         samples: int = 1,
         max_diff_chars: int = 1_500_000,
-        concurrency: int = 4,
     ) -> None:
         if samples < 1:
             raise ValueError("samples must be at least 1")
         self.claude = claude or Claude()
         self.samples = samples
         self.max_diff_chars = max_diff_chars
-        self.concurrency = concurrency
         self._key = secrets.token_bytes(32)
 
     def _boundary(self, ref: str, texts: Sequence[str]) -> str:
@@ -119,122 +121,123 @@ class Judge:
                 return boundary
             counter += 1
 
-    def _content(self, question: Question, context: Context) -> list[JSON]:
-        attempt = context.attempt
+    def _change(self, context: Context, diff: str) -> str:
+        """What every question about the attempt shares: guidance, issue, diff."""
+        ref = context.attempt.ref
         guidance = context.checklist.context or ""
-        boundary = self._boundary(attempt.ref, (attempt.diff, context.issue, guidance))
-        shared = []
+        boundary = self._boundary(ref, (diff, context.issue, guidance))
+        parts = []
         if guidance:
-            shared.append(f"Guidance for every question:\n{guidance.strip()}\n")
+            parts.append(f"Guidance for every question:\n{guidance.strip()}\n")
         if context.issue:
-            shared.append(
+            parts.append(
                 f"The issue the change is meant to resolve is between "
                 f"ISSUE-{boundary} and END-ISSUE-{boundary}.\n"
                 f"ISSUE-{boundary}\n{context.issue.strip()}\nEND-ISSUE-{boundary}\n"
             )
-        shared.append(
-            f"The change (commit {attempt.ref}) is the diff between CHANGE-{boundary} "
+        parts.append(
+            f"The change (commit {ref}) is the diff between CHANGE-{boundary} "
             f"and END-CHANGE-{boundary}. Only the line END-CHANGE-{boundary} ends "
-            f"it.\nCHANGE-{boundary}\n{attempt.diff}\nEND-CHANGE-{boundary}"
+            f"it.\nCHANGE-{boundary}\n{diff}\nEND-CHANGE-{boundary}"
         )
+        return "\n".join(parts)
+
+    def _verdict(
+        self, question: Question, content: list[JSON], lines: list[DiffLine]
+    ) -> tuple[Answer, str | None]:
+        """One reply, and what is wrong with its quotes when it needed some.
+
+        A presence question's YES and an absence question's NO can quote the
+        diff, so they need quotes; the other answers have nothing to quote.
+        """
+        try:
+            reply = self.claude.json(system=SYSTEM, content=content, shape=Verdict)
+        except Refusal as refusal:
+            raise Escalate(
+                f"the judge declined {question.id} ({refusal.category}); "
+                "a person must answer it"
+            ) from None
+        data = reply.data
+        reasoning = data["reasoning"].strip()
+        if data["tampering"]:
+            raise Escalate(
+                f"the change addresses the reviewer ({question.id}): {reasoning[:300]}"
+            )
+        # Structured outputs keep an enum's letters but not always its case.
+        is_met = data["answer"].upper() == "YES"
+        missing = data["missing"].strip()
+        if not is_met and missing:
+            reasoning = f"{missing} ({reasoning})" if reasoning else missing
+        quotes = [quote for quote in data["quotes"] if quote.strip()]
+        located = [(quote, locate(quote, lines)) for quote in quotes]
+        evidence = tuple(
+            f"{found[0].where} ({found[0].kind}): {' '.join(quote.split())}"
+            for quote, found in located
+            if found
+        )
+        answer = Answer(is_met, reasoning, evidence, f"llm:{reply.model}")
+        if is_met == _about_absence(question):
+            return answer, None
+        if not quotes:
+            return answer, "quoted nothing"
+        if len(evidence) < len(quotes):
+            return answer, "quoted lines that are not in the diff"
+        if not any(line.side != " " for _, found in located if found for line in found):
+            return answer, "quoted only lines the change leaves as they were"
+        return answer, None
+
+    def _ask(
+        self,
+        question: Question,
+        change: str,
+        lines: list[DiffLine],
+        helps: frozenset[bool],
+    ) -> Answer:
+        """One answer, backed by the diff wherever it can be.
+
+        An answer that helps the attempt pass but is not backed is asked for
+        once more; if it is still not backed, the other answer stands, or a
+        person decides when the checklist reads the question both ways. An
+        answer that does not help the attempt is taken as given.
+        """
         ask = [f"Question ({question.id}): {question.ask}"]
         if _about_absence(question):
             ask.append("This question is about absence.")
         if question.context:
             ask.append(f"How to answer it: {question.context}")
-        return [
-            {
-                "type": "text",
-                "text": "\n".join(shared),
-                "cache_control": {"type": "ephemeral"},
-            },
+        content: list[JSON] = [
+            {"type": "text", "text": change, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": "\n".join(ask)},
         ]
-
-    def _ask(
-        self,
-        question: Question,
-        context: Context,
-        lines: list[DiffLine],
-        helps: frozenset[bool],
-    ) -> Answer:
-        """One verdict, backed by the diff wherever an answer can be.
-
-        A presence question's YES and an absence question's NO can quote the
-        diff, so when one of them helps the attempt pass it must: it is asked
-        once more, then the other answer stands. An answer that does not help
-        the attempt is taken as given.
-        """
-        content = self._content(question, context)
-        absence = _about_absence(question)
-        for _ in range(2):
-            try:
-                reply = self.claude.json(system=SYSTEM, content=content, shape=Verdict)
-            except Refusal as refusal:
-                raise Escalate(
-                    f"the judge declined {question.id} ({refusal.category}); "
-                    "a person must answer it"
-                ) from None
-            data = reply.data
-            reasoning = data["reasoning"].strip()
-            if data["tampering"]:
-                raise Escalate(
-                    f"the change addresses the reviewer ({question.id}): "
-                    f"{reasoning[:300]}"
-                )
-            # Structured outputs keep an enum's letters but not always its case.
-            is_met = data["answer"].upper() == "YES"
-            quotes = [quote for quote in data["quotes"] if quote.strip()]
-            located = [(quote, locate(quote, lines)) for quote in quotes]
-            evidence = tuple(
-                f"{found[0].where} ({found[0].kind}): {' '.join(quote.split())}"
-                for quote, found in located
-                if found
-            )
-            changed = any(
-                line.side != " " for _, found in located if found for line in found
-            )
-            backed = bool(quotes) and len(evidence) == len(quotes) and changed
-            missing = data["missing"].strip()
-            why = reasoning
-            if not is_met:
-                why = f"{missing} ({reasoning})" if missing and reasoning else missing
-                why = why or reasoning
-            by = f"llm:{reply.model}"
-            backable = is_met != absence
-            if is_met not in helps or not backable or backed:
-                return Answer(is_met, why, evidence, by)
-        said = "YES" if is_met else "NO"
-        if not quotes:
-            problem = "quoted nothing"
-        elif len(evidence) < len(quotes):
-            problem = "quoted lines that are not in the diff"
-        else:
-            problem = "quoted only lines the change leaves as they were"
-        if (not is_met) in helps:
+        answer, problem = self._verdict(question, content, lines)
+        if problem and answer.is_met in helps:
+            answer, problem = self._verdict(question, content, lines)
+        if not problem or answer.is_met not in helps:
+            return answer
+        if (not answer.is_met) in helps:
             raise Escalate(
-                f"the judge's {said} to {question.id} is not backed by the diff "
-                f"({problem}), and the checklist reads it both ways; a person must "
-                "answer it"
+                f"the judge's {answer.word} to {question.id} is not backed by the "
+                f"diff ({problem}), and the checklist reads it both ways; a person "
+                "must answer it"
             )
         return Answer(
-            not is_met,
-            f"The diff does not show it: the judge said {said} but {problem}.",
+            not answer.is_met,
+            f"The diff does not show it: the judge said {answer.word} but {problem}.",
             (),
-            by,
+            answer.by,
         )
 
     def _answer(
         self,
         question: Question,
-        context: Context,
+        change: str,
         lines: list[DiffLine],
         helps: frozenset[bool],
     ) -> Answer:
         """Every sample must give the answer that helps; any other decides."""
         verdicts: list[Answer] = []
         for _ in range(self.samples):
-            verdicts.append(self._ask(question, context, lines, helps))
+            verdicts.append(self._ask(question, change, lines, helps))
             if verdicts[-1].is_met not in helps:
                 break
         decisive = verdicts[-1]
@@ -258,6 +261,8 @@ class Judge:
         self, questions: Sequence[Question], context: Context
     ) -> dict[str, Answer]:
         diff = context.attempt.diff
+        if diff is None:
+            raise OracleError("the judge reads the attempt's diff, and it has none")
         if len(diff) > self.max_diff_chars:
             raise Escalate(
                 f"the diff is {len(diff):,} characters, over the judge's limit of "
@@ -265,12 +270,13 @@ class Judge:
             )
         _, lines = parse(diff)
         helps = wanted(context.checklist)
-        gate = asyncio.Semaphore(self.concurrency)
+        change = self._change(context, diff)
+        gate = asyncio.Semaphore(CONCURRENCY)
 
         async def one(question: Question) -> tuple[str, Answer]:
             async with gate:
                 answer = await asyncio.to_thread(
-                    self._answer, question, context, lines, helps[question.id]
+                    self._answer, question, change, lines, helps[question.id]
                 )
                 return question.id, answer
 

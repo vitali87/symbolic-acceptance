@@ -140,8 +140,10 @@ class RequestTests(unittest.TestCase):
             fake.body(i)["messages"][0]["content"][0]["text"] for i in (0, 1)
         )
         self.assertEqual(first, second, "same prefix, so the cache is reused")
-        other, _ = judge()
-        self.assertNotEqual(j._boundary("abc123", ()), other._boundary("abc123", ()))
+        other, other_fake = judge(verdict("NO", missing="x"))
+        ask(other)
+        third = other_fake.body()["messages"][0]["content"][0]["text"]
+        self.assertNotEqual(first, third, "another judge draws another boundary")
 
     def test_oauth_token(self):
         fake = FakeHTTP(verdict("NO", missing="x"))
@@ -282,6 +284,12 @@ class VerdictTests(unittest.TestCase):
         self.assertFalse(answer.is_met)
         self.assertIn("[1/2 samples YES]", answer.reasoning)
         self.assertEqual(len(fake.requests), 2, "one NO decides; no third sample")
+
+    def test_an_attempt_without_a_diff_is_an_error(self):
+        j, fake = judge()
+        with self.assertRaisesRegex(sa.OracleError, "has none"):
+            ask(j, diff=None)
+        self.assertEqual(fake.requests, [])
 
     def test_oversized_diff_goes_to_a_person(self):
         j, fake = judge(max_diff_chars=100)

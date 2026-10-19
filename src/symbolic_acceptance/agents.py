@@ -26,7 +26,15 @@ from pathlib import Path
 
 from symbolic_acceptance.loop import Attempt, Task
 
-__all__ = ["RUNNER_SECRETS", "AgentError", "CommandAgent", "diff", "git", "local_diff"]
+__all__ = [
+    "RUNNER_SECRETS",
+    "AgentError",
+    "CommandAgent",
+    "diff",
+    "git",
+    "local_diff",
+    "without_secrets",
+]
 
 # Git's empty tree: reading attributes from it means none apply, so no
 # smudge filter or diff attribute in the checkout can alter what git shows.
@@ -41,8 +49,18 @@ _OVERRIDES = (
     "-c",
     "core.quotePath=true",
 )
+# Git without the user's or the system's configuration, which the agent may
+# have written too.
+_ISOLATED = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 # The variables the runner reads its GitHub token from (see github.GitHub).
 RUNNER_SECRETS = frozenset({"GITHUB_TOKEN", "GH_TOKEN"})
+
+
+def without_secrets(env: Mapping[str, str]) -> dict[str, str]:
+    """``env`` without :data:`RUNNER_SECRETS`, for running code the agent wrote."""
+    return {k: v for k, v in env.items() if k not in RUNNER_SECRETS}
+
+
 _DIFF = (
     "diff",
     "--no-color",
@@ -59,11 +77,15 @@ class AgentError(RuntimeError):
     """The agent failed, or finished without changing anything."""
 
 
-def git(cwd: str | Path, *args: str) -> str:
-    """Run git in ``cwd`` with the checkout's own settings overridden."""
+def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
+    """Run git in ``cwd`` with the checkout's own settings overridden.
+
+    ``isolated`` also leaves out the user's and the system's configuration.
+    """
     done = subprocess.run(
         ["git", *_OVERRIDES, *args],
         cwd=cwd,
+        env={**os.environ, **_ISOLATED} if isolated else None,
         capture_output=True,
         encoding="utf-8",
         errors="replace",  # binary and non-UTF-8 files in a diff
@@ -97,7 +119,7 @@ class CommandAgent:
     ``base`` is the commit attempts are compared with; it defaults to the
     checkout's HEAD when the first attempt starts, so pass the recorded base
     when resuming a run. With ``push``, each attempt is pushed to that branch
-    of ``remote``, so CI runs on it. The agent gets ``env`` (by default this
+    of ``origin``, so CI runs on it. The agent gets ``env`` (by default this
     process's environment) without :data:`RUNNER_SECRETS`.
     """
 
@@ -107,10 +129,8 @@ class CommandAgent:
         *,
         cwd: str | Path = ".",
         timeout: float = 3600.0,
-        commit: bool = True,
         base: str | None = None,
         push: str | None = None,
-        remote: str = "origin",
         env: Mapping[str, str] = os.environ,
     ) -> None:
         if not argv:
@@ -118,10 +138,8 @@ class CommandAgent:
         self.argv = list(argv)
         self.cwd = Path(cwd)
         self.timeout = timeout
-        self.commit = commit
         self.base = base
         self.push = push
-        self.remote = remote
         self.env = env
 
     def _head(self) -> str:
@@ -136,7 +154,7 @@ class CommandAgent:
                 self.argv,
                 cwd=self.cwd,
                 input=task.prompt(),
-                env={k: v for k, v in self.env.items() if k not in RUNNER_SECRETS},
+                env=without_secrets(self.env),
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
@@ -148,7 +166,7 @@ class CommandAgent:
         if done.returncode != 0:
             tail = (done.stderr or done.stdout).strip()[-2000:]
             raise AgentError(f"the agent exited with {done.returncode}: {tail}")
-        if self.commit and git(self.cwd, "status", "--porcelain").strip():
+        if git(self.cwd, "status", "--porcelain").strip():
             git(self.cwd, "add", "--all")
             git(self.cwd, "commit", "--quiet", "-m", f"Attempt {task.number}")
         after = self._head()
@@ -159,7 +177,7 @@ class CommandAgent:
                 self.cwd,
                 "push",
                 "--quiet",
-                self.remote,
+                "origin",
                 f"{after}:refs/heads/{self.push}",
             )
         return Attempt(

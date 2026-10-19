@@ -7,7 +7,10 @@ acceptance criterion, each stated constraint, and the existing invariants.
 
 from __future__ import annotations
 
-__all__ = ["BUG", "FEATURE", "FORMAT_GUIDE", "TEMPLATES"]
+__all__ = ["BUG", "FEATURE", "FORMAT_GUIDE", "ORACLES", "TEMPLATES"]
+
+# The oracles the guide describes, which the command line provides.
+ORACLES = ("ci", "llm", "human")
 
 FORMAT_GUIDE = """\
 An acceptance checklist is TOML with two parts.
@@ -45,7 +48,9 @@ Rules:
   and only when their answer can still change the result.
 - One fact per question. Split "fixed and tested" into two questions.
 - Put conditions in `when`, not in the question: "does it touch SSO" is a
-  question of its own that gates the SSO requirement.
+  question of its own that gates the SSO requirement. When the condition is
+  about files, decide it with check = "frozen" over their paths, under
+  `not`, rather than asking the judge.
 - Ids are letters, digits and underscores.
 """
 

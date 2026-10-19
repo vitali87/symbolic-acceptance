@@ -53,10 +53,7 @@ def _assignments(ids: tuple[str, ...]) -> Iterator[dict[str, bool]]:
 
 def _constant(expr: Expr) -> bool | None:
     """The value ``expr`` has under every answer set, if it has one."""
-    ids = refs(expr)
-    if len(ids) > MAX_EXHAUSTIVE:
-        return None
-    seen = {value(expr, facts) for facts in _assignments(ids)}
+    seen = {value(expr, facts) for facts in _assignments(refs(expr))}
     return seen.pop() if len(seen) == 1 else None
 
 

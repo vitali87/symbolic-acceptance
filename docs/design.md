@@ -121,20 +121,31 @@ off (`stop_on_regression=False`).
   unrelated reason (an import error) does not count, and `test_targets_bug`
   asks the judge whether it exercises the reported behaviour.
 - On GitHub, only owners, members and collaborators (or an allowlist) answer,
-  never bots or the agent's account, and only after the question was asked
-  about that commit. The runner's markers count only at the start of a
-  comment it could have written.
+  never bots or the accounts in `exclude`, and only after the question was
+  asked about that commit. The runner cannot tell the agent's account from
+  a person's, so an agent with a GitHub account of its own needs it in
+  `exclude` (or answers limited to `reviewers`). The runner's markers count
+  only at the start of a comment it could have written.
 - The runner's git overrides what the agent's checkout configuration and
   attributes could change (hooks, replace refs, filters, textconv, diff
-  prefixes); `run` commands execute in a fresh checkout of the commit; and
-  the run record, with the issue text, is kept outside the checkout.
+  prefixes); `run` commands execute in a fresh clone of the commit that
+  reads none of the checkout's git configuration or attributes, nor the
+  user's; and the run record, with the issue text, is kept outside the
+  checkout.
 - Edited comments never count as answers, and lint warns when CI check runs
   answer questions but `.github/workflows` is not frozen.
-- The agent runs without the runner's GitHub token, so it cannot report a
-  check run or comment as the runner. Runner and agent still share a user
-  and a checkout: that stops an agent gaming the checks, not one attacking
-  the runner. Against that, run the agent in a sandbox that holds none of
-  the runner's credentials, with a checkout that has none persisted.
+- The agent, and the `run` commands that execute its code, run without the
+  runner's GitHub token, so they cannot report a check run or comment as
+  the runner. Runner and agent still share a user and a machine, so what
+  the agent writes outside its checkout (user site-packages, say) can still
+  change a local `run` check. Checks that must hold against an agent set
+  on gaming them belong in CI, behind frozen workflows; against one
+  attacking the runner itself, run the agent in a sandbox that holds none
+  of the runner's credentials, with a checkout that has none persisted.
+- An `llm` question in a `when` condition helps the attempt with a NO,
+  which has nothing to quote, so the judge's NO there stands unbacked.
+  Where the condition is about files ("does it touch SSO?"), a frozen
+  check over those paths decides it exactly instead.
 - An oracle may only answer the questions it was asked.
 - The checklist's digest is recorded; resuming with a changed checklist
   fails.

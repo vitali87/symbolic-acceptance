@@ -11,7 +11,7 @@ from helpers import repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import CommandAgent
-from symbolic_acceptance.checks import Checks
+from symbolic_acceptance.checks import Checks, Commands
 
 AGENT = """\
 import re, sys
@@ -92,7 +92,7 @@ class EndToEndTests(unittest.TestCase):
                         checklist,
                         agent=CommandAgent([sys.executable, "-c", AGENT], cwd=tmp),
                         oracles={
-                            "ci": Checks(repo=tmp),
+                            "ci": Checks(Commands(tmp)),
                             "llm": judge,
                             "human": lambda q, c: {},
                         },

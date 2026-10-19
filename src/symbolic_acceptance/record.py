@@ -35,7 +35,7 @@ VERSION = 1
 class _Attempt(TypedDict):
     ref: str
     number: int
-    diff: str
+    diff: str | None
     claims: str
     base: str
 

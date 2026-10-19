@@ -63,13 +63,14 @@ class Attempt:
     """One commit to judge.
 
     Oracles must read facts from ``ref`` (CI results for that commit, the diff
-    computed by the runner). ``claims`` is what the agent says it did; it is
-    shown to people but is never evidence.
+    computed by the runner); ``diff`` is ``None`` when nothing computed one.
+    ``claims`` is what the agent says it did; it is shown to people but is
+    never evidence.
     """
 
     ref: str
     number: int = 0
-    diff: str = ""
+    diff: str | None = None
     claims: str = ""
     base: str = ""
 
@@ -196,11 +197,14 @@ class Task:
             "",
         ]
         for question in checklist.questions.values():
-            frozen = _globs(question, "paths")
-            if question.options.get("check") == "frozen" and frozen:
-                allowed = _globs(question, "allow_new")
-                note = f" (new files matching {allowed} are allowed)" if allowed else ""
-                lines += [f"Do not change files matching {frozen}{note}.", ""]
+            if question.options.get("check") != "frozen":
+                continue
+            allowed = _globs(question, "allow_new")
+            note = f" (new files matching {allowed} are allowed)" if allowed else ""
+            lines += [
+                f"Do not change files matching {_globs(question, 'paths')}{note}.",
+                "",
+            ]
         for requirement in checklist.requirements:
             gate = ""
             if requirement.when is not None:
@@ -268,15 +272,22 @@ P = ParamSpec("P")
 async def _call(
     function: Callable[P, object], *args: P.args, **kwargs: P.kwargs
 ) -> object:
-    """Await an async callable; run a sync one in a thread."""
-    method = type(function).__call__ if not inspect.isroutine(function) else None
-    if inspect.iscoroutinefunction(function) or inspect.iscoroutinefunction(method):
-        result = function(*args, **kwargs)
-    else:
-        result = await asyncio.to_thread(function, *args, **kwargs)
-    if inspect.isawaitable(result):
-        result = await result
-    return result
+    """Call ``function`` in a thread, so a sync one cannot block the loop, and
+    await what it returns when that is awaitable (an async one's coroutine)."""
+    result = await asyncio.to_thread(function, *args, **kwargs)
+    return await result if inspect.isawaitable(result) else result
+
+
+async def _put(
+    oracle: Oracle, questions: tuple[Question, ...], context: Context
+) -> object:
+    """Ask ``oracle``. A pause or a hand-over is its result; any other error is
+    raised, so the questions put to other oracles at the same time are not
+    waited for."""
+    try:
+        return await _call(oracle, questions, context)
+    except (Pending, Escalate) as stop:
+        return stop
 
 
 def _check_oracles(checklist: Checklist, oracles: Mapping[str, Oracle]) -> None:
@@ -338,8 +349,7 @@ async def evaluate(
         context = Context(checklist, attempt, MappingProxyType(dict(known)), issue)
         names = list(groups)
         results = await asyncio.gather(
-            *(_call(oracles[name], tuple(groups[name]), context) for name in names),
-            return_exceptions=True,
+            *(_put(oracles[name], tuple(groups[name]), context) for name in names)
         )
         got: dict[str, Answer] = {}
         waiting: list[str] = []
@@ -354,8 +364,6 @@ async def evaluate(
                 notes.append(f"{name}: {result}")
             elif isinstance(result, Escalate):
                 escalations.append(f"{name}: {result}")
-            elif isinstance(result, BaseException):
-                raise result
             else:
                 answered = _accepted(name, asked, result)
                 if not answered:

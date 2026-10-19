@@ -20,6 +20,7 @@ from symbolic_acceptance.checklist import (
     load,
     render,
 )
+from symbolic_acceptance.claude import DEFAULT_MODEL
 from symbolic_acceptance.feedback import assess, render_failures
 from symbolic_acceptance.lint import lint
 from symbolic_acceptance.loop import (
@@ -32,11 +33,9 @@ from symbolic_acceptance.loop import (
     run,
 )
 from symbolic_acceptance.report import markdown
-from symbolic_acceptance.templates import TEMPLATES
+from symbolic_acceptance.templates import ORACLES, TEMPLATES
 
 __all__ = ["main"]
-
-ORACLES = ("ci", "llm", "human")
 
 
 def _load(path: str) -> Checklist:
@@ -103,12 +102,11 @@ def _answers(path: str) -> dict[str, Answer]:
         )
     answers = {}
     for qid, value in data.items():
-        if isinstance(value, bool):
-            value = {"is_met": value}
-        if not isinstance(value, dict):
+        fields = {"is_met": value} if isinstance(value, bool) else value
+        if not isinstance(fields, dict):
             raise SystemExit(f"error: {qid}: expected true, false or an answer object")
         try:
-            answers[qid] = Answer(**value)
+            answers[qid] = Answer(**fields)
         except TypeError as error:
             raise SystemExit(f"error: {qid}: {error}") from None
     return answers
@@ -134,15 +132,14 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     from symbolic_acceptance.claude import Claude
     from symbolic_acceptance.draft import DraftError, draft
 
-    issue = Path(args.issue).read_text(encoding="utf-8")
-    claude = Claude(model=args.model) if args.model else Claude()
-    try:
-        result = draft(issue, template=args.template, claude=claude)
-    except DraftError as error:
-        raise SystemExit(f"error: {error}") from None
     out = Path(args.out)
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
+    issue = Path(args.issue).read_text(encoding="utf-8")
+    try:
+        result = draft(issue, template=args.template, claude=Claude(model=args.model))
+    except DraftError as error:
+        raise SystemExit(f"error: {error}") from None
     text = result.text if result.text.endswith("\n") else result.text + "\n"
     out.write_text(text, encoding="utf-8")
     print(f"wrote {out}; review it before approving")
@@ -187,7 +184,7 @@ class TerminalReviewer:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     from symbolic_acceptance.agents import CommandAgent
-    from symbolic_acceptance.checks import Checks
+    from symbolic_acceptance.checks import Checks, Commands
     from symbolic_acceptance.claude import Claude
     from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews, post_report
     from symbolic_acceptance.judge import Judge
@@ -199,6 +196,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "error: the checklist has lint errors:\n" + "\n".join(map(str, errors))
         )
     issue = Path(args.issue).read_text(encoding="utf-8") if args.issue else ""
+    if args.pr and not args.github:
+        raise SystemExit("error: --pr needs --github")
     github = GitHub(args.github) if args.github else None
     ci_fallback = GitHubChecks(github, wait=args.ci_wait) if github else None
     exclude = args.exclude.split(",") if args.exclude else []
@@ -210,8 +209,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             reviewers=args.reviewers.split(",") if args.reviewers else None,
             exclude=exclude,
         )
-    claude = Claude(model=args.model) if args.model else Claude()
-    ci = Checks(repo=args.cwd, fallback=ci_fallback)
+    claude = Claude(model=args.model)
+    ci = Checks(Commands(args.cwd), fallback=ci_fallback)
     remote = [
         qid
         for qid in checklist.used()
@@ -309,7 +308,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("issue", help="file with the issue text")
     sub.add_argument("--template", choices=sorted(TEMPLATES), default="bug")
     sub.add_argument("--out", default="acceptance.toml")
-    sub.add_argument("--model")
+    sub.add_argument("--model", default=DEFAULT_MODEL)
     sub.add_argument("--force", action="store_true")
     sub.set_defaults(handler=_cmd_draft)
 
@@ -336,7 +335,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_argument("--reviewers", help="comma-separated logins allowed to answer")
     sub.add_argument("--exclude", help="comma-separated logins never allowed to answer")
-    sub.add_argument("--model", help="Claude model for the judge")
+    sub.add_argument(
+        "--model", default=DEFAULT_MODEL, help="Claude model for the judge"
+    )
     sub.add_argument(
         "--samples", type=int, default=1, help="judge samples per question"
     )

@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sys
 import tempfile
 import unittest
@@ -138,6 +139,10 @@ class FrozenTests(unittest.TestCase):
             ("old.py -> new.py (renamed)", "tests/test_old.py (deleted)"),
         )
 
+    def test_an_attempt_without_a_diff_is_an_error(self):
+        with self.assertRaisesRegex(sa.OracleError, "has none"):
+            frozen_files(self.question(paths=["tests/*"]), context(diff=None))
+
     def test_needs_paths(self):
         with self.assertRaises(sa.OracleError):
             frozen_files(self.question(), context(DIFF))
@@ -190,6 +195,29 @@ class CommandsTests(unittest.TestCase):
         listed = self.git("worktree", "list")
         self.assertEqual(len(listed.strip().splitlines()), 1, "the worktree is removed")
 
+    def test_the_checkout_cannot_set_up_a_filter(self):
+        # A filter defined in the agent's checkout would rewrite files as
+        # they are checked out; the command must see the commit as it is.
+        Path(self.tmp.name, ".git", "info", "attributes").write_text("*.py filter=f\n")
+        self.git("config", "filter.f.smudge", "sed s/v1/v2/")
+        sees = run_question("sees", "print(open('app.py').read().strip())")
+        self.assertEqual(self.check(sees).evidence, ("print('v1')",))
+
+    def test_commands_never_get_the_runners_github_token(self):
+        env = {"PATH": os.environ["PATH"], "GITHUB_TOKEN": "t", "GH_TOKEN": "t"}
+        commands = Commands(self.tmp.name, env={**env, "OTHER_TOKEN": "kept"})
+        sees = run_question(
+            "sees", "import os; print(sorted(k for k in os.environ if 'TOKEN' in k))"
+        )
+        answer = commands(sees, context(ref=self.head))
+        self.assertEqual(answer.evidence, ("['OTHER_TOKEN']",))
+
+    def test_a_command_past_its_timeout_fails(self):
+        slow = run_question("slow", "import time; time.sleep(5)")
+        answer = Commands(self.tmp.name, timeout=0.5)(slow, context(ref=self.head))
+        self.assertFalse(answer.is_met)
+        self.assertIn("timed out", answer.reasoning)
+
     def test_invalid_utf8_output_is_kept(self):
         noisy = run_question(
             "noisy", "import sys; sys.stdout.buffer.write(b'caf\\xe9\\n')"
@@ -205,7 +233,7 @@ class CommandsTests(unittest.TestCase):
         async def github(questions, ctx):
             raise sa.Pending("CI running")
 
-        router = Checks(repo=self.tmp.name, fallback=github)
+        router = Checks(self.commands, fallback=github)
         local = run_question("local", "pass")
         remote = sa.Question("remote", "R?", "ci", options={"check": "tests"})
         with self.assertRaises(sa.Pending) as caught:

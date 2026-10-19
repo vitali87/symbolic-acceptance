@@ -5,7 +5,7 @@
 * :class:`Reviews` answers ``human`` questions from pull request comments. It
   posts the questions once per attempt and reads replies such as
   ``/yes sso_exempt reviewed with security`` from people allowed to answer.
-* :func:`compare_diff` and :func:`post_report` fetch a diff and keep one
+* :func:`compare_diff` fetches a diff, and :func:`post_report` keeps one
   report comment up to date.
 """
 
@@ -17,14 +17,14 @@ import os
 import re
 import time
 import urllib.parse
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TypedDict
 
 from symbolic_acceptance import http
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
-from symbolic_acceptance.loop import Attempt, Context, OracleError, Pending
+from symbolic_acceptance.loop import Context, OracleError, Pending
 
 __all__ = [
     "API_VERSION",
@@ -37,7 +37,6 @@ __all__ = [
     "Reviews",
     "User",
     "compare_diff",
-    "diff_source",
     "post_report",
 ]
 
@@ -53,9 +52,8 @@ _ASKED = re.compile(
     r"<!-- symbolic-acceptance:ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
 )
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
-_FAILED = frozenset(
-    {"failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"}
-)
+# Seconds between reads of check runs still going.
+POLL = 15.0
 REPORT_MARKER = "<!-- symbolic-acceptance:report -->"
 
 
@@ -234,12 +232,9 @@ class GitHubChecks:
     up to ``wait`` seconds and then reported as :class:`Pending`.
     """
 
-    def __init__(
-        self, github: GitHub, *, wait: float = 0.0, poll: float = 15.0
-    ) -> None:
+    def __init__(self, github: GitHub, *, wait: float = 0.0) -> None:
         self.github = github
         self.wait = wait
-        self.poll = poll
 
     def _read(
         self, questions: Sequence[Question], ref: str
@@ -259,18 +254,13 @@ class GitHubChecks:
             if latest["status"] != "completed":
                 waiting.append(f"{question.id} ({name!r} is {latest['status']})")
                 continue
-            conclusion = latest["conclusion"]
             summary = latest["output"]["title"] or latest["output"]["summary"]
-            evidence = tuple(item for item in (latest["html_url"], summary) if item)
-            if conclusion == "success":
-                answers[question.id] = Answer(
-                    True, f"{name} passed", evidence, by=f"ci:{name}"
-                )
-            else:
-                why = "failed" if conclusion in _FAILED else f"concluded {conclusion}"
-                answers[question.id] = Answer(
-                    False, f"{name} {why}", evidence, by=f"ci:{name}"
-                )
+            answers[question.id] = Answer(
+                latest["conclusion"] == "success",
+                f"{name} concluded {latest['conclusion']}",
+                tuple(item for item in (latest["html_url"], summary) if item),
+                by=f"ci:{name}",
+            )
         return answers, waiting
 
     async def __call__(
@@ -285,7 +275,7 @@ class GitHubChecks:
                 return answers
             if time.monotonic() >= deadline:
                 raise Pending("CI: " + "; ".join(waiting), answers=answers)
-            await asyncio.sleep(self.poll)
+            await asyncio.sleep(POLL)
 
 
 class Reviews:
@@ -380,12 +370,3 @@ class Reviews:
                 answers=answers,
             )
         return answers
-
-
-def diff_source(github: GitHub, base: str) -> Callable[[Attempt], str]:
-    """A ``run(diff=...)`` source: GitHub's diff from ``base`` to the attempt."""
-
-    def source(attempt: Attempt) -> str:
-        return compare_diff(github, attempt.base or base, attempt.ref)
-
-    return source

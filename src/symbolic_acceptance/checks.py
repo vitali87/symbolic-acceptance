@@ -7,9 +7,8 @@
   may match anyway (the regression test). Patterns use :mod:`fnmatch`, where
   ``*`` also matches ``/``.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
-  attempt's commit. ``expect = "fail"`` inverts it. Commands run without a
-  shell.
-* ``check = "<name>"`` with a handler registered under that name.
+  attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts it.
+  Commands run without a shell.
 
 Anything else goes to ``fallback``, such as
 :class:`symbolic_acceptance.github.GitHubChecks`.
@@ -19,21 +18,23 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import os
 import shlex
 import subprocess
 import tempfile
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from symbolic_acceptance.agents import git
+from symbolic_acceptance.agents import git, without_secrets
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Context, Oracle, OracleError, Pending, _call
 
-__all__ = ["Checks", "Commands", "Handler", "command", "frozen_files"]
+__all__ = ["Checks", "Commands", "command", "frozen_files"]
 
-Handler = Callable[[Question, Context], Answer | Awaitable[Answer]]
+# Lines of a command's output kept as evidence.
+TAIL = 30
 
 
 def _matches(path: str | None, patterns: Sequence[str]) -> bool:
@@ -61,7 +62,10 @@ def frozen_files(question: Question, context: Context) -> Answer:
     if not frozen:
         raise OracleError(f"q.{question.id} needs paths = [<frozen globs>]")
     allow_new = question.strings("allow_new")
-    files, _ = parse(context.attempt.diff)
+    diff = context.attempt.diff
+    if diff is None:
+        raise OracleError(f"q.{question.id} reads the attempt's diff, and it has none")
+    files, _ = parse(diff)
     violations = []
     for change in files:
         if not (_matches(change.path, frozen) or _matches(change.old_path, frozen)):
@@ -88,20 +92,28 @@ def frozen_files(question: Question, context: Context) -> Answer:
 class Commands:
     """Run a question's ``run`` command on the attempt's commit; exit 0 is YES.
 
-    Each command runs in a fresh checkout of exactly that commit, made with
-    ``git worktree`` from the repository at ``repo`` and removed afterwards.
-    Nothing outside the commit (ignored files, skip-worktree edits, a smudge
-    filter) can change the result, and one command cannot affect the next. A
-    command that runs past ``timeout`` counts as failing; one that cannot
-    start at all is an :class:`OracleError`, for a person to fix.
+    Each command runs in a fresh checkout of exactly that commit, in a clone
+    of the repository at ``repo`` that shares its objects but none of its
+    configuration or attributes, nor the user's, and is removed afterwards.
+    Nothing in the checkout outside the commit (ignored files, skip-worktree
+    edits, a filter set up to rewrite files on checkout) can change the
+    result, and one command cannot affect the next. The command runs the
+    attempt's code, so like the agent it gets ``env`` (by default this
+    process's environment) without the runner's GitHub token. A command
+    that runs past ``timeout`` counts as failing; one that cannot start at
+    all is an :class:`OracleError`, for a person to fix.
     """
 
     def __init__(
-        self, repo: str | Path, *, timeout: float = 1800.0, tail: int = 30
+        self,
+        repo: str | Path,
+        *,
+        timeout: float = 1800.0,
+        env: Mapping[str, str] = os.environ,
     ) -> None:
         self.repo = Path(repo)
         self.timeout = timeout
-        self.tail = tail
+        self.env = env
 
     def __call__(self, question: Question, context: Context) -> Answer:
         argv = command(question)
@@ -110,19 +122,18 @@ class Commands:
             raise OracleError(f'q.{question.id}.expect must be "pass" or "fail"')
         with tempfile.TemporaryDirectory(prefix="symbolic-acceptance-") as scratch:
             tree = str(Path(scratch, "tree"))
+            source = str(self.repo.resolve())
+            clone = ("clone", "--quiet", "--shared", "--no-checkout", source, tree)
+            git(scratch, *clone, isolated=True)
             git(
-                self.repo,
-                "worktree",
-                "add",
-                "--detach",
-                "--quiet",
                 tree,
+                "checkout",
+                "--quiet",
+                "--detach",
                 context.attempt.ref,
+                isolated=True,
             )
-            try:
-                return self._run(argv, tree, expect == "pass")
-            finally:
-                git(self.repo, "worktree", "remove", "--force", tree)
+            return self._run(argv, tree, expect == "pass")
 
     def _run(self, argv: list[str], tree: str, wanted: bool) -> Answer:
         shown = shlex.join(argv)
@@ -130,6 +141,7 @@ class Commands:
             done = subprocess.run(
                 argv,
                 cwd=tree,
+                env=without_secrets(self.env),
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",
@@ -142,33 +154,34 @@ class Commands:
             )
         except OSError as error:
             raise OracleError(f"`{shown}` could not start: {error}") from None
-        output = (done.stdout + done.stderr).strip().splitlines()[-self.tail :]
+        output = (done.stdout + done.stderr).strip().splitlines()[-TAIL:]
         passed = done.returncode == 0
         verb = "passed" if passed else f"failed (exit {done.returncode})"
         return Answer(passed == wanted, f"`{shown}` {verb}", tuple(output), by="ci:run")
 
 
 class Checks:
-    """A ``ci`` oracle: local checks first, then ``fallback`` for the rest."""
+    """A ``ci`` oracle: local checks first, then ``fallback`` for the rest.
+
+    ``run`` questions need ``commands``; without it they go to ``fallback``.
+    """
 
     def __init__(
-        self,
-        handlers: Mapping[str, Handler] | None = None,
-        *,
-        repo: str | Path | None = None,
-        fallback: Oracle | None = None,
-        timeout: float = 1800.0,
+        self, commands: Commands | None = None, *, fallback: Oracle | None = None
     ) -> None:
-        self.handlers: dict[str, Handler] = {"frozen": frozen_files, **(handlers or {})}
-        self.commands = Commands(repo, timeout=timeout) if repo is not None else None
+        self.commands = commands
         self.fallback = fallback
+
+    def _local(
+        self, question: Question
+    ) -> Callable[[Question, Context], Answer] | None:
+        if question.options.get("check") == "frozen":
+            return frozen_files
+        return self.commands if "run" in question.options else None
 
     def handles(self, question: Question) -> bool:
         """Whether a local check answers ``question``, without ``fallback``."""
-        name = question.options.get("check")
-        if isinstance(name, str) and name in self.handlers:
-            return True
-        return "run" in question.options and self.commands is not None
+        return self._local(question) is not None
 
     async def __call__(
         self, questions: Sequence[Question], context: Context
@@ -176,25 +189,17 @@ class Checks:
         answers: dict[str, Answer] = {}
         rest: list[Question] = []
         for question in questions:
-            name = question.options.get("check")
-            if not self.handles(question):
+            local = self._local(question)
+            if local is None:
                 rest.append(question)
-            elif isinstance(name, str) and name in self.handlers:
-                answer = await _call(self.handlers[name], question, context)
-                if not isinstance(answer, Answer):
-                    raise OracleError(f"the {name!r} check did not return an Answer")
-                answers[question.id] = answer
             else:
-                assert self.commands is not None  # handles() checked it
-                answers[question.id] = await asyncio.to_thread(
-                    self.commands, question, context
-                )
+                answers[question.id] = await asyncio.to_thread(local, question, context)
         if rest:
             if self.fallback is None:
                 ids = ", ".join(q.id for q in rest)
                 raise OracleError(
-                    f"no local check for {ids}: give it `run`, register a handler "
-                    "for its `check`, or pass a fallback such as GitHubChecks"
+                    f"no local check for {ids}: give it `run` and Checks a Commands, "
+                    "or pass a fallback such as GitHubChecks"
                 )
             try:
                 more = await _call(self.fallback, tuple(rest), context)

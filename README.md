@@ -128,26 +128,29 @@ hand the attempt to a person.
   condition. A question marked `kind = "absence"` ("does it leave the API
   unchanged?") has nothing to quote for its YES, so its NO quotes what
   breaks it. With `samples > 1`, every sample must give the helpful answer.
-- `run` commands execute in a fresh checkout of the attempt's commit, so
-  nothing outside the commit can change their result.
+- `run` commands execute in a fresh clone of the attempt's commit that
+  reads none of the checkout's git configuration or attributes, so nothing
+  in the checkout outside the commit can change their result.
 - Text in the change addressed to a reviewer escalates instead of being
   answered, and so does a diff too large to judge whole.
 - `check = "frozen"` fails any change to the checklist, CI configuration or
   existing tests; a new regression test can be allowed with `allow_new`.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
-  answer, never bots or the agent's own account, only after the question was
-  asked about that commit, and never in an edited comment (anyone with write
-  access can edit someone else's). The runner's own markers count only at
-  the start of a comment it could have written.
+  answer, never bots or the accounts in `exclude` (put the agent's there if
+  it has one), only after the question was asked about that commit, and
+  never in an edited comment (anyone with write access can edit someone
+  else's). The runner's own markers count only at the start of a comment
+  it could have written.
 - Freeze `.github/` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.
 - Keep the run record outside the agent's checkout; inside it, the record
   would be committed with the attempt. The command line refuses to.
-- `CommandAgent` runs the agent without the runner's GitHub token, with which
-  it could report a check run or comment as the runner. Give it no other
-  credentials that can comment as a reviewer either: a reply posted with
-  your token reads as yours. For an agent that might attack the runner
-  itself, not just game the checks, see the limits in
+- The agent, and the `run` commands that execute its code, get no GitHub
+  token from the runner, with which they could report a check run or
+  comment as the runner. Give the agent no other credentials that can
+  comment as a reviewer either: a reply posted with your token reads as
+  yours. What local `run` checks cannot protect against, and how to run an
+  agent that might attack the runner itself, is in
   [`docs/design.md`](docs/design.md).
 
 The judge calls the Claude Messages API over HTTPS with `urllib`. It uses
@@ -166,7 +169,7 @@ from pathlib import Path
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import CommandAgent
-from symbolic_acceptance.checks import Checks
+from symbolic_acceptance.checks import Checks, Commands
 from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews
 from symbolic_acceptance.judge import Judge
 
@@ -182,7 +185,7 @@ result = asyncio.run(
             push="agent/issue-342",  # so CI runs on every attempt
         ),
         oracles={
-            "ci": Checks(repo="work", fallback=GitHubChecks(github, wait=1800)),
+            "ci": Checks(Commands("work"), fallback=GitHubChecks(github, wait=1800)),
             "llm": Judge(),
             "human": Reviews(github, number=57, exclude=["agent-account"]),
         },
