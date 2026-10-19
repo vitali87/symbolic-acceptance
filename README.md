@@ -151,7 +151,9 @@ hand the attempt to a person.
   every sample must give the helpful answer.
 - `run` commands execute in a fresh clone of the attempt's commit that
   reads none of the checkout's git configuration or attributes, so nothing
-  in the checkout outside the commit can change their result.
+  in the checkout outside the commit can change their result. Submodules,
+  whose files are another repository's, are empty there; checks that need
+  them belong in CI.
 - Text in the change addressed to a reviewer escalates instead of being
   answered, and so do a diff too large to judge whole, a question the judge
   declines, and a reply cut off before it ends.
