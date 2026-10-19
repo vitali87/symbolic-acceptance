@@ -17,7 +17,8 @@ An acceptance checklist is TOML with two parts.
   by      = the oracle that answers it: "ci", "llm" or "human"   (required)
   context = how to answer it, including when it does not apply   (optional)
   any other key is an option for that oracle: for "ci", check = "<name>"
-  names the CI check that answers it, run = "<command>" runs a command, and
+  names the CI check that answers it, run = "<command>" runs a command
+  whose success is YES (with expect = "fail", whose failure is), and
   check = "frozen" with paths = [<globs>] and allow_new = [<globs>] checks
   that frozen files are left alone. For "llm", kind = "absence" marks a
   question whose YES means the change avoids something ("Does it leave the

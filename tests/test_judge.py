@@ -155,6 +155,10 @@ class RequestTests(unittest.TestCase):
 
 
 class VerdictTests(unittest.TestCase):
+    def test_the_answer_is_read_whatever_its_case(self):
+        j, _ = judge(verdict("Yes", ["if failures(user) > MAX_FAILURES:"]))
+        self.assertTrue(ask(j).is_met)
+
     def test_supported_yes_carries_located_evidence(self):
         j, _ = judge(verdict("YES", ["if failures(user) > MAX_FAILURES:"]))
         answer = ask(j)
@@ -255,9 +259,10 @@ class VerdictTests(unittest.TestCase):
             ask(j)
 
     def test_truncated_reply_is_an_error(self):
-        j, _ = judge(message({}, stop="max_tokens"))
-        with self.assertRaises(ClaudeError):
-            ask(j)
+        for stop in ("max_tokens", "model_context_window_exceeded"):
+            j, _ = judge(message({}, stop=stop))
+            with self.assertRaisesRegex(ClaudeError, f"stopped early \\({stop}"):
+                ask(j)
 
     def test_samples_must_agree_on_yes(self):
         j, fake = judge(

@@ -182,7 +182,8 @@ class Judge:
                     f"the change addresses the reviewer ({question.id}): "
                     f"{reasoning[:300]}"
                 )
-            is_met = data["answer"] == "YES"
+            # Structured outputs keep an enum's letters but not always its case.
+            is_met = data["answer"].upper() == "YES"
             quotes = [quote for quote in data["quotes"] if quote.strip()]
             located = [(quote, locate(quote, lines)) for quote in quotes]
             evidence = tuple(

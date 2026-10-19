@@ -69,7 +69,7 @@ class _Message(TypedDict):
     model: str
     content: list[_Block]
     stop_reason: str | None
-    stop_details: NotRequired[_StopDetails | None]
+    stop_details: _StopDetails | None  # null unless the reply is a refusal
 
 
 def _schema(shape: object) -> dict[str, JSON]:
@@ -165,12 +165,15 @@ class Claude:
             repeatable=True,
         )
         message: _Message = json.loads(response.body)
-        if message["stop_reason"] == "refusal":
-            details = message.get("stop_details")
+        stop = message["stop_reason"]
+        if stop == "refusal":
+            details = message["stop_details"]
             raise Refusal(details["category"] if details else None)
-        if message["stop_reason"] == "max_tokens":
+        # With no tools and no stop sequences, any other stop cuts the reply
+        # short: max_tokens, or model_context_window_exceeded.
+        if stop != "end_turn":
             raise ClaudeError(
-                f"the reply hit max_tokens ({self.max_tokens}) and is incomplete"
+                f"the reply stopped early ({stop}; max_tokens is {self.max_tokens})"
             )
         # Structured outputs guarantee a reply in the shape the schema gives.
         data: T = json.loads(
