@@ -30,6 +30,8 @@ import re
 import signal
 import subprocess
 import tempfile
+import threading
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -93,16 +95,32 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k not in RUNNER_SECRETS | _ELSEWHERE}
 
 
-# The process groups of the programs run_program is running now.
+# The process groups of the programs run_program is running now, and
+# whether stop_programs has been called, after which none may run.
 _running: set[int] = set()
+_stopped = threading.Event()
+# Seconds a program asked to stop has to end before it is killed.
+GRACE = 5.0
 # The most of a program's output kept, from its end: what the runner reads
 # of it is its last lines.
 OUTPUT = 1 << 20
 
 
-def stop_programs() -> None:
+def stop_programs(grace: float = GRACE) -> None:
     """End every program :func:`run_program` is running, and what they
-    started, for a runner told to stop: each run_program returns at once."""
+    started, for a runner told to stop, and any it starts from now on.
+
+    Each is asked to stop (SIGTERM), so that git, say, removes its locks,
+    and killed if it has not within ``grace`` seconds.
+    """
+    _stopped.set()
+    asked = _running.copy()
+    for group in asked:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(group, signal.SIGTERM)
+    deadline = time.monotonic() + grace
+    while _running & asked and time.monotonic() < deadline:
+        time.sleep(0.05)
     for group in _running.copy():
         with contextlib.suppress(ProcessLookupError):
             os.killpg(group, signal.SIGKILL)
@@ -139,6 +157,8 @@ def run_program(
             start_new_session=True,
         )
         _running.add(process.pid)
+        if _stopped.is_set():  # stop_programs came as it started
+            os.killpg(process.pid, signal.SIGKILL)
         try:
             status: int | None = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:

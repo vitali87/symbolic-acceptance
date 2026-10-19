@@ -1078,47 +1078,143 @@ class CLITests(unittest.TestCase):
         self.assertEqual(requests, [])
 
     def test_ctrl_c_or_sigterm_stops_the_agent_and_leaves_the_run_to_resume(self):
-        for stop in (signal.SIGINT, signal.SIGTERM):
+        # The agent is in its own git commit, held up by a hook, when the
+        # runner is told to stop; once with nobody reading its errors.
+        for stop, reading in (
+            (signal.SIGINT, True),
+            (signal.SIGTERM, True),
+            (signal.SIGINT, False),
+        ):
             with (
-                self.subTest(stop.name),
+                self.subTest(stop.name, reading=reading),
                 tempfile.TemporaryDirectory() as tmp,
                 tempfile.TemporaryDirectory() as outside,
             ):
                 repo(tmp)
+                hook = Path(tmp, ".git", "hooks", "pre-commit")
+                hook.write_text("#!/bin/sh\nsleep 60\n")
+                hook.chmod(0o755)
                 checklist = Path(outside, "acceptance.toml")
                 checklist.write_text(
                     '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
                     '[[require]]\nthat = "ok"\nfail = "not ok"\n'
                 )
                 pid = Path(outside, "pid")
-                slow = (
-                    f"import os, time; open({str(pid)!r}, 'w').write(str(os.getpid()));"
-                    " time.sleep(60)"
+                commits = (
+                    "import os, subprocess; open('app.py', 'w').write('v2');"
+                    f" open({str(pid)!r}, 'w').write(str(os.getpid()));"
+                    " subprocess.run(['git', 'commit', '-qam', 'v2'])"
                 )
                 saved = Path(outside, "run.json")
                 runner = subprocess.Popen(
                     [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
-                    + ["--agent", shlex.join([sys.executable, "-c", slow])]
+                    + ["--agent", shlex.join([sys.executable, "-c", commits])]
                     + ["--cwd", tmp, "--record", str(saved)],
-                    env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                    env=NO_GIT_CONFIG
+                    | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
                     stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                     text=True,
                 )
+                lock = Path(tmp, ".git", "index.lock")
                 deadline = time.monotonic() + 30
-                while not pid.exists() or not pid.read_text():
-                    self.assertLess(
-                        time.monotonic(), deadline, "the agent never started"
-                    )
+                while not pid.exists() or not lock.exists():
+                    self.assertLess(time.monotonic(), deadline, "no commit began")
                     time.sleep(0.05)
+                assert runner.stderr is not None
+                if not reading:
+                    runner.stderr.close()
                 runner.send_signal(stop)
-                _, err = runner.communicate(timeout=20)
-                self.assertEqual(runner.returncode, 128 + stop, err)
-                self.assertNotIn("Traceback", err)
+                runner.wait(timeout=20)
+                if reading:
+                    self.assertNotIn("Traceback", runner.stderr.read())
+                    runner.stderr.close()
+                self.assertEqual(runner.returncode, 128 + stop)
                 with self.assertRaises(ProcessLookupError, msg="the agent was stopped"):
                     os.kill(int(pid.read_text()), 0)
+                self.assertFalse(lock.exists(), "git was let remove its lock")
                 self.assertEqual(json.loads(saved.read_text())["status"], "running")
+
+    def test_a_run_goes_on_through_a_ctrl_c_it_was_told_to_ignore(self):
+        # As a shell runs a job in the background: SIGINT ignored from the start.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            started = Path(outside, "started")
+            agent = (
+                f"import time; open({str(started)!r}, 'w').close(); time.sleep(1);"
+                " open('app.py', 'w').write('v2')"
+            )
+            runner = subprocess.Popen(
+                ["sh", "-c", 'trap "" INT; exec "$@"', "sh"]
+                + [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--agent", shlex.join([sys.executable, "-c", agent]), "--cwd", tmp],
+                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            deadline = time.monotonic() + 30
+            while not started.exists():
+                self.assertLess(time.monotonic(), deadline, "the agent never started")
+                time.sleep(0.05)
+            runner.send_signal(signal.SIGINT)
+            out, err = runner.communicate(timeout=30)
+        self.assertEqual(runner.returncode, 3, err)
+        self.assertIn("no terminal to ask a person", out)
+
+    def test_a_run_from_another_thread_than_the_main_one(self):
+        # Only the main thread can handle signals; the run goes on without.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            results = []
+            thread = threading.Thread(
+                target=lambda: results.append(
+                    cli("run", str(checklist), "--agent", "true", "--cwd", tmp)
+                )
+            )
+            thread.start()
+            thread.join(timeout=60)
+        ((code, out),) = results
+        self.assertEqual(code, 1)
+        self.assertIn("attempt 1 changed nothing", out)
+
+    def test_a_program_started_once_the_runner_is_stopping_ends_at_once(self):
+        # A process of its own, as stopping is for good.
+        script = (
+            "import os, sys, time\n"
+            "from symbolic_acceptance.agents import run_program, stop_programs\n"
+            "stop_programs()\n"
+            "start = time.monotonic()\n"
+            "status, _ = run_program([sys.executable, '-c', 'import time; time.sleep(30)'],"
+            " cwd='.', env=os.environ, timeout=60)\n"
+            "print(status, time.monotonic() - start < 10)\n"
+        )
+        done = subprocess.run(
+            [sys.executable, "-c", script],
+            env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertEqual(done.stdout, f"{-signal.SIGKILL} True\n")
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):

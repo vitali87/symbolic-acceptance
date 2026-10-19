@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import os
 import shlex
 import signal
 import sys
-from collections.abc import Sequence
+import threading
+from collections.abc import Generator, Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
@@ -214,6 +216,50 @@ class TerminalReviewer:
         return answers
 
 
+# Ctrl-C, and what a supervisor or a cancelled CI job sends.
+_STOPS = (signal.SIGINT, signal.SIGTERM)
+
+
+def _stop(signum: int, frame: object) -> None:
+    """End the agent or check running now and stop as soon as the rest has,
+    the record kept as last saved; a second signal, for a request still
+    waiting on the network, quits at once."""
+    for stop in _STOPS:
+        if signal.getsignal(stop) is _stop:
+            signal.signal(stop, _quit)
+    # Whoever read stderr may be gone with the same Ctrl-C.
+    with contextlib.suppress(OSError):
+        name = signal.Signals(signum).name
+        print(f"stopping on {name}; send it again to quit at once", file=sys.stderr)
+    stop_programs()
+    raise SystemExit(128 + signum)
+
+
+def _quit(signum: int, frame: object) -> None:
+    stop_programs(grace=0)
+    os._exit(128 + signum)
+
+
+@contextlib.contextmanager
+def _stoppable() -> Generator[None]:
+    """Stop on Ctrl-C or SIGTERM as :func:`_stop` does, unless the signal was
+    ignored from the start (a shell's background job), or this is not the
+    main thread, the only one that can handle signals."""
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    previous = {
+        stop: signal.signal(stop, _stop)
+        for stop in _STOPS
+        if signal.getsignal(stop) is not signal.SIG_IGN
+    }
+    try:
+        yield
+    finally:
+        for stop, handler in previous.items():
+            signal.signal(stop, handler)
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     checklist = _load(args.file)
     errors = [i for i in lint(checklist, oracles=ORACLES) if i.level == "error"]
@@ -317,19 +363,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if github and args.pr:
             post_report(github, args.pr, markdown(result, checklist), exclude=exclude)
 
-    result = asyncio.run(
-        run(
-            checklist,
-            agent=agent,
-            oracles=oracles,
-            issue=issue,
-            max_attempts=args.max_attempts,
-            resume=resume,
-            on_progress=progress,
-            stop_on_regression=not args.keep_going_on_regression,
-            base=agent.base,
+    with _stoppable():
+        result = asyncio.run(
+            run(
+                checklist,
+                agent=agent,
+                oracles=oracles,
+                issue=issue,
+                max_attempts=args.max_attempts,
+                resume=resume,
+                on_progress=progress,
+                stop_on_regression=not args.keep_going_on_regression,
+                base=agent.base,
+            )
         )
-    )
     print(f"{result.status}: {result.reason}")
     if result.last and result.last.failures:
         sys.stdout.write(result.last.feedback)
@@ -442,25 +489,8 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-# Ctrl-C, and what a supervisor or a cancelled CI job sends.
-_STOPS = (signal.SIGINT, signal.SIGTERM)
-
-
-def _stop(signum: int, frame: object) -> None:
-    """End the agent or check running now, and stop as soon as the rest has,
-    the record kept as last saved; a second signal, for a request still
-    waiting on the network, quits at once."""
-    for stop in _STOPS:
-        signal.signal(stop, lambda signum, frame: os._exit(128 + signum))
-    name = signal.Signals(signum).name
-    print(f"stopping on {name}; send it again to quit at once", file=sys.stderr)
-    stop_programs()
-    raise SystemExit(128 + signum)
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    previous = {stop: signal.signal(stop, _stop) for stop in _STOPS}
     try:
         return int(args.handler(args))
     except BrokenPipeError:
@@ -478,9 +508,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         # What went wrong outside this program, or in how it was set up; the
         # record, if any, keeps the run as it was.
         raise SystemExit(f"error: {error}") from None
-    finally:
-        for stop, handler in previous.items():
-            signal.signal(stop, handler)
 
 
 if __name__ == "__main__":
