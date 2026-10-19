@@ -6,7 +6,7 @@ from pathlib import Path
 from helpers import EXAMPLE, example, finished_run
 
 import symbolic_acceptance as sa
-from symbolic_acceptance import record
+from symbolic_acceptance import record, templates
 from symbolic_acceptance.lint import MAX_EXHAUSTIVE
 from symbolic_acceptance.report import markdown
 
@@ -304,6 +304,23 @@ class LintTests(unittest.TestCase):
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))
+
+    def test_blanks_a_template_leaves_are_reported_until_filled_in(self):
+        findings = [
+            f for f in sa.lint(sa.loads(templates.FEATURE)) if f.code == "placeholder"
+        ]
+        self.assertIn(
+            "q.criterion_1.check still holds the template's "
+            "<test or job that decides it>",
+            [f.message for f in findings],
+        )
+        self.assertTrue(all(f.level == "warning" for f in findings))
+        # Angle brackets around one word are text, as in HTML.
+        page = sa.loads(
+            '[q.a]\nask = "Does the page set its <title>?"\nby = "llm"\n'
+            '[[require]]\nthat = "a"\nfail = "x"\n'
+        )
+        self.assertNotIn("placeholder", [f.code for f in sa.lint(page)])
 
     def test_check_runs_need_frozen_workflows(self):
         unfrozen = sa.loads(

@@ -11,14 +11,16 @@ looks for checklists that load but cannot mean what their author intended:
 * warnings: requirements that can never fail (``never-fails``), ``when``
   conditions that are always or never YES (``when-always``, ``when-never``),
   checks held up behind a person (``gated-by-person``), questions nothing
-  reads (``unused-question``) or asked twice (``duplicate-question``), and
-  CI check runs an attempt could fake (``unfrozen-workflows``);
+  reads (``unused-question``) or asked twice (``duplicate-question``), CI
+  check runs an attempt could fake (``unfrozen-workflows``), and blanks a
+  template left to fill in (``placeholder``);
 * info: checklists too large for the exhaustive checks (``not-exhaustive``).
 """
 
 from __future__ import annotations
 
 import itertools
+import re
 import shlex
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
@@ -54,6 +56,8 @@ _READERS = {
 }
 # What a shell's pipes, command lists and redirections are made of.
 _SHELL = frozenset("|&;<>")
+# A template's blank, such as "<short title>": words in angle brackets.
+_PLACEHOLDER = re.compile(r"<[^<>\n]*\s[^<>\n]*>")
 
 
 @dataclass(frozen=True)
@@ -226,6 +230,30 @@ def _check_runs_findings(checklist: Checklist) -> list[Finding]:
     ]
 
 
+def _texts(value: object, path: str) -> Iterator[tuple[str, str]]:
+    """Every string in the checklist's data, with where it is."""
+    if isinstance(value, str):
+        yield path, value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield from _texts(item, f"{path}.{key}" if path else key)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            yield from _texts(item, f"{path}[{index}]")
+
+
+def _placeholder_findings(checklist: Checklist) -> list[Finding]:
+    return [
+        Finding(
+            "warning",
+            "placeholder",
+            f"{path} still holds the template's {blank[0]}",
+        )
+        for path, text in _texts(checklist.to_dict(), "")
+        for blank in _PLACEHOLDER.finditer(text)
+    ]
+
+
 def lint(
     checklist: Checklist,
     *,
@@ -297,6 +325,7 @@ def lint(
                 )
 
     findings.extend(_check_runs_findings(checklist))
+    findings.extend(_placeholder_findings(checklist))
 
     ordered = checklist.used()
     if len(ordered) <= MAX_EXHAUSTIVE:
