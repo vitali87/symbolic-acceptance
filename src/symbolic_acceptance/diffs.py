@@ -107,18 +107,14 @@ def _strip_prefix(path: str) -> str | None:
 def _header(paths: str) -> tuple[str | None, str | None]:
     """The two paths of a ``diff --git`` header.
 
-    Git leaves a path with spaces unquoted, so the header is split where its
-    two halves name the same file, which they do unless the file was renamed;
-    a rename has ``rename from`` and ``rename to`` lines that give both paths.
+    Git leaves a path with spaces unquoted, so the header is split in the
+    middle: its two halves name the same file, unless the file was renamed,
+    and a rename has ``rename from`` and ``rename to`` lines that give both.
     """
-    half = len(paths) // 2
     if quoted := _QUOTED.match(paths):
-        old, new = quoted[0], paths[quoted.end() + 1 :]
-    elif paths[half : half + 1] == " " and paths[2:half] == paths[half + 3 :]:
-        old, new = paths[:half], paths[half + 1 :]
-    else:
-        old, _, new = paths.partition(" ")
-    return _strip_prefix(old), _strip_prefix(new)
+        return _strip_prefix(quoted[0]), _strip_prefix(paths[quoted.end() + 1 :])
+    half = len(paths) // 2
+    return _strip_prefix(paths[:half]), _strip_prefix(paths[half + 1 :])
 
 
 @dataclass
