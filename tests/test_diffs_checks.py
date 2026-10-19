@@ -198,6 +198,20 @@ class ParseTests(unittest.TestCase):
             "a copy in another file is not this file's line",
         )
 
+    def test_a_path_that_could_name_two_files_names_neither(self):
+        # "b/src/auth.py" is src/auth.py as the diff names it, and also a
+        # file the change adds under that very name.
+        _, lines = parse(
+            "diff --git a/src/auth.py b/src/auth.py\n--- a/src/auth.py\n"
+            "+++ b/src/auth.py\n@@ -1,2 +1,2 @@\n-x = 1\n+x = 2\n lock(user)\n"
+            "diff --git a/b/src/auth.py b/b/src/auth.py\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/b/src/auth.py\n@@ -0,0 +1 @@\n+lock(user)\n"
+        )
+        self.assertIsNone(locate("lock(user)", "b/src/auth.py", lines))
+        found = locate("lock(user)", "src/auth.py", lines)
+        assert found is not None
+        self.assertEqual([d.where for d in found], ["src/auth.py:2"])
+
     def test_a_line_that_starts_with_a_plus_is_found_whole(self):
         # "+retries" also reads as "retries" with the diff's "+", which is
         # too short to prove anything; the line itself is long enough.

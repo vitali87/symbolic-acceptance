@@ -212,9 +212,13 @@ def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | Non
     prove nothing and are rejected.
     """
     parts = [part.strip() for part in quote.split("\n") if part.strip()]
-    # The path as the diff names it, with or without the a/ or b/ before it.
+    # The path as the diff names it, with or without the a/ or b/ before it;
+    # read both ways it may name two files, and then it names neither.
     names = {path, path.removeprefix("a/"), path.removeprefix("b/")}
-    candidates = [line for line in lines if line.path in names and line.text.strip()]
+    files = {line.path for line in lines} & names
+    if len(files) != 1:
+        return None
+    candidates = [line for line in lines if line.path in files and line.text.strip()]
     unchanged = None
     for start in range(len(candidates) - len(parts) + 1):
         window = candidates[start : start + len(parts)]
