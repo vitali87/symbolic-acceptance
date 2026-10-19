@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -96,3 +98,84 @@ def json_response(
     data: Any, status: int = 200, headers: Mapping[str, str] | None = None
 ) -> Response:
     return Response(status, json.dumps(data).encode("utf-8"), dict(headers or {}))
+
+
+GIT_ENV = {
+    "GIT_AUTHOR_NAME": "Test",
+    "GIT_AUTHOR_EMAIL": "test@example.com",
+    "GIT_COMMITTER_NAME": "Test",
+    "GIT_COMMITTER_EMAIL": "test@example.com",
+}
+
+
+def repo(tmp: str) -> Callable[..., str]:
+    """A git repository in ``tmp`` with one commit of ``app.py``."""
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args],
+            cwd=tmp,
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, **GIT_ENV},
+        ).stdout
+
+    git("init", "-q")
+    Path(tmp, "app.py").write_text("print('v1')\n")
+    git("add", ".")
+    git("commit", "-q", "-m", "base")
+    return git
+
+
+def message(
+    data: Any, stop: str = "end_turn", model: str = "claude-opus-5-5"
+) -> Response:
+    """A Messages API reply carrying ``data`` as its JSON text."""
+    return json_response(
+        {
+            "model": model,
+            "stop_reason": stop,
+            "stop_details": {"category": "cyber"} if stop == "refusal" else None,
+            "content": [
+                {"type": "thinking", "thinking": ""},
+                {"type": "text", "text": json.dumps(data)},
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
+    )
+
+
+DIFF = """\
+diff --git a/src/auth.py b/src/auth.py
+index 1111111..2222222 100644
+--- a/src/auth.py
++++ b/src/auth.py
+@@ -10,3 +10,6 @@ def login(user, password):
+     if not check(user, password):
+-        return False
++        record_failure(user)
++        if failures(user) > MAX_FAILURES:
++            lock(user)
++++ not a header, an added line
+     return True
+diff --git a/tests/test_auth.py b/tests/test_auth.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/tests/test_auth.py
+@@ -0,0 +1,2 @@
++def test_lockout():
++    assert locks_after(5)
+diff --git a/old.py b/new.py
+similarity index 100%
+rename from old.py
+rename to new.py
+diff --git a/tests/test_old.py b/tests/test_old.py
+deleted file mode 100644
+index 4444444..0000000
+--- a/tests/test_old.py
++++ /dev/null
+@@ -1 +0,0 @@
+-def test_old(): pass
+"""

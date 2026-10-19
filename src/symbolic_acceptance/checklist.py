@@ -126,6 +126,14 @@ class Question:
         frozen = MappingProxyType({k: _freeze(v) for k, v in self.options.items()})
         object.__setattr__(self, "options", frozen)
 
+    def strings(self, key: str) -> tuple[str, ...]:
+        """An option given as a string or a list of strings; empty if absent."""
+        value = self.options.get(key, ())
+        items = (value,) if isinstance(value, str) else value
+        if not isinstance(items, tuple) or not all(isinstance(i, str) for i in items):
+            raise ValueError(f"q.{self.id}.{key} must be a string or a list of strings")
+        return items
+
 
 @dataclass(frozen=True)
 class Requirement:

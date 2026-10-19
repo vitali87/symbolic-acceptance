@@ -2,28 +2,12 @@ import asyncio
 import json
 import unittest
 
-from helpers import FakeHTTP, json_response
-from test_diffs_checks import DIFF
+from helpers import DIFF, FakeHTTP, json_response, message
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import http
 from symbolic_acceptance.claude import Claude, ClaudeError
 from symbolic_acceptance.judge import Judge
-
-
-def message(data, stop="end_turn", model="claude-opus-5-5"):
-    return json_response(
-        {
-            "model": model,
-            "stop_reason": stop,
-            "stop_details": {"category": "cyber"} if stop == "refusal" else None,
-            "content": [
-                {"type": "thinking", "thinking": ""},
-                {"type": "text", "text": json.dumps(data)},
-            ],
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-        }
-    )
 
 
 def verdict(answer, quotes=(), missing="", tampering=False, reasoning="looked"):
@@ -49,7 +33,7 @@ def judge(*responses, **kwargs):
     return Judge(claude, **kwargs), fake
 
 
-def ask(judge_, diff=DIFF, issue="Logins are not throttled"):
+def ask(judge_, diff=DIFF, issue="Logins are not throttled", question=QUESTION):
     checklist = sa.loads(
         '[q.locks_account]\nask = "Does it lock accounts?"\nby = "llm"\n'
         '[[require]]\nthat = "locks_account"\nfail = "x"\n'
@@ -57,7 +41,7 @@ def ask(judge_, diff=DIFF, issue="Logins are not throttled"):
     context = sa.Context(
         checklist, sa.Attempt("abc123", 1, diff=diff, claims="trust me"), {}, issue
     )
-    return asyncio.run(judge_([QUESTION], context))["locks_account"]
+    return asyncio.run(judge_([question], context))[question.id]
 
 
 class RequestTests(unittest.TestCase):
@@ -110,7 +94,8 @@ class VerdictTests(unittest.TestCase):
         answer = ask(j)
         self.assertTrue(answer.is_met)
         self.assertEqual(
-            answer.evidence, ("src/auth.py:12: if failures(user) > MAX_FAILURES:",)
+            answer.evidence,
+            ("src/auth.py:12 (added): if failures(user) > MAX_FAILURES:",),
         )
         self.assertEqual(answer.by, "llm:claude-opus-5-5")
 
@@ -122,6 +107,28 @@ class VerdictTests(unittest.TestCase):
         self.assertFalse(answer.is_met)
         self.assertIn("quoted nothing", answer.reasoning)
         self.assertEqual(len(fake.requests), 2)
+
+    def test_context_lines_alone_do_not_support_a_yes(self):
+        context_only = verdict("YES", ["if not check(user, password):"])
+        j, _ = judge(context_only, context_only)
+        answer = ask(j)
+        self.assertFalse(answer.is_met)
+        self.assertIn("only lines the change leaves as they were", answer.reasoning)
+
+    def test_absence_needs_no_quote_for_yes(self):
+        j, fake = judge(verdict("YES", [], reasoning="no public signature changed"))
+        absent = sa.Question(
+            "api_stable", "Is the API unchanged?", "llm", options={"kind": "absence"}
+        )
+        self.assertTrue(ask(j, question=absent).is_met)
+        asked = fake.body()["messages"][0]["content"][1]["text"]
+        self.assertIn("This question is about absence.", asked)
+
+    def test_unknown_kind(self):
+        j, _ = judge()
+        odd = sa.Question("x", "X?", "llm", options={"kind": "maybe"})
+        with self.assertRaisesRegex(sa.OracleError, "kind must be"):
+            ask(j, question=odd)
 
     def test_no_says_what_is_missing(self):
         j, _ = judge(
@@ -216,6 +223,30 @@ class HTTPTests(unittest.TestCase):
                 sleep=lambda s: None,
             )
         self.assertEqual(len(fake.requests), 1)
+
+    def test_posts_are_not_retried_when_they_may_have_taken_effect(self):
+        fake = FakeHTTP(json_response({}, 502))
+        with self.assertRaisesRegex(http.HTTPError, "HTTP 502"):
+            http.request(
+                "POST", "https://example.test/x", transport=fake, sleep=lambda s: None
+            )
+        self.assertEqual(len(fake.requests), 1)
+
+        def timeout(request, seconds):
+            raise TimeoutError("read timed out")
+
+        with self.assertRaisesRegex(http.HTTPError, "connection failed"):
+            http.request("POST", "https://example.test/x", transport=timeout)
+
+    def test_retry_after_is_capped(self):
+        slept = []
+        fake = FakeHTTP(
+            json_response({}, 429, {"retry-after": "3600"}), json_response({})
+        )
+        http.request(
+            "POST", "https://example.test/x", transport=fake, sleep=slept.append
+        )
+        self.assertEqual(slept, [http.MAX_WAIT])
 
     def test_connection_errors_are_retried(self):
         import urllib.error

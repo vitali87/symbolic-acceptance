@@ -13,7 +13,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from symbolic_acceptance.answer import Answer
+from symbolic_acceptance.answer import Answer, yes_no
 from symbolic_acceptance.checklist import (
     AllOf,
     AnyOf,
@@ -25,7 +25,7 @@ from symbolic_acceptance.checklist import (
     Requirement,
     render,
 )
-from symbolic_acceptance.logic import FAIL, OPEN, Facts, Status, statuses, value
+from symbolic_acceptance.logic import FAIL, OPEN, Facts, Status, facts, statuses, value
 
 __all__ = [
     "Assessment",
@@ -91,26 +91,22 @@ class Assessment:
     failures: tuple[Failure, ...]
 
 
-def _facts(answers: Mapping[str, Answer]) -> dict[str, bool]:
-    return {qid: answer.is_met for qid, answer in answers.items()}
-
-
 def _explain(
-    expr: Expr, checklist: Checklist, answers: Mapping[str, Answer], facts: Facts
+    expr: Expr, checklist: Checklist, answers: Mapping[str, Answer], known: Facts
 ) -> Reason:
-    actual = value(expr, facts)
+    actual = value(expr, known)
     if actual is None:
         raise ValueError(f"{render(expr)} is not decided yet")
     if isinstance(expr, Ref):
         return Fact(checklist.questions[expr.id], answers[expr.id])
     if isinstance(expr, Not):
-        return Group(expr, actual, (_explain(expr.item, checklist, answers, facts),))
+        return Group(expr, actual, (_explain(expr.item, checklist, answers, known),))
     # The items with the expression's own value decided it: the NO items of a
     # NO all(), the YES items of a YES any(), and every item otherwise.
     parts = tuple(
-        _explain(item, checklist, answers, facts)
+        _explain(item, checklist, answers, known)
         for item in expr.items
-        if value(item, facts) is actual
+        if value(item, known) is actual
     )
     # Undoing a NO all() or a YES any() takes every part; the others, one.
     each = not actual if isinstance(expr, AllOf) else actual
@@ -119,21 +115,21 @@ def _explain(
 
 def explain(expr: Expr, checklist: Checklist, answers: Mapping[str, Answer]) -> Reason:
     """Explain a decided expression; raises ``ValueError`` if it is open."""
-    return _explain(expr, checklist, answers, _facts(answers))
+    return _explain(expr, checklist, answers, facts(answers))
 
 
 def assess(checklist: Checklist, answers: Mapping[str, Answer]) -> Assessment:
     """Decide what the answers in hand say about the attempt."""
-    facts = _facts(answers)
-    current = statuses(checklist, facts)
+    known = facts(answers)
+    current = statuses(checklist, known)
     failures = tuple(
         Failure(
             requirement,
-            reason=_explain(requirement.that, checklist, answers, facts),
+            reason=_explain(requirement.that, checklist, answers, known),
             because=(
                 None
                 if requirement.when is None
-                else _explain(requirement.when, checklist, answers, facts)
+                else _explain(requirement.when, checklist, answers, known)
             ),
         )
         for requirement in checklist.requirements
@@ -144,10 +140,6 @@ def assess(checklist: Checklist, answers: Mapping[str, Answer]) -> Assessment:
     return Assessment("open" if OPEN in current.values() else "approved", current, ())
 
 
-def _word(flag: bool) -> str:
-    return "YES" if flag else "NO"
-
-
 def _one_line(text: str) -> str:
     return " ".join(text.split())
 
@@ -156,7 +148,7 @@ def _lines(reason: Reason, wanted: bool, indent: str) -> list[str]:
     if isinstance(reason, Fact):
         question, answer = reason.question, reason.answer
         lines = [
-            f"{indent}- {question.id}: needs {_word(wanted)}, got {answer.word} "
+            f"{indent}- {question.id}: needs {yes_no(wanted)}, got {answer.word} "
             f"[{answer.by or question.by}]",
             f"{indent}  Q: {question.ask}",
         ]
@@ -167,7 +159,7 @@ def _lines(reason: Reason, wanted: bool, indent: str) -> list[str]:
     if isinstance(reason.expr, Not):
         return _lines(reason.parts[0], not wanted, indent)
     how = "fix each of" if reason.fix == "each" else "fix any one of"
-    lines = [f"{indent}- {render(reason.expr)}: needs {_word(wanted)}; {how}:"]
+    lines = [f"{indent}- {render(reason.expr)}: needs {yes_no(wanted)}; {how}:"]
     for part in reason.parts:
         lines += _lines(part, wanted, indent + "  ")
     return lines
@@ -176,8 +168,8 @@ def _lines(reason: Reason, wanted: bool, indent: str) -> list[str]:
 def _because(reason: Reason) -> str:
     if isinstance(reason, Fact):
         return f"   Applies because {reason.question.id} is YES."
-    facts = ", ".join(f"{f.question.id} is {_word(f.actual)}" for f in reason.facts())
-    return f"   Applies because {render(reason.expr)} is YES ({facts})."
+    listed = ", ".join(f"{f.question.id} is {yes_no(f.actual)}" for f in reason.facts())
+    return f"   Applies because {render(reason.expr)} is YES ({listed})."
 
 
 def render_failures(failures: Sequence[Failure]) -> str:

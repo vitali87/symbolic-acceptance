@@ -117,16 +117,25 @@ hand the attempt to a person.
 
 - The judge gets the diff, computed by the runner from git or GitHub, inside
   a block with a boundary the agent cannot predict. The agent's own account
-  of its change is never shown to it.
-- A YES from the judge must quote the diff, and the quotes are checked. An
-  unsupported YES counts as NO. With `samples > 1`, every sample must agree.
+  of its change is never shown to it. The runner's git overrides whatever the
+  checkout's configuration could change (hooks, replace refs, textconv and
+  diff drivers, path prefixes), since the agent can write that configuration.
+- A YES from the judge must quote the diff, at least one line the change adds
+  or removes, and the quotes are checked; an unsupported YES counts as NO.
+  A question marked `kind = "absence"` ("does it leave the API unchanged?")
+  has nothing to quote for its YES, so its NO quotes what breaks it instead.
+  With `samples > 1`, every sample must say YES.
 - Text in the change addressed to a reviewer escalates instead of being
   answered, and so does a diff too large to judge whole.
 - `check = "frozen"` fails any change to the checklist, CI configuration or
   existing tests; a new regression test can be allowed with `allow_new`.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
-  answer, never bots or the agent's own account, and only for the commit the
-  question was asked about.
+  answer, never bots or the agent's own account, and only after the question
+  was asked about that commit. The runner's own markers count only at the
+  start of a comment it could have written, so text quoted in a comment
+  cannot pose as one.
+- Keep the run record outside the agent's checkout; inside it, the record
+  would be committed with the attempt. The command line refuses to.
 - Run the agent without credentials that can comment as a reviewer. A reply
   posted with your token reads as yours; nothing in a comment can tell the
   agent apart from you.
@@ -154,9 +163,13 @@ github = GitHub("owner/repo")
 
 result = asyncio.run(sa.run(
     checklist,
-    agent=CommandAgent(["claude", "-p", "--permission-mode", "auto"], cwd="."),
+    agent=CommandAgent(
+        ["claude", "-p", "--permission-mode", "auto"],
+        cwd="work",               # the agent's checkout
+        push="agent/issue-342",   # so CI runs on every attempt
+    ),
     oracles={
-        "ci": Checks(cwd=".", fallback=GitHubChecks(github, wait=1800)),
+        "ci": Checks(cwd="work", fallback=GitHubChecks(github, wait=1800)),
         "llm": Judge(),
         "human": Reviews(github, number=57, exclude=["agent-account"]),
     },
@@ -175,8 +188,10 @@ symbolic-acceptance template bug > acceptance.toml   # or: draft issue.md (Claud
 symbolic-acceptance lint acceptance.toml             # before a person approves it
 symbolic-acceptance digest acceptance.toml           # pin the approved version
 symbolic-acceptance run acceptance.toml --issue issue.md --agent "claude -p" \
-    --record run.json --github owner/repo --pr 57
-symbolic-acceptance run acceptance.toml --agent "claude -p" --resume run.json
+    --cwd work --push agent/issue-342 --record run.json \
+    --github owner/repo --pr 57
+symbolic-acceptance run acceptance.toml --agent "claude -p" --cwd work \
+    --push agent/issue-342 --github owner/repo --pr 57 --resume run.json
 symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 ```
 

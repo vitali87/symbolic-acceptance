@@ -23,7 +23,7 @@ from typing import Any, Literal
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Checklist, Question, render
 from symbolic_acceptance.feedback import Failure, assess, render_failures
-from symbolic_acceptance.logic import DEFAULT_LAST, NA, PASS, Status, by_oracle, plan
+from symbolic_acceptance.logic import DEFAULT_LAST, PASS, Status, by_oracle, facts, plan
 
 __all__ = [
     "APPROVED",
@@ -215,9 +215,9 @@ class Task:
             "",
         ]
         for question in checklist.questions.values():
-            frozen = _globs(question.options, "paths")
+            frozen = _globs(question, "paths")
             if question.options.get("check") == "frozen" and frozen:
-                allowed = _globs(question.options, "allow_new")
+                allowed = _globs(question, "allow_new")
                 note = f" (new files matching {allowed} are allowed)" if allowed else ""
                 lines += [f"Do not change files matching {frozen}{note}.", ""]
         for requirement in checklist.requirements:
@@ -248,10 +248,8 @@ class Task:
         return "\n".join(lines) + "\n"
 
 
-def _globs(options: Mapping[str, object], key: str) -> str:
-    value = options.get(key, ())
-    patterns = (value,) if isinstance(value, str) else value
-    return ", ".join(f"`{p}`" for p in patterns) if isinstance(patterns, tuple) else ""
+def _globs(question: Question, key: str) -> str:
+    return ", ".join(f"`{pattern}`" for pattern in question.strings(key))
 
 
 @dataclass(frozen=True)
@@ -342,8 +340,7 @@ async def evaluate(
     known = dict(answers or {})
     done = list(rounds)
     while True:
-        facts = {qid: answer.is_met for qid, answer in known.items()}
-        ask = plan(checklist, facts, last=lambda q: q.by in deferred)
+        ask = plan(checklist, facts(known), last=lambda q: q.by in deferred)
         if not ask:
             # plan() stops only once a requirement fails or none is left open.
             return Evaluation.from_answers(checklist, attempt, known, done)
@@ -407,7 +404,7 @@ def _verdict(
     if stop_on_regression:
         for earlier in evaluations[:-1]:
             regressed = sorted(
-                rid for rid in failing if earlier.requirements.get(rid) in (PASS, NA)
+                rid for rid in failing if earlier.requirements.get(rid) == PASS
             )
             if regressed:
                 return ESCALATED, (

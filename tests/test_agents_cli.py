@@ -9,38 +9,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import EXAMPLE, FakeHTTP, example
-from test_judge import message
+from helpers import EXAMPLE, GIT_ENV, FakeHTTP, example, message, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import AgentError, CommandAgent, local_diff
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.cli import main
 from symbolic_acceptance.draft import DraftError, draft
-
-GIT_ENV = {
-    "GIT_AUTHOR_NAME": "Test",
-    "GIT_AUTHOR_EMAIL": "test@example.com",
-    "GIT_COMMITTER_NAME": "Test",
-    "GIT_COMMITTER_EMAIL": "test@example.com",
-}
-
-
-def repo(tmp):
-    def git(*args):
-        subprocess.run(
-            ["git", *args],
-            cwd=tmp,
-            check=True,
-            capture_output=True,
-            env={**os.environ, **GIT_ENV},
-        )
-
-    git("init", "-q")
-    Path(tmp, "app.py").write_text("print('v1')\n")
-    git("add", ".")
-    git("commit", "-q", "-m", "base")
-    return git
 
 
 class CommandAgentTests(unittest.TestCase):
@@ -76,6 +51,45 @@ class CommandAgentTests(unittest.TestCase):
             ).stdout
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(local_diff(tmp)(attempt), attempt.diff)
+
+    def test_the_checkout_cannot_rig_the_diff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            Path(tmp, "tests").mkdir()
+            Path(tmp, "tests", "test_app.py").write_text("assert True\n")
+            git("add", ".")
+            git("commit", "-qm", "tests")
+            # What an agent could do to hide a change to a frozen test file.
+            git("config", "diff.noprefix", "true")
+            git("config", "diff.relative", "true")
+            Path(tmp, ".gitattributes").write_text("*.py -diff\n")
+            script = "open('tests/test_app.py', 'w').write('assert False or True\\n')"
+            agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
+            attempt = asyncio.run(agent(self.task()))
+        self.assertIn(
+            "diff --git a/tests/test_app.py b/tests/test_app.py", attempt.diff
+        )
+        self.assertIn("+assert False or True", attempt.diff)
+
+    def test_attempts_are_pushed(self):
+        with (
+            tempfile.TemporaryDirectory() as remote,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            subprocess.run(["git", "init", "-q", "--bare", remote], check=True)
+            git = repo(tmp)
+            git("remote", "add", "origin", remote)
+            script = "open('app.py', 'w').write(\"print('v2')\\n\")"
+            agent = CommandAgent([sys.executable, "-c", script], cwd=tmp, push="agent")
+            attempt = asyncio.run(agent(self.task()))
+            pushed = subprocess.run(
+                ["git", "rev-parse", "refs/heads/agent"],
+                cwd=remote,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+        self.assertEqual(pushed, attempt.ref)
 
     def test_no_change_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -168,6 +182,29 @@ class CLITests(unittest.TestCase):
             del truth["suite_green"]
             answers.write_text(json.dumps(dict(truth, backs_off=True)))
             self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 2)
+
+    def test_run_refuses_setups_that_cannot_work(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            # The example's ci questions need GitHub check runs.
+            with self.assertRaisesRegex(SystemExit, "--github and --push"):
+                cli("run", str(EXAMPLE), "--agent", "true", "--cwd", tmp)
+            local = Path(tmp, "local.toml")
+            local.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            record = str(Path(tmp, "run.json"))
+            with self.assertRaisesRegex(SystemExit, "outside the agent's checkout"):
+                cli(
+                    "run",
+                    str(local),
+                    "--agent",
+                    "true",
+                    "--cwd",
+                    tmp,
+                    "--record",
+                    record,
+                )
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):

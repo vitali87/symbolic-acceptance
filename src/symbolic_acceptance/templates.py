@@ -19,7 +19,10 @@ An acceptance checklist is TOML with two parts.
   any other key is an option for that oracle: for "ci", check = "<name>"
   names the CI check that answers it, run = "<command>" runs a command, and
   check = "frozen" with paths = [<globs>] and allow_new = [<globs>] checks
-  that frozen files are left alone.
+  that frozen files are left alone. For "llm", kind = "absence" marks a
+  question whose YES means the change avoids something ("Does it leave the
+  public API unchanged?"): there is nothing to quote for that YES, so the
+  judge quotes what breaks it for a NO instead.
 
 [[require]] declares one requirement. Every requirement must hold for the
 attempt to be approved; each one that fails is reported to the coding agent
@@ -118,6 +121,7 @@ check = "<test or job that decides it>"
 [q.constraint_1]
 ask = "<stated constraint, e.g. 'Does the change keep the public API unchanged?'>"
 by = "llm"
+kind = "absence"
 
 [q.criterion_tests]
 ask = "Do new tests cover each acceptance criterion?"

@@ -8,7 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from test_agents_cli import GIT_ENV, repo
+from helpers import GIT_ENV, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import CommandAgent

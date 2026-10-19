@@ -8,6 +8,10 @@ The task prompt is sent on standard input. If the agent leaves changes
 uncommitted, they are committed for it, so every attempt is one commit; the
 diff is computed here with git, from where the run started to that commit,
 and the agent's own output is kept only as its claims.
+
+The agent can write to the checkout's git configuration, so every git
+command here overrides what that configuration could change: hooks,
+replace refs, textconv and external diff drivers, path prefixes, quoting.
 """
 
 from __future__ import annotations
@@ -19,7 +23,27 @@ from pathlib import Path
 
 from symbolic_acceptance.loop import Attempt, Task
 
-__all__ = ["AgentError", "CommandAgent", "git", "local_diff"]
+__all__ = ["AgentError", "CommandAgent", "diff", "git", "local_diff"]
+
+_OVERRIDES = (
+    "--no-replace-objects",
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "core.quotePath=true",
+)
+_DIFF = (
+    "diff",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--text",
+    "--no-relative",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+)
 
 
 class AgentError(RuntimeError):
@@ -27,8 +51,9 @@ class AgentError(RuntimeError):
 
 
 def git(cwd: str | Path, *args: str) -> str:
+    """Run git in ``cwd`` with the checkout's own settings overridden."""
     done = subprocess.run(
-        ["git", *args],
+        ["git", *_OVERRIDES, *args],
         cwd=cwd,
         capture_output=True,
         text=True,
@@ -40,15 +65,18 @@ def git(cwd: str | Path, *args: str) -> str:
     return done.stdout
 
 
+def diff(cwd: str | Path, base: str, head: str) -> str:
+    """The unified diff from ``base`` to ``head``, as plain text."""
+    return git(cwd, *_DIFF, base, head)
+
+
 def local_diff(cwd: str | Path) -> Callable[[Attempt], str]:
     """A ``run(diff=...)`` source: ``git diff`` from the attempt's base to it."""
 
     def source(attempt: Attempt) -> str:
         if not attempt.base:
             raise AgentError("the attempt has no base commit to diff against")
-        return git(
-            cwd, "diff", "--no-color", "--no-ext-diff", attempt.base, attempt.ref
-        )
+        return diff(cwd, attempt.base, attempt.ref)
 
     return source
 
@@ -57,7 +85,9 @@ class CommandAgent:
     """Run ``argv`` in ``cwd`` once per attempt.
 
     ``base`` is the commit attempts are compared with; it defaults to the
-    checkout's HEAD when the first attempt starts.
+    checkout's HEAD when the first attempt starts, so pass the recorded base
+    when resuming a run. With ``push``, each attempt is pushed to that branch
+    of ``remote``, so CI runs on it.
     """
 
     def __init__(
@@ -68,6 +98,8 @@ class CommandAgent:
         timeout: float = 3600.0,
         commit: bool = True,
         base: str | None = None,
+        push: str | None = None,
+        remote: str = "origin",
     ) -> None:
         if not argv:
             raise ValueError("argv must name the agent's command")
@@ -76,6 +108,8 @@ class CommandAgent:
         self.timeout = timeout
         self.commit = commit
         self.base = base
+        self.push = push
+        self.remote = remote
 
     def _head(self) -> str:
         return git(self.cwd, "rev-parse", "HEAD").strip()
@@ -105,10 +139,17 @@ class CommandAgent:
         after = self._head()
         if after == before:
             raise AgentError(f"attempt {task.number} changed nothing")
-        diff = git(self.cwd, "diff", "--no-color", "--no-ext-diff", self.base, after)
+        if self.push is not None:
+            git(
+                self.cwd,
+                "push",
+                "--quiet",
+                self.remote,
+                f"{after}:refs/heads/{self.push}",
+            )
         return Attempt(
             ref=after,
-            diff=diff,
+            diff=diff(self.cwd, self.base, after),
             claims=done.stdout.strip()[-4000:],
             base=self.base,
         )

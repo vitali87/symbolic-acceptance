@@ -14,7 +14,14 @@ from collections.abc import Collection, Iterator
 from dataclasses import dataclass
 from typing import Literal
 
-from symbolic_acceptance.checklist import Checklist, Expr, Requirement, refs, render
+from symbolic_acceptance.checklist import (
+    Checklist,
+    Expr,
+    Question,
+    Requirement,
+    refs,
+    render,
+)
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
 
 __all__ = ["MAX_EXHAUSTIVE", "Issue", "lint"]
@@ -108,6 +115,22 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
     return issues
 
 
+def _option_issues(question: Question) -> list[Issue]:
+    """Options the built-in oracles read, checked before any run needs them."""
+    problems: list[str] = []
+    options = question.options
+    try:
+        if options.get("check") == "frozen" and not question.strings("paths"):
+            problems.append('check = "frozen" needs paths = [<frozen globs>]')
+        question.strings("allow_new")
+        question.strings("run")
+    except ValueError as error:
+        problems.append(str(error))
+    if options.get("kind", "presence") not in ("presence", "absence"):
+        problems.append('kind must be "presence" or "absence"')
+    return [Issue("error", "bad-option", problem, question.id) for problem in problems]
+
+
 def lint(
     checklist: Checklist,
     *,
@@ -119,6 +142,7 @@ def lint(
     used = set(checklist.used())
 
     for question in checklist.questions.values():
+        issues.extend(_option_issues(question))
         if question.id not in used:
             issues.append(
                 Issue(

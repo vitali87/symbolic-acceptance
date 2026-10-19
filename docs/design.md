@@ -78,8 +78,10 @@ the dangerous error is a false YES, which re-sampling NOs does nothing about.
 The judge instead:
 
 - returns structured JSON (`output_config.format`);
-- must quote the diff for a YES; the quotes are checked, and an unsupported
-  YES counts as NO;
+- must quote the diff for a YES, at least one line the change adds or
+  removes; the quotes are checked, and an unsupported YES counts as NO. A
+  question about absence (`kind = "absence"`) has nothing to quote for its
+  YES, so its NO quotes what breaks it instead;
 - with `samples > 1`, needs every sample to say YES;
 - escalates on text addressed to the reviewer, on a refusal, and on a diff
   too large to read whole (it never truncates);
@@ -102,6 +104,8 @@ conclusions: statuses are re-derived on load and must match.
 No progress and regression compare *requirement* statuses between attempts.
 Raw answers flip for reasons that do not matter (a moot question, a judge's
 wording); requirement statuses only change when the outcome does.
+A regression is a requirement that passed and now fails; one that newly
+applies (its `when` turned YES) goes back to the agent as ordinary feedback.
 Escalating on a regression is the default, as proposed, and can be turned
 off (`stop_on_regression=False`).
 
@@ -113,7 +117,12 @@ off (`stop_on_regression=False`).
   unrelated reason (an import error) does not count, and `test_targets_bug`
   asks the judge whether it exercises the reported behaviour.
 - On GitHub, only owners, members and collaborators (or an allowlist) answer,
-  never bots or the agent's account, and only for the commit asked about.
+  never bots or the agent's account, and only after the question was asked
+  about that commit. The runner's markers count only at the start of a
+  comment it could have written.
+- The runner's git overrides what the agent's checkout configuration could
+  change (hooks, replace refs, textconv, diff prefixes), and the run record
+  is kept outside the checkout.
 - An oracle may only answer the questions it was asked.
 - The checklist's digest is recorded; resuming with a changed checklist
   fails.

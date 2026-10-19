@@ -24,6 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from typing import Literal
 
+from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import (
     AllOf,
     Checklist,
@@ -42,6 +43,7 @@ __all__ = [
     "PASS",
     "Status",
     "by_oracle",
+    "facts",
     "plan",
     "status",
     "statuses",
@@ -58,6 +60,11 @@ OPEN: Status = "open"
 DEFAULT_LAST = ("human",)
 
 Facts = Mapping[str, bool]
+
+
+def facts(answers: Mapping[str, Answer]) -> dict[str, bool]:
+    """The YES/NO of each answer, which is all the logic needs."""
+    return {qid: answer.is_met for qid, answer in answers.items()}
 
 
 def value(expr: Expr, facts: Facts) -> bool | None:

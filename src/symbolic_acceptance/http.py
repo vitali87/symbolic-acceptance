@@ -18,7 +18,12 @@ from typing import Any
 
 __all__ = ["HTTPError", "Response", "Transport", "request"]
 
+IDEMPOTENT = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504, 529})
+# Statuses meaning the server did not act on the request, so even a POST
+# can be sent again.
+UNPROCESSED = frozenset({408, 429, 529})
+MAX_WAIT = 60.0
 
 
 @dataclass(frozen=True)
@@ -60,20 +65,20 @@ def urlopen(request: urllib.request.Request, timeout: float) -> Response:
         return Response(error.code, error.read(), dict(error.headers.items()))
 
 
-def _retry_after(response: Response | None, attempt: int) -> float:
-    if response is not None:
-        value = response.header("retry-after")
-        if value:
+def _wait(response: Response | None, attempt: int) -> float:
+    """Seconds before the next try: the server's ``Retry-After``, else backoff."""
+    value = response.header("retry-after") if response is not None else None
+    if value:
+        try:
+            seconds = float(value)
+        except ValueError:
             try:
-                return max(0.0, float(value))
-            except ValueError:
-                try:
-                    return max(
-                        0.0, parsedate_to_datetime(value).timestamp() - time.time()
-                    )
-                except (TypeError, ValueError):
-                    pass
-    return min(60.0, 2.0**attempt)
+                seconds = parsedate_to_datetime(value).timestamp() - time.time()
+            except (TypeError, ValueError):
+                seconds = 2.0**attempt
+    else:
+        seconds = 2.0**attempt
+    return min(MAX_WAIT, max(0.0, seconds))
 
 
 def _detail(response: Response) -> str:
@@ -102,10 +107,13 @@ def request(
     transport: Transport | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Response:
-    """Send a request; retry timeouts, rate limits and server errors.
+    """Send a request, retrying failures that are safe to retry.
 
     Returns the response for any 2xx status and raises :class:`HTTPError`
-    otherwise, after ``retries`` further tries on retryable failures.
+    otherwise. Idempotent methods are retried on connection failures, rate
+    limits and server errors. Other methods, such as POST, may already have
+    taken effect when they fail, so they are retried only when the server
+    says it did not process the request (408, 429, 529).
     """
     send = transport or urlopen
     data = None
@@ -113,22 +121,24 @@ def request(
     if json_body is not None:
         data = json.dumps(json_body).encode("utf-8")
         all_headers.setdefault("content-type", "application/json")
-    response: Response | None = None
-    for attempt in range(retries + 1):
+    idempotent = method in IDEMPOTENT
+    attempt = 0
+    while True:
+        final = attempt == retries
         prepared = urllib.request.Request(
             url, data=data, headers=all_headers, method=method
         )
         try:
             response = send(prepared, timeout)
         except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
-            if attempt == retries:
+            if final or not idempotent:
                 raise HTTPError(method, url, 0, f"connection failed: {error}") from None
-            sleep(_retry_after(None, attempt))
-            continue
-        if 200 <= response.status < 300:
-            return response
-        if response.status not in RETRY_STATUSES or attempt == retries:
-            break
-        sleep(_retry_after(response, attempt))
-    assert response is not None
-    raise HTTPError(method, url, response.status, _detail(response))
+            sleep(_wait(None, attempt))
+        else:
+            if 200 <= response.status < 300:
+                return response
+            retryable = RETRY_STATUSES if idempotent else UNPROCESSED
+            if final or response.status not in retryable:
+                raise HTTPError(method, url, response.status, _detail(response))
+            sleep(_wait(response, attempt))
+        attempt += 1

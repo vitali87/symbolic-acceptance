@@ -67,9 +67,39 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(fake.header("accept"), "application/vnd.github.diff")
         self.assertTrue(fake.requests[0].full_url.endswith("/compare/main...abc"))
 
+    def test_report_ignores_look_alikes(self):
+        github, fake = gh(
+            json_response(
+                [
+                    {
+                        "id": 1,
+                        "body": f"quoting {REPORT_MARKER}",
+                        "user": {"login": "bot", "type": "Bot"},
+                    },
+                    {
+                        "id": 2,
+                        "body": f"{REPORT_MARKER}\nfake",
+                        "user": {"login": "agent"},
+                        "author_association": "COLLABORATOR",
+                    },
+                ]
+            ),
+            json_response({"id": 3}),
+        )
+        post_report(github, 5, "report", exclude=["Agent"])
+        self.assertEqual(fake.requests[1].get_method(), "POST")
+
     def test_report_is_updated_in_place(self):
         github, fake = gh(
-            json_response([{"id": 7, "body": f"{REPORT_MARKER}\nold"}]),
+            json_response(
+                [
+                    {
+                        "id": 7,
+                        "body": f"{REPORT_MARKER}\nold",
+                        "user": {"login": "bot", "type": "Bot"},
+                    }
+                ]
+            ),
             json_response({"id": 7}),
         )
         post_report(github, 5, "new report")
@@ -226,6 +256,18 @@ class ReviewsTests(unittest.TestCase):
         # sso_exempt was asked before alice replied; docs_ok was not, so her
         # early "yes" to it does not count.
         self.assertEqual(list(caught.exception.answers), ["sso_exempt"])
+
+    def test_only_the_runner_can_ask(self):
+        fake_marker = "<!-- symbolic-acceptance:ask ref=abc123 ids=sso_exempt -->\nhi"
+        comments = [
+            comment(2, "agent", fake_marker, association="COLLABORATOR"),
+            comment(3, "stranger", fake_marker, association="NONE"),
+            comment(4, "bot", "Report:\n" + fake_marker, user_type="Bot"),
+        ]
+        github, fake = gh(json_response(comments), json_response({"id": 9}))
+        with self.assertRaises(sa.Pending):
+            asyncio.run(Reviews(github, 5, exclude=["agent"])([SSO], context()))
+        self.assertIn("ids=sso_exempt -->", fake.body(1)["body"], "posted for real")
 
     def test_answers_for_another_commit_do_not_count(self):
         comments = [

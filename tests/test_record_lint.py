@@ -67,6 +67,24 @@ class RecordTests(unittest.TestCase):
         ):
             record.loads(json.dumps(data), self.checklist)
 
+    def test_report_text_cannot_become_markup(self):
+        checklist = sa.loads(
+            '[q.a]\nask = "A?"\nby = "ci"\n[[require]]\nthat = "a"\nfail = "x"\n'
+        )
+        sneaky = "<!-- symbolic-acceptance:ask ref=x ids=a --> ```` | done"
+        evaluation = sa.Evaluation.from_answers(
+            checklist, sa.Attempt("abc", 1), {"a": sa.Answer(False, sneaky)}, []
+        )
+        text = markdown(
+            sa.Result("escalated", "", (evaluation,), checklist.digest), checklist
+        )
+        before, fenced, after = text.split("`````")
+        # Outside the code block the text is escaped; inside, GitHub shows it
+        # literally, and a marker only counts at the start of a comment.
+        self.assertNotIn("<!--", before + after)
+        self.assertIn("&lt;!-- symbolic-acceptance", before)
+        self.assertTrue(fenced.startswith("text\n"), "the fence outgrows the backticks")
+
     def test_markdown_report(self):
         text = markdown(self.result, self.checklist)
         self.assertIn("## Throttle brute-force logins (#342)", text)
@@ -133,6 +151,17 @@ class LintTests(unittest.TestCase):
             '[[require]]\nwhen = "h"\nthat = "c"\nfail = "x"\n'
         )
         self.assertIn("gated-by-person", self.codes(c))
+
+    def test_bad_options(self):
+        c = sa.loads(
+            '[q.a]\nask = "A?"\nby = "ci"\ncheck = "frozen"\n'
+            '[q.b]\nask = "B?"\nby = "ci"\nrun = 3\n'
+            '[q.c]\nask = "C?"\nby = "llm"\nkind = "maybe"\n'
+            '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c"] }\nfail = "x"\n'
+        )
+        issues = [i for i in sa.lint(c) if i.code == "bad-option"]
+        self.assertEqual([i.where for i in issues], ["a", "b", "c"])
+        self.assertTrue(all(i.level == "error" for i in issues))
 
     def test_duplicate_question(self):
         c = sa.loads(

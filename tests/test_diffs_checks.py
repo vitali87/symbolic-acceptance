@@ -2,44 +2,13 @@ import asyncio
 import sys
 import tempfile
 import unittest
+from pathlib import Path
+
+from helpers import DIFF, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.checks import Checks, Commands, frozen_files
 from symbolic_acceptance.diffs import locate, parse
-
-DIFF = """\
-diff --git a/src/auth.py b/src/auth.py
-index 1111111..2222222 100644
---- a/src/auth.py
-+++ b/src/auth.py
-@@ -10,3 +10,6 @@ def login(user, password):
-     if not check(user, password):
--        return False
-+        record_failure(user)
-+        if failures(user) > MAX_FAILURES:
-+            lock(user)
-+++ not a header, an added line
-     return True
-diff --git a/tests/test_auth.py b/tests/test_auth.py
-new file mode 100644
-index 0000000..3333333
---- /dev/null
-+++ b/tests/test_auth.py
-@@ -0,0 +1,2 @@
-+def test_lockout():
-+    assert locks_after(5)
-diff --git a/old.py b/new.py
-similarity index 100%
-rename from old.py
-rename to new.py
-diff --git a/tests/test_old.py b/tests/test_old.py
-deleted file mode 100644
-index 4444444..0000000
---- a/tests/test_old.py
-+++ /dev/null
-@@ -1 +0,0 @@
--def test_old(): pass
-"""
 
 
 class ParseTests(unittest.TestCase):
@@ -69,6 +38,24 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(
             [f.path for f in files][:2], ["src/auth.py", "tests/test_auth.py"]
         )
+
+    def test_quoted_paths_from_real_git(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            Path(tmp, "docs").mkdir()
+            Path(tmp, "docs", "naïve café.md").write_text("hi\n")
+            Path(tmp, "app.py").write_text("print('v2')\n")
+            git("add", ".")
+            git("commit", "-qm", "change")
+            diff = git("diff", "HEAD~1", "HEAD")
+        self.assertIn("\\303", diff, "git quoted the path with octal escapes")
+        files, _ = parse(diff)
+        self.assertEqual(
+            [(f.path, f.status) for f in files],
+            [("app.py", "modified"), ("docs/naïve café.md", "added")],
+        )
+        q = sa.Question("frozen", "Frozen?", "ci", options={"paths": ["docs/*"]})
+        self.assertFalse(frozen_files(q, context(diff)).is_met)
 
     def test_locate(self):
         _, lines = parse(DIFF)
@@ -109,7 +96,7 @@ class FrozenTests(unittest.TestCase):
     def test_needs_paths(self):
         with self.assertRaises(sa.OracleError):
             frozen_files(self.question(), context(DIFF))
-        with self.assertRaisesRegex(sa.OracleError, "list of glob patterns"):
+        with self.assertRaisesRegex(ValueError, "a string or a list of strings"):
             frozen_files(self.question(paths=3), context(DIFF))
 
 

@@ -207,6 +207,18 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result.status, sa.ESCALATED)
         self.assertIn("regression: suite_green", result.reason)
 
+    def test_a_requirement_that_newly_applies_is_not_a_regression(self):
+        result, agent = run(
+            self.checklist,
+            [
+                dict(PASSING, new_test=False),
+                dict(PASSING, touches_sso=True, sso_exempt=False),
+                PASSING,
+            ],
+        )
+        self.assertEqual(result.status, sa.APPROVED)
+        self.assertEqual([f.requirement.id for f in agent.tasks[2].feedback], ["sso"])
+
     def test_regression_can_go_back_to_the_agent(self):
         result, _ = run(
             self.checklist,

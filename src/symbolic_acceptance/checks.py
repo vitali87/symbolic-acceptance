@@ -33,24 +33,16 @@ __all__ = ["Checks", "Commands", "Handler", "frozen_files"]
 Handler = Callable[[Question, Context], Answer | Awaitable[Answer]]
 
 
-def _patterns(question: Question, key: str) -> tuple[str, ...]:
-    value = question.options.get(key, ())
-    patterns = (value,) if isinstance(value, str) else value
-    if not isinstance(patterns, tuple) or not all(isinstance(p, str) for p in patterns):
-        raise OracleError(f"q.{question.id}.{key} must be a list of glob patterns")
-    return patterns
-
-
 def _matches(path: str | None, patterns: Sequence[str]) -> bool:
     return path is not None and any(fnmatch.fnmatchcase(path, p) for p in patterns)
 
 
 def frozen_files(question: Question, context: Context) -> Answer:
     """YES when no frozen path is added, changed, renamed or deleted."""
-    frozen = _patterns(question, "paths")
+    frozen = question.strings("paths")
     if not frozen:
         raise OracleError(f"q.{question.id} needs paths = [<frozen globs>]")
-    allow_new = _patterns(question, "allow_new")
+    allow_new = question.strings("allow_new")
     files, _ = parse(context.attempt.diff)
     violations = []
     for change in files:
@@ -162,6 +154,13 @@ class Checks:
         self.commands = Commands(cwd, timeout=timeout) if cwd is not None else None
         self.fallback = fallback
 
+    def handles(self, question: Question) -> bool:
+        """Whether a local check answers ``question``, without ``fallback``."""
+        name = question.options.get("check")
+        if isinstance(name, str) and name in self.handlers:
+            return True
+        return "run" in question.options and self.commands is not None
+
     async def __call__(
         self, questions: Sequence[Question], context: Context
     ) -> dict[str, Answer]:
@@ -169,17 +168,18 @@ class Checks:
         rest: list[Question] = []
         for question in questions:
             name = question.options.get("check")
-            if isinstance(name, str) and name in self.handlers:
+            if not self.handles(question):
+                rest.append(question)
+            elif isinstance(name, str) and name in self.handlers:
                 answer = await _call(self.handlers[name], question, context)
                 if not isinstance(answer, Answer):
                     raise OracleError(f"the {name!r} check did not return an Answer")
                 answers[question.id] = answer
-            elif "run" in question.options and self.commands is not None:
+            else:
+                assert self.commands is not None  # handles() checked it
                 answers[question.id] = await asyncio.to_thread(
                     self.commands, question, context
                 )
-            else:
-                rest.append(question)
         if rest:
             if self.fallback is None:
                 ids = ", ".join(q.id for q in rest)

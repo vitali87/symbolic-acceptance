@@ -5,7 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["Answer"]
+__all__ = ["Answer", "yes_no"]
+
+
+def yes_no(flag: bool) -> str:
+    return "YES" if flag else "NO"
 
 
 @dataclass(frozen=True)
@@ -38,7 +42,7 @@ class Answer:
 
     @property
     def word(self) -> str:
-        return "YES" if self.is_met else "NO"
+        return yes_no(self.is_met)
 
     def to_dict(self) -> dict[str, object]:
         data: dict[str, object] = {"is_met": self.is_met}

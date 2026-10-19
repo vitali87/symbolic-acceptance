@@ -198,35 +198,56 @@ def _cmd_run(args: argparse.Namespace) -> int:
     issue = Path(args.issue).read_text(encoding="utf-8") if args.issue else ""
     github = GitHub(args.github) if args.github else None
     ci_fallback = GitHubChecks(github, wait=args.ci_wait) if github else None
+    exclude = args.exclude.split(",") if args.exclude else []
     human: Oracle = TerminalReviewer()
     if github and args.pr:
         human = Reviews(
             github,
             args.pr,
             reviewers=args.reviewers.split(",") if args.reviewers else None,
-            exclude=args.exclude.split(",") if args.exclude else (),
+            exclude=exclude,
         )
     claude = Claude(model=args.model) if args.model else Claude()
-    oracles = {
-        "ci": Checks(cwd=args.cwd, fallback=ci_fallback),
-        "llm": Judge(claude, samples=args.samples),
-        "human": human,
-    }
+    ci = Checks(cwd=args.cwd, fallback=ci_fallback)
+    remote = [
+        qid
+        for qid in checklist.used()
+        if checklist.questions[qid].by == "ci"
+        and not ci.handles(checklist.questions[qid])
+    ]
+    if remote and not (github and args.push):
+        raise SystemExit(
+            f"error: {', '.join(remote)} are answered by GitHub check runs; pass "
+            "--github and --push so that every attempt reaches CI"
+        )
+    oracles = {"ci": ci, "llm": Judge(claude, samples=args.samples), "human": human}
     resume: Result | None = None
     if args.resume:
         resume = record.load(args.resume, checklist)
     record_path = args.record or args.resume
+    if record_path and Path(record_path).resolve().is_relative_to(
+        Path(args.cwd).resolve()
+    ):
+        raise SystemExit(
+            "error: keep the run record outside the agent's checkout (--cwd); "
+            "inside it, the record would be committed with the attempt and the "
+            "agent could rewrite it"
+        )
+    # A resumed run keeps diffing against the commit it started from.
+    base = resume.evaluations[0].attempt.base if resume and resume.evaluations else ""
 
     def progress(result: Result) -> None:
         if record_path:
             record.save(result, checklist, record_path)
         if github and args.pr:
-            post_report(github, args.pr, markdown(result, checklist))
+            post_report(github, args.pr, markdown(result, checklist), exclude=exclude)
 
     result = asyncio.run(
         run(
             checklist,
-            agent=CommandAgent(shlex.split(args.agent), cwd=args.cwd),
+            agent=CommandAgent(
+                shlex.split(args.agent), cwd=args.cwd, base=base or None, push=args.push
+            ),
             oracles=oracles,
             issue=issue,
             max_attempts=args.max_attempts,
@@ -299,6 +320,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--record", help="save the run here after every attempt")
     sub.add_argument("--resume", help="continue a saved run (and keep saving to it)")
     sub.add_argument("--github", help="owner/name, for CI results and reviews")
+    sub.add_argument("--push", help="push each attempt to this branch, for CI")
     sub.add_argument(
         "--pr", type=int, help="pull request to ask people on and report to"
     )

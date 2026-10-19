@@ -39,6 +39,8 @@ __all__ = [
 API_VERSION = "2026-03-10"
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
 _REPLY = re.compile(r"^/(yes|no)\s+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$", re.I | re.M | re.A)
+# Markers count only at the very start of a comment, so text quoted inside a
+# comment (CI output in a report, say) can never pose as one.
 _ASKED = re.compile(
     r"<!-- symbolic-acceptance:ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.A
 )
@@ -139,11 +141,33 @@ def compare_diff(github: GitHub, base: str, head: str) -> str:
     return github.call("GET", path, accept="application/vnd.github.diff").text()
 
 
-def post_report(github: GitHub, number: int, markdown: str) -> dict[str, Any]:
-    """Create or update the single report comment on an issue or pull request."""
+def _author(comment: dict[str, Any]) -> tuple[str, bool, str]:
+    """The comment's login (lowercased), whether a bot wrote it, its association."""
+    user = comment.get("user") or {}
+    login = str(user.get("login", "")).lower()
+    bot = user.get("type") == "Bot" or login.endswith("[bot]")
+    return login, bot, str(comment.get("author_association", ""))
+
+
+def _by_runner(comment: dict[str, Any], exclude: Collection[str]) -> bool:
+    """Whether the runner could have written it: a bot, or a trusted account."""
+    login, bot, association = _author(comment)
+    return login not in exclude and (bot or association in _TRUSTED)
+
+
+def post_report(
+    github: GitHub, number: int, markdown: str, *, exclude: Collection[str] = ()
+) -> dict[str, Any]:
+    """Create or update the single report comment on an issue or pull request.
+
+    ``exclude`` lists accounts (the agent's) whose comments are never taken
+    for the report, whatever they contain.
+    """
     body = f"{REPORT_MARKER}\n{markdown}"
+    excluded = {login.lower() for login in exclude}
     for existing in github.comments(number):
-        if REPORT_MARKER in (existing.get("body") or ""):
+        text = existing.get("body") or ""
+        if text.startswith(REPORT_MARKER) and _by_runner(existing, excluded):
             return github.edit_comment(existing["id"], body)
     return github.comment(number, body)
 
@@ -238,15 +262,12 @@ class Reviews:
         self.exclude = {e.lower() for e in exclude}
 
     def _allowed(self, comment: dict[str, Any]) -> bool:
-        user = comment.get("user") or {}
-        login = str(user.get("login", "")).lower()
-        if not login or login in self.exclude:
-            return False
-        if user.get("type") == "Bot" or login.endswith("[bot]"):
+        login, bot, association = _author(comment)
+        if not login or bot or login in self.exclude:
             return False
         if self.reviewers is not None:
             return login in self.reviewers
-        return comment.get("author_association") in _TRUSTED
+        return association in _TRUSTED
 
     def _ask_body(self, questions: Sequence[Question], ref: str) -> str:
         ids = ",".join(q.id for q in questions)
@@ -270,10 +291,10 @@ class Reviews:
         )
         asked_at: dict[str, str] = {}
         for comment in comments:
-            for match in _ASKED.finditer(comment.get("body") or ""):
-                if match["ref"] == ref:
-                    for qid in match["ids"].split(","):
-                        asked_at.setdefault(qid, comment["created_at"])
+            match = _ASKED.match(comment.get("body") or "")
+            if match and match["ref"] == ref and _by_runner(comment, self.exclude):
+                for qid in match["ids"].split(","):
+                    asked_at.setdefault(qid, comment["created_at"])
         new = [q for q in questions if q.id not in asked_at]
         if new:
             self.github.comment(self.number, self._ask_body(new, ref))

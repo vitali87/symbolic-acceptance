@@ -8,9 +8,20 @@ from typing import Literal
 
 __all__ = ["DiffLine", "FileChange", "locate", "parse"]
 
-_GIT_HEADER = re.compile(r"^diff --git (?P<old>\S+|\"(?:[^\"\\]|\\.)*\") (?P<new>.+)$")
+_GIT_HEADER = re.compile(r'^diff --git (?P<old>"(?:[^"\\]|\\.)*"|\S+) (?P<new>.+)$')
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
-_ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
+_ESCAPES = {
+    "a": "\a",
+    "b": "\b",
+    "t": "\t",
+    "n": "\n",
+    "v": "\v",
+    "f": "\f",
+    "r": "\r",
+    '"': '"',
+    "\\": "\\",
+}
+_OCTAL = re.compile(r"[0-7]{3}")
 MIN_QUOTE = 8
 
 
@@ -41,20 +52,34 @@ class DiffLine:
     def where(self) -> str:
         return f"{self.path}:{'-' if self.side == '-' else ''}{self.line}"
 
+    @property
+    def kind(self) -> Literal["added", "removed", "context"]:
+        if self.side == "+":
+            return "added"
+        return "removed" if self.side == "-" else "context"
+
 
 def _unquote(path: str) -> str:
-    if len(path) >= 2 and path[0] == '"' and path[-1] == '"':
-        body = path[1:-1]
-        out, index = [], 0
-        while index < len(body):
-            if body[index] == "\\" and index + 1 < len(body):
-                out.append(_ESCAPES.get(body[index + 1], body[index + 1]))
-                index += 2
-            else:
-                out.append(body[index])
-                index += 1
-        path = "".join(out)
-    return path
+    """Undo git's C-style quoting of unusual paths (see ``core.quotePath``).
+
+    Octal escapes are the path's UTF-8 bytes, so they are collected as bytes
+    and decoded once.
+    """
+    if not (len(path) >= 2 and path[0] == path[-1] == '"'):
+        return path
+    body, raw, index = path[1:-1], bytearray(), 0
+    while index < len(body):
+        if body[index] != "\\":
+            raw += body[index].encode("utf-8")
+            index += 1
+        elif _OCTAL.fullmatch(body, index + 1, index + 4):
+            raw.append(int(body[index + 1 : index + 4], 8))
+            index += 4
+        else:
+            escaped = body[index + 1 : index + 2]
+            raw += _ESCAPES.get(escaped, escaped).encode("utf-8")
+            index += 2
+    return raw.decode("utf-8", errors="surrogateescape")
 
 
 def _strip_prefix(path: str) -> str | None:

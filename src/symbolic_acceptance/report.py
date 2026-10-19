@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from symbolic_acceptance.checklist import Checklist
 from symbolic_acceptance.loop import Evaluation, Result
 
@@ -11,7 +13,15 @@ _ICONS = {"pass": "✅", "fail": "❌", "n/a": "➖", "open": "⏳"}
 
 
 def _cell(text: str) -> str:
-    return " ".join(text.split()).replace("|", "\\|")
+    """One table cell: a single line, with nothing that could become markup."""
+    return " ".join(text.split()).replace("<", "&lt;").replace("|", "\\|")
+
+
+def _fenced(text: str) -> list[str]:
+    """A code block whose fence no run of backticks in ``text`` can close."""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [f"{fence}text", text, fence]
 
 
 def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
@@ -46,7 +56,7 @@ def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
         lines += ["", "</details>"]
     if evaluation.failures:
         lines += ["", "<details><summary>Feedback sent to the agent</summary>", ""]
-        lines += ["```text", evaluation.feedback.rstrip(), "```", "", "</details>"]
+        lines += [*_fenced(evaluation.feedback.rstrip()), "", "</details>"]
     return lines
 
 
