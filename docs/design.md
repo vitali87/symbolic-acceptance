@@ -134,8 +134,8 @@ off (`stop_on_regression=False`).
   `exclude` (or answers limited to `reviewers`). The runner's markers count
   only at the start of a comment it could have written.
 - The runner's git overrides what the agent's checkout configuration and
-  attributes could change (hooks, replace refs, filters, textconv, diff
-  prefixes); `run` commands execute in a fresh clone of the commit that
+  attributes could change (hooks, replace refs, textconv, binary files,
+  diff format); `run` commands execute in a fresh clone of the commit that
   reads none of the checkout's git configuration or attributes, nor the
   user's; and the run record, with the issue text, is kept outside the
   checkout.

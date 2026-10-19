@@ -13,6 +13,7 @@ import symbolic_acceptance as sa
 from symbolic_acceptance import record
 from symbolic_acceptance.agents import CommandAgent, GitError, diff, git
 from symbolic_acceptance.claude import Claude
+from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.draft import DraftError, draft
 
 
@@ -99,8 +100,8 @@ class CommandAgentTests(unittest.TestCase):
             Path(outside, "changed").write_text(changed)
             new = git("hash-object", "-w", str(Path(outside, "changed"))).strip()
             git("replace", new, git("rev-parse", "HEAD:tests/test_app.py").strip())
-            # Hooks, a file monitor, filters, diff drivers and settings that
-            # would hide or reshape the change.
+            # Hooks, a file monitor, diff drivers and settings that would hide
+            # or reshape the change.
             hooks, ran = Path(outside, "hooks"), Path(outside, "monitor-ran")
             hooks.mkdir()
             for name, body in (("pre-commit", "exit 1"), ("monitor", f"touch {ran}")):
@@ -114,23 +115,26 @@ class CommandAgentTests(unittest.TestCase):
                 "diff.noprefix": "true",
                 "diff.context": "0",
                 "diff.ignoreSubmodules": "all",
+                "diff.submodule": "log",
+                "diff.renames": "copies",
                 "diff.external": "echo HIDDEN",
                 "diff.hide.textconv": "echo HIDDEN",
-                "filter.rewrite.clean": "sed s/False/True/",
             }.items():
                 git("config", key, value)
             Path(tmp, ".git", "info", "attributes").write_text(
                 "*.py diff=hide\ntests/test_app.py -diff\n"
             )
-            Path(tmp, ".gitattributes").write_text("*.py filter=rewrite\n")
-            # A gitlink, which ignoreSubmodules would hide.
+            # A gitlink, which ignoreSubmodules or the submodule log would hide.
             head = git("rev-parse", "HEAD").strip()
             Path(tmp, "tests", "vendored").mkdir()
             git("update-index", "--add", "--cacheinfo", f"160000,{head},tests/vendored")
             script = (
                 f"open('tests/test_app.py', 'w').write({changed!r});"
                 "open('app.py', 'w').write('v2\\n');"
-                "open('naïve.txt', 'w').write('x\\n')"
+                "open('naïve.txt', 'w').write('x\\n');"
+                # A copy of a changed file, which copy detection would show
+                # as changed rather than added.
+                "open('tests/test_copy.py', 'w').write('a = 1\\nassert True\\nb = 2\\n')"
             )
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
             attempt = asyncio.run(agent(self.task()))
@@ -143,7 +147,16 @@ class CommandAgentTests(unittest.TestCase):
             " a = 1\n-assert True\n+assert False or True\n b = 2", attempt.diff
         )
         self.assertIn("-print('v1')\n+v2", attempt.diff)
-        self.assertIn("new file mode 160000", attempt.diff)
+        self.assertEqual(
+            [(f.path, f.status) for f in parse(attempt.diff)[0]],
+            [
+                ("app.py", "modified"),
+                ("naïve.txt", "added"),
+                ("tests/test_app.py", "modified"),
+                ("tests/test_copy.py", "added"),
+                ("tests/vendored", "added"),
+            ],
+        )
         self.assertIn('"b/na\\303\\257ve.txt"', attempt.diff)
         self.assertNotIn("HIDDEN", attempt.diff)
         self.assertNotIn("\x1b[", attempt.diff)

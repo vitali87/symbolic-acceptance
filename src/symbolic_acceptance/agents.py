@@ -12,8 +12,11 @@ and the agent's own output is kept only as its claims.
 The agent runs without the runner's GitHub token, which would let it report
 a check run or comment as the runner. It can write to the checkout's git
 configuration and attributes, so every git command here overrides what they
-could change: hooks, replace refs, filters, textconv and external diff
-drivers, path prefixes, quoting, ignored submodules, context lines.
+could change: hooks, replace refs, the file monitor, and in the diff
+textconv and external drivers, binary files, path prefixes, quoting,
+renames, submodules and context lines. A filter can still rewrite what the
+agent's changes are committed as, which is the agent's to decide anyway:
+everyone judges the commit.
 """
 
 from __future__ import annotations
@@ -35,12 +38,8 @@ __all__ = [
     "git",
 ]
 
-# Git's empty tree: reading attributes from it means none apply, so no
-# smudge filter or diff attribute in the checkout can alter what git shows.
-EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 _OVERRIDES = (
     "--no-replace-objects",
-    f"--attr-source={EMPTY_TREE}",
     "-c",
     "core.hooksPath=/dev/null",
     "-c",
@@ -90,6 +89,8 @@ _DIFF = (
     "--text",
     "--no-relative",
     "--ignore-submodules=none",
+    "--submodule=short",
+    "--find-renames",
     "--unified=3",
     "--src-prefix=a/",
     "--dst-prefix=b/",
