@@ -187,7 +187,7 @@ def loads(text: str, checklist: Checklist) -> Result:
         evaluations.append(evaluation)
     recorded = data["status"]
     last = evaluations[-1].status if evaluations else None
-    if last not in _LAST.get(recorded, set()) or any(
+    if last not in _LAST[recorded] or any(
         evaluation.status != CHANGES for evaluation in evaluations[:-1]
     ):
         raise ValueError(

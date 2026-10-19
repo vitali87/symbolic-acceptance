@@ -64,14 +64,6 @@ def _read(path: str) -> str:
         raise SystemExit(f"error: {path} is not UTF-8 text") from None
 
 
-def _json(path: str) -> object:
-    try:
-        data: object = json.loads(_read(path))
-    except json.JSONDecodeError as error:
-        raise SystemExit(f"error: {path}: {error}") from None
-    return data
-
-
 def _record(path: str, checklist: Checklist) -> Result:
     try:
         return record.loads(_read(path), checklist)
@@ -129,7 +121,10 @@ def _cmd_template(args: argparse.Namespace) -> int:
 
 
 def _answers(path: str) -> dict[str, Answer]:
-    data = _json(path)
+    try:
+        data: object = json.loads(_read(path))
+    except json.JSONDecodeError as error:
+        raise SystemExit(f"error: {path}: {error}") from None
     if not isinstance(data, dict):
         raise SystemExit(
             "error: answers must be a JSON object of question id to answer"

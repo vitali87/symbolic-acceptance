@@ -94,10 +94,7 @@ def refs(expr: Expr) -> tuple[str, ...]:
         return (expr.id,)
     if isinstance(expr, Not):
         return refs(expr.item)
-    seen: dict[str, None] = {}
-    for item in expr.items:
-        seen.update(dict.fromkeys(refs(item)))
-    return tuple(seen)
+    return tuple(dict.fromkeys(qid for item in expr.items for qid in refs(item)))
 
 
 def _to_data(expr: Expr) -> str | dict[str, object]:
@@ -150,11 +147,8 @@ class Requirement:
 
     def questions(self) -> tuple[str, ...]:
         """Question ids this requirement reads, ``when`` first."""
-        seen: dict[str, None] = {}
-        if self.when is not None:
-            seen.update(dict.fromkeys(refs(self.when)))
-        seen.update(dict.fromkeys(refs(self.that)))
-        return tuple(seen)
+        when = () if self.when is None else refs(self.when)
+        return tuple(dict.fromkeys((*when, *refs(self.that))))
 
 
 @dataclass(frozen=True)
@@ -173,10 +167,9 @@ class Checklist:
 
     def used(self) -> tuple[str, ...]:
         """Question ids some requirement reads, in first-use order."""
-        seen: dict[str, None] = {}
-        for requirement in self.requirements:
-            seen.update(dict.fromkeys(requirement.questions()))
-        return tuple(seen)
+        return tuple(
+            dict.fromkeys(qid for r in self.requirements for qid in r.questions())
+        )
 
     def to_dict(self) -> dict[str, object]:
         """The checklist as plain data, in the shape the TOML was written in."""
