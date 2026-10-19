@@ -28,7 +28,6 @@ from symbolic_acceptance.logic import DEFAULT_LAST, PASS, Status, by_oracle, fac
 __all__ = [
     "APPROVED",
     "CHANGES",
-    "DEFAULT_LAST",
     "ESCALATED",
     "RUNNING",
     "WAITING",
@@ -256,16 +255,11 @@ class Result:
     issue: str = ""
 
     @property
-    def attempts(self) -> tuple[Attempt, ...]:
-        return tuple(e.attempt for e in self.evaluations)
-
-    @property
     def last(self) -> Evaluation | None:
         return self.evaluations[-1] if self.evaluations else None
 
 
 Agent = Callable[[Task], Attempt | str | Awaitable[Attempt | str]]
-DiffSource = Callable[[Attempt], str | Awaitable[str]]
 Listener = Callable[[Result], object]
 
 
@@ -340,14 +334,24 @@ async def evaluate(
     Pass the ``answers`` and ``rounds`` of a waiting evaluation to resume it.
     """
     _check_oracles(checklist, oracles)
-    deferred = frozenset(last)
     known = dict(answers or {})
     done = list(rounds)
-    while True:
-        ask = plan(checklist, facts(known), last=lambda q: q.by in deferred)
-        if not ask:
-            # plan() stops only once a requirement fails or none is left open.
-            return Evaluation.from_answers(checklist, attempt, known, done)
+    waiting: list[str] = []
+    notes: list[str] = []
+    # plan() stops once a requirement fails or none is left open; answers in
+    # hand can decide the attempt (a person's NO), and then nobody is waited
+    # for.
+    while ask := plan(checklist, facts(known), last=last):
+        if waiting:
+            return Evaluation.from_answers(
+                checklist,
+                attempt,
+                known,
+                done,
+                WAITING,
+                "; ".join(notes),
+                tuple(waiting),
+            )
         groups = by_oracle(checklist, ask)
         context = Context(checklist, attempt, MappingProxyType(dict(known)), issue)
         names = list(groups)
@@ -355,8 +359,6 @@ async def evaluate(
             *(_put(oracles[name], tuple(groups[name]), context) for name in names)
         )
         got: dict[str, Answer] = {}
-        waiting: list[str] = []
-        notes: list[str] = []
         escalations: list[str] = []
         for name, result in zip(names, results, strict=True):
             asked = [q.id for q in groups[name]]
@@ -379,18 +381,7 @@ async def evaluate(
             return Evaluation.from_answers(
                 checklist, attempt, known, done, ESCALATED, "; ".join(escalations)
             )
-        # Answers in hand can decide the attempt (a person's NO), and then
-        # nobody is waited for.
-        if waiting and plan(checklist, facts(known), last=lambda q: q.by in deferred):
-            return Evaluation.from_answers(
-                checklist,
-                attempt,
-                known,
-                done,
-                WAITING,
-                "; ".join(notes),
-                tuple(waiting),
-            )
+    return Evaluation.from_answers(checklist, attempt, known, done)
 
 
 def _verdict(
@@ -432,7 +423,6 @@ async def run(
     issue: str = "",
     max_attempts: int = 5,
     last: Collection[str] = DEFAULT_LAST,
-    diff: DiffSource | None = None,
     resume: Result | None = None,
     on_progress: Listener | None = None,
     stop_on_regression: bool = True,
@@ -440,8 +430,9 @@ async def run(
     """Run the agent until approval or escalation.
 
     The agent is ``(task) -> Attempt | ref``, and raises :class:`Escalate`
-    when it cannot make an attempt. ``diff`` computes an attempt's diff from
-    its ref, so the judge never reads a diff the agent supplied.
+    when it cannot make an attempt. It is the runner's code around the
+    coding agent, such as :class:`symbolic_acceptance.agents.CommandAgent`,
+    which computes the attempt's diff itself.
     ``on_progress`` gets the run after each evaluation, ``running`` or as it
     ended, e.g. to save it with :func:`symbolic_acceptance.record.save`.
     Pass a saved ``Result`` as ``resume`` to continue it; its issue text
@@ -505,11 +496,6 @@ async def run(
             attempt = Attempt(ref=produced, number=task.number)
         else:
             raise TypeError("the agent must return an Attempt or a non-empty ref")
-        if diff is not None:
-            computed = await _call(diff, attempt)
-            if not isinstance(computed, str):
-                raise TypeError("the diff source must return the diff as a string")
-            attempt = replace(attempt, diff=computed)
         evaluations.append(
             await evaluate(checklist, attempt, oracles, last=last, issue=issue)
         )

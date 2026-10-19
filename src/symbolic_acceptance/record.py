@@ -18,6 +18,7 @@ from symbolic_acceptance.answer import Answer, AnswerData
 from symbolic_acceptance.checklist import Checklist
 from symbolic_acceptance.loop import (
     APPROVED,
+    ESCALATED,
     WAITING,
     Attempt,
     Evaluation,
@@ -116,7 +117,7 @@ def loads(text: str, checklist: Checklist) -> Result:
         if unknown:
             raise ValueError(f"record answers unknown questions: {unknown}")
         status = item["status"]
-        paused = status if status in ("waiting", "escalated") else None
+        paused = status if status in (WAITING, ESCALATED) else None
         evaluation = Evaluation.from_answers(
             checklist,
             Attempt(**item["attempt"]),

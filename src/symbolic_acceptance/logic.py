@@ -21,7 +21,7 @@ other      other       ``open``
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from typing import Literal
 
 from symbolic_acceptance.answer import Answer
@@ -138,12 +138,12 @@ def plan(
     checklist: Checklist,
     facts: Facts,
     *,
-    last: Callable[[Question], bool],
+    last: Collection[str] = DEFAULT_LAST,
 ) -> list[str]:
     """The questions to ask now, in checklist order; empty once there are none.
 
-    Questions for which ``last(question)`` is false are asked first, with full
-    coverage: every question that could show an applicable requirement unmet.
+    Questions for oracles not in ``last`` are asked first, with full coverage:
+    every question that could show an applicable requirement unmet.
     ``when`` conditions are asked before the ``that`` they gate, so a gated
     check is never asked while it might not apply.
 
@@ -159,7 +159,7 @@ def plan(
             _deciding(when, facts, early)  # nothing, once `when` is NO
         else:
             _unmet(requirement.that, True, facts, early)
-    first = [qid for qid in early if not last(checklist.questions[qid])]
+    first = [qid for qid in early if checklist.questions[qid].by not in last]
     if first:
         return first
 

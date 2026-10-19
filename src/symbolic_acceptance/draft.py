@@ -14,7 +14,7 @@ from typing import TypedDict
 
 from symbolic_acceptance.checklist import Checklist, ChecklistError, loads
 from symbolic_acceptance.claude import Claude
-from symbolic_acceptance.lint import Issue, lint
+from symbolic_acceptance.lint import Finding, lint
 from symbolic_acceptance.templates import FORMAT_GUIDE, ORACLES, TEMPLATES
 
 __all__ = ["Draft", "DraftError", "draft"]
@@ -44,7 +44,7 @@ class DraftError(RuntimeError):
 class Draft:
     text: str
     checklist: Checklist
-    issues: tuple[Issue, ...]
+    findings: tuple[Finding, ...]
     questions: tuple[str, ...]
 
 
@@ -78,10 +78,10 @@ def draft(
         except ChecklistError as error:
             problems = str(error)
         else:
-            issues = tuple(lint(checklist, oracles=ORACLES))
-            errors = [str(i) for i in issues if i.level == "error"]
+            findings = tuple(lint(checklist, oracles=ORACLES))
+            errors = [str(f) for f in findings if f.level == "error"]
             if not errors:
-                return Draft(text, checklist, issues, questions)
+                return Draft(text, checklist, findings, questions)
             problems = "\n".join(errors)
         content = (
             f"{request}\n\nA previous draft was:\n```toml\n{text}\n```\n"

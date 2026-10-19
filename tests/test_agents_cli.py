@@ -11,7 +11,7 @@ from helpers import EXAMPLE, FakeHTTP, cli, example, finished_run, message, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
-from symbolic_acceptance.agents import CommandAgent, local_diff
+from symbolic_acceptance.agents import CommandAgent, diff
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.draft import DraftError, draft
 
@@ -41,7 +41,7 @@ class CommandAgentTests(unittest.TestCase):
                 check=True,
             ).stdout
             self.assertEqual(log.strip(), "Attempt 1")
-            self.assertEqual(local_diff(tmp)(attempt), attempt.diff)
+            self.assertEqual(diff(tmp, attempt.base, attempt.ref), attempt.diff)
 
     def test_a_new_file_is_an_attempt_whatever_the_checkout_says(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -223,7 +223,7 @@ class CLITests(unittest.TestCase):
             self.assertIn("Why: no delay", out)
             del truth["suite_green"]
             answers.write_text(json.dumps(dict(truth, backs_off=True)))
-            self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 2)
+            self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 3)
             answers.write_text(json.dumps({"backs_off": {"is_met": "no"}}))
             with self.assertRaisesRegex(SystemExit, "backs_off: is_met must be a bool"):
                 cli("explain", str(EXAMPLE), str(answers))

@@ -49,7 +49,6 @@ _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _TOP_LEVEL = frozenset({"title", "context", "q", "require"})
 _QUESTION_KEYS = frozenset({"ask", "by", "context"})
 _REQUIREMENT_KEYS = frozenset({"id", "that", "when", "fail"})
-_EMPTY: Mapping[str, object] = MappingProxyType({})
 
 
 class ChecklistError(ValueError):
@@ -119,7 +118,7 @@ class Question:
     ask: str
     by: str
     context: str | None = None
-    options: Mapping[str, object] = field(default_factory=lambda: _EMPTY)
+    options: Mapping[str, object] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         frozen = MappingProxyType({k: _freeze(v) for k, v in self.options.items()})

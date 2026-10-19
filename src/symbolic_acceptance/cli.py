@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
+from symbolic_acceptance.agents import CommandAgent
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import (
     Checklist,
@@ -20,8 +21,12 @@ from symbolic_acceptance.checklist import (
     load,
     render,
 )
-from symbolic_acceptance.claude import DEFAULT_MODEL
+from symbolic_acceptance.checks import Checks, Commands
+from symbolic_acceptance.claude import DEFAULT_MODEL, Claude
+from symbolic_acceptance.draft import DraftError, draft
 from symbolic_acceptance.feedback import assess, render_failures
+from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews, post_report
+from symbolic_acceptance.judge import Judge
 from symbolic_acceptance.lint import lint
 from symbolic_acceptance.loop import (
     APPROVED,
@@ -55,14 +60,14 @@ def _cmd_lint(args: argparse.Namespace) -> int:
             print(f"{path}: error: {error}")
             worst = 1
             continue
-        issues = lint(checklist, oracles=oracles)
-        for issue in issues:
-            print(f"{path}: {issue}")
-        if any(i.level == "error" for i in issues) or (
-            args.strict and any(i.level == "warning" for i in issues)
+        findings = lint(checklist, oracles=oracles)
+        for finding in findings:
+            print(f"{path}: {finding}")
+        if any(f.level == "error" for f in findings) or (
+            args.strict and any(f.level == "warning" for f in findings)
         ):
             worst = 1
-        elif not issues:
+        elif not findings:
             print(f"{path}: ok ({len(checklist.requirements)} requirements)")
     return worst
 
@@ -124,13 +129,10 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     if assessment.failures:
         print()
         sys.stdout.write(render_failures(assessment.failures))
-    return {"approved": 0, "changes": 1}.get(assessment.status, 2)
+    return {"approved": 0, "changes": 1, "open": 3}[assessment.status]
 
 
 def _cmd_draft(args: argparse.Namespace) -> int:
-    from symbolic_acceptance.claude import Claude
-    from symbolic_acceptance.draft import DraftError, draft
-
     out = Path(args.out)
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
@@ -142,8 +144,8 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     text = result.text if result.text.endswith("\n") else result.text + "\n"
     out.write_text(text, encoding="utf-8")
     print(f"wrote {out}; review it before approving")
-    for issue_found in result.issues:
-        print(f"  {issue_found}")
+    for finding in result.findings:
+        print(f"  {finding}")
     if result.questions:
         print("Questions for the reporter:")
         for question in result.questions:
@@ -184,12 +186,6 @@ class TerminalReviewer:
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
-    from symbolic_acceptance.agents import CommandAgent
-    from symbolic_acceptance.checks import Checks, Commands
-    from symbolic_acceptance.claude import Claude
-    from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews, post_report
-    from symbolic_acceptance.judge import Judge
-
     checklist = _load(args.file)
     errors = [i for i in lint(checklist, oracles=ORACLES) if i.level == "error"]
     if errors:
@@ -280,6 +276,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="symbolic-acceptance",
         description="Acceptance checklists for coding agents.",
+        epilog="Exit status: 0 approved (or clean), 1 changes, escalated or "
+        "errors, 2 bad usage, 3 waiting (or undecided).",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)

@@ -178,9 +178,9 @@ class LintTests(unittest.TestCase):
             '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", "f"] }\n'
             'fail = "x"\n'
         )
-        issues = [i for i in sa.lint(c) if i.code == "bad-option"]
+        findings = [f for f in sa.lint(c) if f.code == "bad-option"]
         self.assertEqual(
-            [(i.where, i.message) for i in issues],
+            [(f.where, f.message) for f in findings],
             [
                 ("a", "q.a.frozen lists no paths"),
                 ("b", "q.b.run must be a string or a list of strings"),
@@ -191,7 +191,7 @@ class LintTests(unittest.TestCase):
                 ("f", "q.f.check must be a string"),
             ],
         )
-        self.assertTrue(all(i.level == "error" for i in issues))
+        self.assertTrue(all(f.level == "error" for f in findings))
 
     def test_check_runs_need_frozen_workflows(self):
         unfrozen = sa.loads(
@@ -207,8 +207,8 @@ class LintTests(unittest.TestCase):
         text += (
             f'[[require]]\nid = "r"\nthat = {{ any = {json.dumps(ids)} }}\nfail = "x"\n'
         )
-        issues = [(i.code, i.where) for i in sa.lint(sa.loads(text))]
-        self.assertEqual(issues, [("not-exhaustive", "r"), ("not-exhaustive", None)])
+        findings = [(f.code, f.where) for f in sa.lint(sa.loads(text))]
+        self.assertEqual(findings, [("not-exhaustive", "r"), ("not-exhaustive", None)])
 
     def test_duplicate_question(self):
         c = sa.loads(

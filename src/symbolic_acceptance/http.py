@@ -48,8 +48,6 @@ class Response:
 class HTTPError(RuntimeError):
     def __init__(self, method: str, url: str, status: int, detail: str) -> None:
         super().__init__(f"{method} {url} failed with HTTP {status}: {detail}")
-        self.status = status
-        self.detail = detail
 
 
 Transport = Callable[[urllib.request.Request, float], Response]
@@ -73,7 +71,7 @@ def _wait(response: Response | None, attempt: int) -> float:
         except ValueError:
             try:
                 seconds = parsedate_to_datetime(value).timestamp() - time.time()
-            except (TypeError, ValueError):
+            except ValueError:
                 seconds = 2.0**attempt
     else:
         seconds = 2.0**attempt

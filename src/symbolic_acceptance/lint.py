@@ -34,7 +34,7 @@ from symbolic_acceptance.checklist import (
 from symbolic_acceptance.checks import command, frozen_paths, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
 
-__all__ = ["MAX_EXHAUSTIVE", "Issue", "lint"]
+__all__ = ["MAX_EXHAUSTIVE", "Finding", "lint"]
 
 # Exhaustive checks enumerate 2**n answer sets; past this many questions they
 # are skipped and reported as such.
@@ -42,7 +42,7 @@ MAX_EXHAUSTIVE = 16
 
 
 @dataclass(frozen=True)
-class Issue:
+class Finding:
     level: Literal["error", "warning", "info"]
     code: str
     message: str
@@ -64,13 +64,13 @@ def _constant(expr: Expr) -> bool | None:
     return seen.pop() if len(seen) == 1 else None
 
 
-def _requirement_issues(requirement: Requirement) -> list[Issue]:
-    issues: list[Issue] = []
+def _requirement_findings(requirement: Requirement) -> list[Finding]:
+    findings: list[Finding] = []
     ids = requirement.questions()
     rid = requirement.id
     if len(ids) > MAX_EXHAUSTIVE:
         return [
-            Issue(
+            Finding(
                 "info",
                 "not-exhaustive",
                 f"reads {len(ids)} questions; exhaustive checks skipped",
@@ -80,8 +80,8 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
     if requirement.when is not None:
         constant = _constant(requirement.when)
         if constant is True:
-            issues.append(
-                Issue(
+            findings.append(
+                Finding(
                     "warning",
                     "when-always",
                     f"`when` {render(requirement.when)} is always YES; drop it",
@@ -89,8 +89,8 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
                 )
             )
         elif constant is False:
-            issues.append(
-                Issue(
+            findings.append(
+                Finding(
                     "warning",
                     "when-never",
                     f"`when` {render(requirement.when)} is never YES, so this "
@@ -101,8 +101,8 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
     results = [status(requirement, facts) for facts in _assignments(ids)]
     applicable = [result for result in results if result != NA]
     if applicable and all(result == FAIL for result in applicable):
-        issues.append(
-            Issue(
+        findings.append(
+            Finding(
                 "error",
                 "never-passes",
                 "fails under every answer set where it applies, so it can never be met",
@@ -110,8 +110,8 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
             )
         )
     elif FAIL not in results:
-        issues.append(
-            Issue(
+        findings.append(
+            Finding(
                 "warning",
                 "never-fails",
                 f"holds under every answer set, so it checks nothing: "
@@ -119,10 +119,10 @@ def _requirement_issues(requirement: Requirement) -> list[Issue]:
                 rid,
             )
         )
-    return issues
+    return findings
 
 
-def _option_issues(question: Question) -> list[Issue]:
+def _option_findings(question: Question) -> list[Finding]:
     """Options the built-in oracles read, checked before any run needs them."""
     options = question.options
     reads: list[Callable[[], object]] = [
@@ -142,7 +142,9 @@ def _option_issues(question: Question) -> list[Issue]:
             problems.append(str(error))
     if not isinstance(options.get("check", ""), str):
         problems.append(f"q.{question.id}.check must be a string")
-    return [Issue("error", "bad-option", problem, question.id) for problem in problems]
+    return [
+        Finding("error", "bad-option", problem, question.id) for problem in problems
+    ]
 
 
 def _freezes(question: Question, path: str) -> bool:
@@ -156,14 +158,14 @@ def _freezes(question: Question, path: str) -> bool:
     return matches(path, frozen) and not matches(path, allowed)
 
 
-def _check_runs_issues(checklist: Checklist) -> list[Issue]:
+def _check_runs_findings(checklist: Checklist) -> list[Finding]:
     """CI check runs can be faked by a workflow the attempt adds."""
     used = [checklist.questions[qid] for qid in checklist.used()]
     probe = ".github/workflows/added-by-the-attempt.yml"
     if any(_freezes(q, probe) for q in used):
         return []
     return [
-        Issue(
+        Finding(
             "warning",
             "unfrozen-workflows",
             f"answered by the CI check run {q.options['check']!r}, but no frozen "
@@ -184,16 +186,16 @@ def lint(
     *,
     oracles: Collection[str] | None = None,
     last: Collection[str] = DEFAULT_LAST,
-) -> list[Issue]:
-    """Return issues, errors first. ``oracles`` lists the oracle names known."""
-    issues: list[Issue] = []
+) -> list[Finding]:
+    """Return findings, errors first. ``oracles`` lists the oracle names known."""
+    findings: list[Finding] = []
     used = set(checklist.used())
 
     for question in checklist.questions.values():
-        issues.extend(_option_issues(question))
+        findings.extend(_option_findings(question))
         if question.id not in used:
-            issues.append(
-                Issue(
+            findings.append(
+                Finding(
                     "warning",
                     "unused-question",
                     "no requirement reads this question",
@@ -201,8 +203,8 @@ def lint(
                 )
             )
         if oracles is not None and question.by not in oracles:
-            issues.append(
-                Issue(
+            findings.append(
+                Finding(
                     "error",
                     "unknown-oracle",
                     f"by = {question.by!r}; known oracles: "
@@ -214,8 +216,8 @@ def lint(
     for question in checklist.questions.values():
         key = " ".join(question.ask.lower().split())
         if key in asks:
-            issues.append(
-                Issue(
+            findings.append(
+                Finding(
                     "warning",
                     "duplicate-question",
                     f"asks the same as q.{asks[key]}",
@@ -226,7 +228,7 @@ def lint(
             asks[key] = question.id
 
     for requirement in checklist.requirements:
-        issues.extend(_requirement_issues(requirement))
+        findings.extend(_requirement_findings(requirement))
         if requirement.when is not None:
             gated_by = [
                 qid
@@ -239,8 +241,8 @@ def lint(
                 if checklist.questions[qid].by not in last
             ]
             if gated_by and waiting:
-                issues.append(
-                    Issue(
+                findings.append(
+                    Finding(
                         "warning",
                         "gated-by-person",
                         f"automated checks ({', '.join(waiting)}) wait for "
@@ -249,7 +251,7 @@ def lint(
                     )
                 )
 
-    issues.extend(_check_runs_issues(checklist))
+    findings.extend(_check_runs_findings(checklist))
 
     ordered = checklist.used()
     if len(ordered) <= MAX_EXHAUSTIVE:
@@ -258,20 +260,20 @@ def lint(
             for facts in _assignments(ordered)
         )
         if not approvable:
-            issues.append(
-                Issue(
+            findings.append(
+                Finding(
                     "error",
                     "never-approved",
                     "no answer set satisfies every requirement at once",
                 )
             )
     else:
-        issues.append(
-            Issue(
+        findings.append(
+            Finding(
                 "info",
                 "not-exhaustive",
                 f"{len(ordered)} questions; the whole-checklist check was skipped",
             )
         )
     rank = {"error": 0, "warning": 1, "info": 2}
-    return sorted(issues, key=lambda issue: rank[issue.level])
+    return sorted(findings, key=lambda finding: rank[finding.level])

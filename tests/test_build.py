@@ -5,12 +5,15 @@ import importlib.util
 import io
 import tarfile
 import tempfile
+import tomllib
 import unittest
 import zipfile
 from email.parser import Parser
 from pathlib import Path
 
 from helpers import ROOT
+
+import symbolic_acceptance as sa
 
 
 def backend():
@@ -28,9 +31,15 @@ class BuildTests(unittest.TestCase):
         self.backend = backend()
 
     def test_nothing_to_download(self):
-        self.assertEqual(self.backend.get_requires_for_build_wheel(), [])
-        self.assertEqual(self.backend.get_requires_for_build_sdist(), [])
-        self.assertEqual(self.backend.get_requires_for_build_editable(), [])
+        with (ROOT / "pyproject.toml").open("rb") as stream:
+            project = tomllib.load(stream)
+        self.assertEqual(project["build-system"]["requires"], [])
+        self.assertEqual(project["project"]["dependencies"], [])
+
+    def test_the_package_reports_the_version_it_is_built_with(self):
+        with (ROOT / "pyproject.toml").open("rb") as stream:
+            version = tomllib.load(stream)["project"]["version"]
+        self.assertEqual(sa.__version__, version)
 
     def test_wheel(self):
         with tempfile.TemporaryDirectory() as tmp:

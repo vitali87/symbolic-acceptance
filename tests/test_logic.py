@@ -23,10 +23,6 @@ def facts(**values):
     return {k: v for k, v in values.items() if v is not None}
 
 
-def people_last(question):
-    return question.by == "human"
-
-
 class ValueTests(unittest.TestCase):
     def test_kleene_all(self):
         expr = AllOf((Ref("a"), Ref("b")))
@@ -71,8 +67,8 @@ class PlanTests(unittest.TestCase):
     def setUp(self):
         self.checklist = example()
 
-    def plan(self, known, last=("human",)):
-        return plan(self.checklist, known, last=lambda q: q.by in last)
+    def plan(self, known):
+        return plan(self.checklist, known)
 
     def test_first_round_asks_every_automated_question_but_gated_ones(self):
         asked = self.plan({})
@@ -127,7 +123,7 @@ class PlanTests(unittest.TestCase):
             fail = "not both"
             """
         )
-        asked = plan(checklist, {"a": False}, last=lambda q: False)
+        asked = plan(checklist, {"a": False}, last=())
         self.assertEqual(asked, ["b"])
 
     def test_people_asked_minimally_once_alone(self):
@@ -145,8 +141,8 @@ class PlanTests(unittest.TestCase):
             fail = "neither"
             """
         )
-        self.assertEqual(plan(checklist, {}, last=lambda q: True), ["h1", "h2"])
-        self.assertEqual(plan(checklist, {"h1": True}, last=lambda q: True), [])
+        self.assertEqual(plan(checklist, {}, last=("human",)), ["h1", "h2"])
+        self.assertEqual(plan(checklist, {"h1": True}, last=("human",)), [])
 
     def test_not_is_planned_through(self):
         checklist = sa.loads(
@@ -171,11 +167,9 @@ class PlanTests(unittest.TestCase):
             fail = "y"
             """
         )
+        self.assertEqual(plan(checklist, {}, last=()), ["breaks", "internal"])
         self.assertEqual(
-            plan(checklist, {}, last=lambda q: False), ["breaks", "internal"]
-        )
-        self.assertEqual(
-            plan(checklist, {"breaks": False, "internal": False}, last=lambda q: False),
+            plan(checklist, {"breaks": False, "internal": False}, last=()),
             ["docs"],
         )
 
@@ -194,11 +188,11 @@ class PlanTests(unittest.TestCase):
             fail = "x"
             """
         )
-        self.assertEqual(plan(checklist, {}, last=people_last), ["risky"])
+        self.assertEqual(plan(checklist, {}, last=("human",)), ["risky"])
         self.assertEqual(
-            plan(checklist, {"risky": True}, last=people_last), ["load_test"]
+            plan(checklist, {"risky": True}, last=("human",)), ["load_test"]
         )
-        self.assertEqual(plan(checklist, {"risky": False}, last=people_last), [])
+        self.assertEqual(plan(checklist, {"risky": False}, last=("human",)), [])
 
 
 class WantedTests(unittest.TestCase):

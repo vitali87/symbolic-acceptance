@@ -30,7 +30,7 @@ from symbolic_acceptance.feedback import (
     explain,
     render_failures,
 )
-from symbolic_acceptance.lint import Issue, lint
+from symbolic_acceptance.lint import Finding, lint
 from symbolic_acceptance.loop import (
     APPROVED,
     CHANGES,
@@ -69,8 +69,8 @@ __all__ = [
     "Evaluation",
     "Fact",
     "Failure",
+    "Finding",
     "Group",
-    "Issue",
     "Not",
     "OracleError",
     "Pending",

@@ -21,18 +21,17 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from symbolic_acceptance.loop import Attempt, Escalate, Task
 
 __all__ = [
     "RUNNER_SECRETS",
-    "AgentError",
     "CommandAgent",
+    "GitError",
     "diff",
     "git",
-    "local_diff",
     "without_secrets",
 ]
 
@@ -75,7 +74,7 @@ _DIFF = (
 )
 
 
-class AgentError(RuntimeError):
+class GitError(RuntimeError):
     """A git command the runner ran failed."""
 
 
@@ -95,24 +94,13 @@ def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
         check=False,
     )
     if done.returncode != 0:
-        raise AgentError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
+        raise GitError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
     return done.stdout
 
 
 def diff(cwd: str | Path, base: str, head: str) -> str:
     """The unified diff from ``base`` to ``head``, as plain text."""
     return git(cwd, *_DIFF, base, head, isolated=True)
-
-
-def local_diff(cwd: str | Path) -> Callable[[Attempt], str]:
-    """A ``run(diff=...)`` source: ``git diff`` from the attempt's base to it."""
-
-    def source(attempt: Attempt) -> str:
-        if not attempt.base:
-            raise ValueError("the attempt has no base commit to diff against")
-        return diff(cwd, attempt.base, attempt.ref)
-
-    return source
 
 
 class CommandAgent:
@@ -154,9 +142,9 @@ class CommandAgent:
         return git(self.cwd, "rev-parse", "HEAD").strip()
 
     def _attempt(self, task: Task) -> Attempt:
-        if self.base is None:
-            self.base = self._head()
         before = self._head()
+        if self.base is None:
+            self.base = before
         if task.previous is not None and before != task.previous.ref:
             raise Escalate(
                 f"the checkout is at {before[:12]}, not at attempt "

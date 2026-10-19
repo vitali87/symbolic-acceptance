@@ -198,7 +198,7 @@ class RunTests(unittest.TestCase):
             issue="Brute force logins",
         )
         self.assertEqual(result.status, sa.APPROVED)
-        self.assertEqual([a.number for a in result.attempts], [1, 2])
+        self.assertEqual([e.attempt.number for e in result.evaluations], [1, 2])
         self.assertEqual(agent.tasks[0].feedback, ())
         self.assertEqual(
             [f.requirement.id for f in agent.tasks[1].feedback], ["new_test"]
@@ -324,32 +324,20 @@ class RunTests(unittest.TestCase):
                 )
             )
 
-    def test_progress_and_diff_source(self):
+    def test_progress_sees_every_evaluation_and_the_outcome(self):
         seen = []
         script = Scripted(PASSING)
         agent = Agent(script, [dict(PASSING, new_test=False), PASSING])
-
-        def diff(attempt):
-            return f"diff of {attempt.ref}"
-
-        diffs = []
-
-        async def llm(questions, context):
-            diffs.append(context.attempt.diff)
-            return {q.id: sa.Answer(script.truth[q.id]) for q in questions}
-
         result = asyncio.run(
             sa.run(
                 self.checklist,
                 agent=agent,
-                oracles=dict(script.oracles(), llm=llm),
-                diff=diff,
+                oracles=script.oracles(),
                 on_progress=lambda r: seen.append((r.status, len(r.evaluations))),
             )
         )
         self.assertEqual(result.status, sa.APPROVED)
         self.assertEqual(seen, [(sa.RUNNING, 1), (sa.APPROVED, 2)])
-        self.assertEqual(diffs, ["diff of commit1", "diff of commit2"])
 
     def test_an_agent_that_cannot_go_on_escalates(self):
         seen = []

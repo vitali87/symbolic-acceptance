@@ -108,15 +108,21 @@ def _entry_points() -> str:
     return "\n".join(["[console_scripts]", *(f"{k} = {v}" for k, v in scripts)]) + "\n"
 
 
+def _files(directory: Path) -> list[Path]:
+    """The files under ``directory``, in order, without Python's caches."""
+    return [
+        path
+        for path in sorted(directory.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc"
+    ]
+
+
 def _package_files() -> list[tuple[str, bytes]]:
     source = ROOT / "src" / PACKAGE
-    files = []
-    for path in sorted(source.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
-            files.append(
-                (path.relative_to(source.parent).as_posix(), path.read_bytes())
-            )
-    return files
+    return [
+        (path.relative_to(source.parent).as_posix(), path.read_bytes())
+        for path in _files(source)
+    ]
 
 
 def _digest(data: bytes) -> str:
@@ -158,31 +164,6 @@ def _write_wheel(directory: str, files: list[tuple[str, bytes]]) -> str:
 # -- PEP 517 hooks ------------------------------------------------------------
 
 
-def get_requires_for_build_wheel(config_settings: Settings = None) -> list[str]:
-    return []
-
-
-def get_requires_for_build_sdist(config_settings: Settings = None) -> list[str]:
-    return []
-
-
-def get_requires_for_build_editable(config_settings: Settings = None) -> list[str]:
-    return []
-
-
-def prepare_metadata_for_build_wheel(
-    metadata_directory: str, config_settings: Settings = None
-) -> str:
-    target = Path(metadata_directory) / _dist_info()
-    target.mkdir(parents=True, exist_ok=True)
-    (target / "METADATA").write_text(_metadata(), encoding="utf-8")
-    (target / "entry_points.txt").write_text(_entry_points(), encoding="utf-8")
-    return target.name
-
-
-prepare_metadata_for_build_editable = prepare_metadata_for_build_wheel
-
-
 def build_wheel(
     wheel_directory: str,
     config_settings: Settings = None,
@@ -205,12 +186,7 @@ def build_sdist(sdist_directory: str, config_settings: Settings = None) -> str:
     base = f"{_normalized(project['name'])}-{project['version']}"
     paths = [ROOT / name for name in SDIST_FILES]
     for directory in SDIST_DIRS:
-        if (ROOT / directory).is_dir():
-            paths += [
-                p
-                for p in sorted((ROOT / directory).rglob("*"))
-                if p.is_file() and "__pycache__" not in p.parts and p.suffix != ".pyc"
-            ]
+        paths += _files(ROOT / directory)
     members = [(f"{base}/PKG-INFO", _metadata().encode("utf-8"))]
     members += [
         (f"{base}/{p.relative_to(ROOT).as_posix()}", p.read_bytes()) for p in paths
