@@ -75,8 +75,8 @@ template bug` and `template feature` print starting points.
 
 1. **Automated questions first, all of them.** Every `ci` and `llm` question
    that could show a requirement unmet is asked, the oracles in parallel, so
-   the agent hears about every failure at once, not just the first. A `when` condition
-   is settled before the checks it gates.
+   the agent hears about every failure at once, not just the first. A `when`
+   condition is settled before the checks it gates.
 2. **People last, and only when it matters.** `human` questions are asked
    only once nothing automated is left, no requirement has failed, and their
    answer can still change the result. A failure never waits for a person,

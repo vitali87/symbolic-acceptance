@@ -198,7 +198,8 @@ no third-party actions.
 
 ## Milestones
 
-1. Loop core: `run`, `evaluate`, planning, feedback, stop conditions, records. **Done.**
+1. Loop core: `run`, `evaluate`, planning, feedback, stop conditions,
+   records. **Done.**
 2. Lint. **Done.**
 3. Oracles: local commands and frozen files, GitHub check runs, the
    evidence-checked judge, people via pull request comments. **Done.**
