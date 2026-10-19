@@ -372,6 +372,12 @@ class CLITests(unittest.TestCase):
     def test_run_refuses_setups_that_cannot_work(self):
         with tempfile.TemporaryDirectory() as tmp:
             # The example's ci questions need GitHub check runs.
+            bare = Path(tmp, "bare.toml")
+            bare.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\n[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            with self.assertRaisesRegex(SystemExit, "a need check, run or frozen"):
+                cli("run", str(bare), "--agent", "true", "--cwd", tmp)
             for only in ((), ("--push", "agent"), ("--github", "octo/repo")):
                 with (
                     self.subTest(only),

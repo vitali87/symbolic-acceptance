@@ -237,6 +237,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if checklist.questions[qid].by == "ci"
         and not ci.handles(checklist.questions[qid])
     ]
+    unnamed = [qid for qid in remote if "check" not in checklist.questions[qid].options]
+    if unnamed:
+        raise SystemExit(f"error: {', '.join(unnamed)} need check, run or frozen")
     if remote and not (github and args.push):
         raise SystemExit(
             f"error: {', '.join(remote)} are answered by GitHub check runs; pass "

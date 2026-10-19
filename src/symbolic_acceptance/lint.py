@@ -5,9 +5,9 @@ silent cases (an attempt that is neither approved nor told what failed). Lint
 looks for checklists that load but cannot mean what their author intended:
 
 * errors: unknown oracles (``unknown-oracle``), options the built-in oracles
-  cannot read (``bad-option``), requirements that can never pass
-  (``never-passes``), and checklists that can never be approved
-  (``never-approved``);
+  cannot read or act on (``bad-option``), requirements that can never pass
+  (``never-passes``; a warning if ``when`` can keep one from applying), and
+  checklists that can never be approved (``never-approved``);
 * warnings: requirements that can never fail (``never-fails``), ``when``
   conditions that are always or never YES (``when-always``, ``when-never``),
   checks held up behind a person (``gated-by-person``), questions nothing
@@ -102,10 +102,12 @@ def _requirement_findings(requirement: Requirement) -> list[Finding]:
     applicable = [result for result in results if result != NA]
     if applicable and all(result == FAIL for result in applicable):
         findings.append(
-            Finding(
-                "error",
+            Finding("error", "never-passes", "fails under every answer set", rid)
+            if NA not in results
+            else Finding(
+                "warning",
                 "never-passes",
-                "fails under every answer set where it applies, so it can never be met",
+                "fails whenever it applies, so it holds only by not applying",
                 rid,
             )
         )
@@ -140,8 +142,11 @@ def _option_findings(question: Question) -> list[Finding]:
             read()
         except ValueError as error:
             problems.append(str(error))
-    if not isinstance(options.get("check", ""), str):
-        problems.append(f"q.{question.id}.check must be a string")
+    check = options.get("check")
+    if "check" in options and (not isinstance(check, str) or not check):
+        problems.append(f"q.{question.id}.check must name a check run")
+    if "frozen" in options and "run" in options:
+        problems.append(f"q.{question.id} has both frozen and run; split it in two")
     return [
         Finding("error", "bad-option", problem, question.id) for problem in problems
     ]
@@ -149,7 +154,7 @@ def _option_findings(question: Question) -> list[Finding]:
 
 def _freezes(question: Question, path: str) -> bool:
     """Whether ``question`` is a frozen check that fails a new file at ``path``."""
-    if "frozen" not in question.options:
+    if question.by != "ci" or "frozen" not in question.options:
         return False
     try:
         frozen, allowed = frozen_paths(question), question.strings("allow_new")
@@ -161,8 +166,10 @@ def _freezes(question: Question, path: str) -> bool:
 def _check_runs_findings(checklist: Checklist) -> list[Finding]:
     """CI check runs can be faked by a workflow the attempt adds."""
     used = [checklist.questions[qid] for qid in checklist.used()]
-    probe = ".github/workflows/added-by-the-attempt.yml"
-    if any(_freezes(q, probe) for q in used):
+    probes = [
+        f".github/workflows/added-by-the-attempt.{ext}" for ext in ("yml", "yaml")
+    ]
+    if all(any(_freezes(q, probe) for q in used) for probe in probes):
         return []
     return [
         Finding(

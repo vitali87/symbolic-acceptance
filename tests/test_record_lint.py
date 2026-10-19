@@ -148,6 +148,15 @@ class LintTests(unittest.TestCase):
         self.assertIn("never-passes", self.codes(c))
         self.assertIn("never-approved", self.codes(c))
 
+    def test_never_passing_where_it_applies_is_a_warning(self):
+        c = checklist(
+            '[[require]]\nid = "r"\nwhen = "a"\nthat = { not = "a" }\nfail = "x"\n',
+            ("a",),
+        )
+        self.assertEqual(
+            [(f.level, f.code) for f in sa.lint(c)], [("warning", "never-passes")]
+        )
+
     def test_never_fails(self):
         c = checklist(
             '[[require]]\nid = "r"\nthat = { any = ["a", { not = "a" }] }\nfail = "x"\n',
@@ -200,8 +209,10 @@ class LintTests(unittest.TestCase):
             '[q.d]\nask = "D?"\nby = "ci"\nrun = "pytest -k \'x"\n'
             '[q.e]\nask = "E?"\nby = "ci"\nrun = []\nexpect = "maybe"\n'
             '[q.f]\nask = "F?"\nby = "ci"\ncheck = 3\n'
-            '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", "f"] }\n'
-            'fail = "x"\n'
+            '[q.g]\nask = "G?"\nby = "ci"\ncheck = ""\n'
+            '[q.h]\nask = "H?"\nby = "ci"\nfrozen = ["x"]\nrun = "true"\n'
+            '[[require]]\nid = "r"\n'
+            'that = { all = ["a", "b", "c", "d", "e", "f", "g", "h"] }\nfail = "x"\n'
         )
         findings = [f for f in sa.lint(c) if f.code == "bad-option"]
         self.assertEqual(
@@ -213,7 +224,9 @@ class LintTests(unittest.TestCase):
                 ("d", "q.d.run: No closing quotation"),
                 ("e", 'q.e.expect must be "pass" or "fail"'),
                 ("e", "q.e.run is empty"),
-                ("f", "q.f.check must be a string"),
+                ("f", "q.f.check must name a check run"),
+                ("g", "q.g.check must name a check run"),
+                ("h", "q.h has both frozen and run; split it in two"),
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))
@@ -225,15 +238,17 @@ class LintTests(unittest.TestCase):
         )
         self.assertEqual(self.codes(unfrozen), ["unfrozen-workflows"])
         self.assertNotIn("unfrozen-workflows", self.codes(example()))
-        for frozen in (
-            'frozen = ["src/*"]',
-            'frozen = [".github/*"]\nallow_new = [".github/workflows/*"]',
-            "frozen = []",
+        for by, frozen in (
+            ("ci", 'frozen = ["src/*"]'),
+            ("ci", 'frozen = [".github/*"]\nallow_new = [".github/workflows/*"]'),
+            ("ci", "frozen = []"),
+            ("ci", 'frozen = [".github/workflows/*.yml"]'),
+            ("llm", 'frozen = [".github/*"]'),
         ):
-            with self.subTest(frozen):
+            with self.subTest(frozen, by=by):
                 elsewhere = sa.loads(
                     '[q.t]\nask = "Tests pass?"\nby = "ci"\ncheck = "tests"\n'
-                    f'[q.f]\nask = "Frozen?"\nby = "ci"\n{frozen}\n'
+                    f'[q.f]\nask = "Frozen?"\nby = "{by}"\n{frozen}\n'
                     '[[require]]\nid = "r"\nthat = { all = ["t", "f"] }\nfail = "x"\n'
                 )
                 self.assertIn("unfrozen-workflows", self.codes(elsewhere))
