@@ -36,6 +36,7 @@ from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Attempt, Escalate, Task
 
 __all__ = [
+    "OUTPUT",
     "RUNNER_SECRETS",
     "CommandAgent",
     "GitError",
@@ -93,6 +94,9 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
 
 # The process groups of the programs run_program is running now.
 _running: set[int] = set()
+# The most of a program's output kept, from its end: what the runner reads
+# of it is its last lines.
+OUTPUT = 1 << 20
 
 
 def stop_programs() -> None:
@@ -112,7 +116,8 @@ def run_program(
     given: str = "",
 ) -> tuple[int | None, str]:
     """Run ``argv`` to its end and return its exit status (``None`` past
-    ``timeout``) and its output, errors mixed in where they came.
+    ``timeout``) and its output, errors mixed in where they came: the last
+    :data:`OUTPUT` bytes of it.
 
     It reads ``given`` and nothing else. It runs in a session of its own, so
     whatever it starts is stopped when it ends, but for a daemon, which
@@ -142,7 +147,7 @@ def run_program(
                 os.killpg(process.pid, signal.SIGKILL)
             process.wait()
             _running.discard(process.pid)
-        log.seek(0)
+        log.seek(max(0, log.seek(0, os.SEEK_END) - OUTPUT))
         return status, log.read().decode("utf-8", errors="replace")
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 from helpers import DIFF, repo
 
 import symbolic_acceptance as sa
-from symbolic_acceptance.agents import GitError, diff
+from symbolic_acceptance.agents import OUTPUT, GitError, diff, run_program
 from symbolic_acceptance.checks import Checks, Commands, frozen_files
 from symbolic_acceptance.diffs import locate, parse
 
@@ -515,6 +515,14 @@ class CommandsTests(unittest.TestCase):
         loose.write_bytes(zlib.compress(b"blob %d\0" % len(forged) + forged))
         with self.assertRaisesRegex(GitError, "fetch"):
             self.check(run_question("sees", "print(open('app.py').read())"))
+
+    def test_only_the_end_of_a_flood_of_output_is_read(self):
+        flood = f"import sys; sys.stdout.write('x' * {3 * OUTPUT} + '\\nthe end\\n')"
+        status, output = run_program(
+            [sys.executable, "-c", flood], cwd=self.tmp.name, env=os.environ, timeout=60
+        )
+        self.assertEqual((status, len(output)), (0, OUTPUT))
+        self.assertTrue(output.endswith("x\nthe end\n"))
 
     def test_invalid_utf8_output_is_kept(self):
         noisy = run_question(
