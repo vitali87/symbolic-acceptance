@@ -64,7 +64,7 @@ fail = "y"
 
 def ask(
     judge_,
-    diff=DIFF,
+    diff: str | None = DIFF,
     issue="Logins are not throttled",
     question=QUESTION,
     checklist_text=None,

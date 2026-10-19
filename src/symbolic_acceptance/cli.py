@@ -102,11 +102,10 @@ def _answers(path: str) -> dict[str, Answer]:
         )
     answers = {}
     for qid, value in data.items():
-        fields = {"is_met": value} if isinstance(value, bool) else value
-        if not isinstance(fields, dict):
+        if not isinstance(value, bool | dict):
             raise SystemExit(f"error: {qid}: expected true, false or an answer object")
         try:
-            answers[qid] = Answer(**fields)
+            answers[qid] = Answer(value) if isinstance(value, bool) else Answer(**value)
         except TypeError as error:
             raise SystemExit(f"error: {qid}: {error}") from None
     return answers

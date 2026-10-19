@@ -27,7 +27,7 @@ def context(ref="abc123"):
     return sa.Context(checklist, sa.Attempt(ref, 1), {})
 
 
-def run(name, status="completed", conclusion="success", run_id=1):
+def run(name, status="completed", conclusion: str | None = "success", run_id=1):
     return {
         "id": run_id,
         "name": name,

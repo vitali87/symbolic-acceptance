@@ -112,7 +112,7 @@ class ParseTests(unittest.TestCase):
         self.assertIsNone(locate("lock", lines), "too short to prove anything")
 
 
-def context(diff="", ref="abc"):
+def context(diff: str | None = "", ref="abc"):
     checklist = sa.loads(
         '[q.x]\nask = "X?"\nby = "ci"\n[[require]]\nthat = "x"\nfail = "x"\n'
     )

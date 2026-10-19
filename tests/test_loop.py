@@ -339,7 +339,7 @@ class RunTests(unittest.TestCase):
 
     def test_agent_must_return_a_ref(self):
         async def agent(task):
-            return None
+            return ""
 
         with self.assertRaises(TypeError):
             asyncio.run(

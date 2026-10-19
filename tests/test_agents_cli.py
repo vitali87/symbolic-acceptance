@@ -178,7 +178,7 @@ class CLITests(unittest.TestCase):
     def test_explain_exit_codes(self):
         with tempfile.TemporaryDirectory() as tmp:
             answers = Path(tmp, "answers.json")
-            truth = {
+            truth: dict[str, object] = {
                 "repro_fixed": True,
                 "new_test": True,
                 "suite_green": True,
