@@ -1078,8 +1078,9 @@ class CLITests(unittest.TestCase):
         self.assertEqual(requests, [])
 
     def test_ctrl_c_or_sigterm_stops_the_agent_and_leaves_the_run_to_resume(self):
-        # The agent is in its own git commit, held up by a hook, when the
-        # runner is told to stop; once with nobody reading its errors.
+        # The agent is in its own git commit, held up by a hook that takes a
+        # second to clean up once asked to stop, when the runner is told to
+        # stop; once with nobody reading its errors.
         for stop, reading in (
             (signal.SIGINT, True),
             (signal.SIGTERM, True),
@@ -1091,8 +1092,14 @@ class CLITests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as outside,
             ):
                 repo(tmp)
+                ready, cleaned = Path(outside, "ready"), Path(outside, "cleaned")
                 hook = Path(tmp, ".git", "hooks", "pre-commit")
-                hook.write_text("#!/bin/sh\nsleep 60\n")
+                hook.write_text(
+                    "#!/bin/sh\n"
+                    f"trap 'sleep 1; touch {shlex.quote(str(cleaned))}; exit 1' TERM\n"
+                    f"touch {shlex.quote(str(ready))}\n"
+                    "sleep 60 & wait\n"
+                )
                 hook.chmod(0o755)
                 checklist = Path(outside, "acceptance.toml")
                 checklist.write_text(
@@ -1119,9 +1126,10 @@ class CLITests(unittest.TestCase):
                 )
                 lock = Path(tmp, ".git", "index.lock")
                 deadline = time.monotonic() + 30
-                while not pid.exists() or not lock.exists():
+                while not ready.exists():
                     self.assertLess(time.monotonic(), deadline, "no commit began")
                     time.sleep(0.05)
+                self.assertTrue(lock.exists(), "git holds its lock")
                 assert runner.stderr is not None
                 if not reading:
                     runner.stderr.close()
@@ -1134,6 +1142,7 @@ class CLITests(unittest.TestCase):
                 with self.assertRaises(ProcessLookupError, msg="the agent was stopped"):
                     os.kill(int(pid.read_text()), 0)
                 self.assertFalse(lock.exists(), "git was let remove its lock")
+                self.assertTrue(cleaned.exists(), "the hook was let clean up")
                 self.assertEqual(json.loads(saved.read_text())["status"], "running")
 
     def test_a_run_goes_on_through_a_ctrl_c_it_was_told_to_ignore(self):

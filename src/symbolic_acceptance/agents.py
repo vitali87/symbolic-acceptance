@@ -24,7 +24,6 @@ is the agent's to decide anyway: everyone judges the commit.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import re
 import signal
@@ -99,7 +98,7 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
 # whether stop_programs has been called, after which none may run.
 _running: set[int] = set()
 _stopped = threading.Event()
-# Seconds a program asked to stop has to end before it is killed.
+# Seconds the programs asked to stop have to end before they are killed.
 GRACE = 5.0
 # The most of a program's output kept, from its end: what the runner reads
 # of it is its last lines.
@@ -110,20 +109,28 @@ def stop_programs(grace: float = GRACE) -> None:
     """End every program :func:`run_program` is running, and what they
     started, for a runner told to stop, and any it starts from now on.
 
-    Each is asked to stop (SIGTERM), so that git, say, removes its locks,
-    and killed if it has not within ``grace`` seconds.
+    They are asked to stop (SIGTERM), so that git, say, removes its locks,
+    and killed if they have not all ended within ``grace`` seconds.
     """
     _stopped.set()
-    asked = _running.copy()
-    for group in asked:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(group, signal.SIGTERM)
+    groups = _running.copy()
+    for group in groups:
+        _signal(group, signal.SIGTERM)
     deadline = time.monotonic() + grace
-    while _running & asked and time.monotonic() < deadline:
+    # Signal 0 only asks whether a process of the group is left.
+    while any(_signal(group, 0) for group in groups) and time.monotonic() < deadline:
         time.sleep(0.05)
-    for group in _running.copy():
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(group, signal.SIGKILL)
+    for group in groups:
+        _signal(group, signal.SIGKILL)
+
+
+def _signal(group: int, number: int) -> bool:
+    """Send the process group signal ``number``: whether it had a process."""
+    try:
+        os.killpg(group, number)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def run_program(
@@ -164,8 +171,9 @@ def run_program(
         except subprocess.TimeoutExpired:
             status = None
         finally:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(process.pid, signal.SIGKILL)
+            # What it left running, unless stop_programs is giving it time.
+            if not _stopped.is_set():
+                _signal(process.pid, signal.SIGKILL)
             process.wait()
             _running.discard(process.pid)
         log.seek(max(0, log.seek(0, os.SEEK_END) - OUTPUT))

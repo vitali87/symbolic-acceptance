@@ -272,9 +272,10 @@ run, which is saved like any other outcome. An error in the runner itself
 keeps the run as it was, ready to resume; an attempt that was being checked
 is checked again, without asking the agent for another. Ctrl-C, or SIGTERM
 from a supervisor or a cancelled CI job, stops a run the same way, ending
-the agent or check it is running. Without `--pr`,
-people answer on the terminal; with no terminal to ask on, or once its input
-ends (Ctrl-D), the run waits for them, to be resumed.
+the agent or check it is running and what that started; they are given
+five seconds to clean up, and a second Ctrl-C ends them at once. Without
+`--pr`, people answer on the terminal; with no terminal to ask on, or once
+its input ends (Ctrl-D), the run waits for them, to be resumed.
 
 `explain acceptance.toml answers.json` decides a checklist from answers you
 supply, which is handy for checking a checklist by hand.
