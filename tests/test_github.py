@@ -15,7 +15,8 @@ from symbolic_acceptance.github import (
 
 def gh(*responses):
     fake = FakeHTTP(*responses)
-    return GitHub("octo/repo", token="t0k", transport=fake), fake
+    github = GitHub("octo/repo", "t0k", "https://api.github.com", transport=fake)
+    return github, fake
 
 
 def context(ref="abc123"):
