@@ -38,6 +38,7 @@ from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Attempt, Escalate, Task
 
 __all__ = [
+    "GRACE",
     "OUTPUT",
     "RUNNER_SECRETS",
     "CommandAgent",

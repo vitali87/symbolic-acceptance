@@ -27,7 +27,7 @@ from helpers import (
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
-from symbolic_acceptance.agents import CommandAgent, GitError, diff, git
+from symbolic_acceptance.agents import GRACE, CommandAgent, GitError, diff, git
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.draft import DraftError, draft
@@ -1183,6 +1183,52 @@ class CLITests(unittest.TestCase):
                 runner.stdout.close()
             self.assertEqual(runner.returncode, 128 + signal.SIGINT)
             self.assertEqual(json.loads(saved.read_text())["status"], "running")
+
+    def test_a_second_ctrl_c_quits_at_once(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            # An agent that will not stop when asked to.
+            group = Path(outside, "group")
+            agent = f"trap '' TERM; echo $$ > {shlex.quote(str(group))}; sleep 60"
+            with subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--agent", shlex.join(["sh", "-c", agent]), "--cwd", tmp],
+                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            ) as runner:
+                deadline = time.monotonic() + 30
+                while not group.exists() or not group.read_text():
+                    self.assertLess(
+                        time.monotonic(), deadline, "the agent never started"
+                    )
+                    time.sleep(0.05)
+                assert runner.stderr is not None
+                runner.send_signal(signal.SIGINT)
+                self.assertIn("send it again", runner.stderr.readline())
+                runner.send_signal(signal.SIGINT)
+                # Long before the agent's grace would be up.
+                runner.wait(timeout=GRACE - 1)
+            self.assertEqual(runner.returncode, 128 + signal.SIGINT)
+            while True:  # its programs killed, once the system has reaped them
+                try:
+                    os.killpg(int(group.read_text()), 0)
+                except ProcessLookupError:
+                    break
+                self.assertLess(
+                    time.monotonic(), deadline, "the agent is still running"
+                )
+                time.sleep(0.05)
 
     def test_a_run_goes_on_through_a_ctrl_c_it_was_told_to_ignore(self):
         # As a shell runs a job in the background: SIGINT ignored from the start.
