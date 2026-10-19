@@ -270,8 +270,9 @@ the record. An agent that fails, times out or changes nothing escalates the
 run, which is saved like any other outcome. An error in the runner itself
 (git, the network, a misconfigured oracle) stops it instead, and the record
 keeps the run as it was, ready to resume; an attempt that was being checked
-is checked again, without asking the agent for another. Ctrl-C stops a run
-the same way, ending the agent or check it is running. Without `--pr`,
+is checked again, without asking the agent for another. Ctrl-C, or SIGTERM
+from a supervisor or a cancelled CI job, stops a run the same way, ending
+the agent or check it is running. Without `--pr`,
 people answer on the terminal; with no terminal to ask on, or once its input
 ends (Ctrl-D), the run waits for them, to be resumed.
 

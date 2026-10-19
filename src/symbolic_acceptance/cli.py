@@ -350,7 +350,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Acceptance checklists for coding agents.",
         epilog="Exit status: 0 approved (or clean), 1 changes, escalated or "
         "errors (options it refuses included), 2 malformed arguments, 3 waiting "
-        "(or undecided), 130 interrupted.",
+        "(or undecided), 130 or 143 stopped by Ctrl-C or SIGTERM.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -442,24 +442,27 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _interrupted(signum: int, frame: object) -> None:
-    """Ctrl-C: end the agent or check running now, and stop as soon as the
-    rest has; a second Ctrl-C, for a request still waiting on the network,
-    quits at once."""
-    signal.signal(signal.SIGINT, lambda signum, frame: os._exit(130))
-    print("interrupted; stopping (Ctrl-C again quits at once)", file=sys.stderr)
+# Ctrl-C, and what a supervisor or a cancelled CI job sends.
+_STOPS = (signal.SIGINT, signal.SIGTERM)
+
+
+def _stop(signum: int, frame: object) -> None:
+    """End the agent or check running now, and stop as soon as the rest has,
+    the record kept as last saved; a second signal, for a request still
+    waiting on the network, quits at once."""
+    for stop in _STOPS:
+        signal.signal(stop, lambda signum, frame: os._exit(128 + signum))
+    name = signal.Signals(signum).name
+    print(f"stopping on {name}; send it again to quit at once", file=sys.stderr)
     stop_programs()
-    raise KeyboardInterrupt
+    raise SystemExit(128 + signum)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    previous = signal.signal(signal.SIGINT, _interrupted)
+    previous = {stop: signal.signal(stop, _stop) for stop in _STOPS}
     try:
         return int(args.handler(args))
-    except KeyboardInterrupt:
-        # A record, if any, keeps the run as it was last saved.
-        return 130
     except BrokenPipeError:
         # The reader went away (e.g. `| head`); stop quietly.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
@@ -476,7 +479,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # record, if any, keeps the run as it was.
         raise SystemExit(f"error: {error}") from None
     finally:
-        signal.signal(signal.SIGINT, previous)
+        for stop, handler in previous.items():
+            signal.signal(stop, handler)
 
 
 if __name__ == "__main__":
