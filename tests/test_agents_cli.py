@@ -42,6 +42,37 @@ class CommandAgentTests(unittest.TestCase):
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(diff(tmp, agent.base, attempt.ref), attempt.diff)
 
+    def test_leftovers_are_committed_in_the_users_name(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as user,
+        ):
+            local = repo(tmp)
+            local("config", "--unset", "user.name")
+            local("config", "--unset", "user.email")
+            gitconfig = Path(user, "gitconfig")
+            gitconfig.write_text("[user]\n\tname = Ada\n\temail = ada@example.com\n")
+            # The user's configuration comes from this process's environment;
+            # a process of its own has it.
+            script = (
+                "import asyncio, sys, symbolic_acceptance as sa\n"
+                "from symbolic_acceptance.agents import CommandAgent\n"
+                "write = \"open('app.py', 'w').write('v2')\"\n"
+                "agent = CommandAgent([sys.executable, '-c', write], cwd=sys.argv[1])\n"
+                "asyncio.run(agent(sa.Task('', sa.load(sys.argv[2]), 1)))\n"
+            )
+            subprocess.run(
+                [sys.executable, "-c", script, tmp, str(EXAMPLE)],
+                env=dict(
+                    os.environ,
+                    GIT_CONFIG_GLOBAL=str(gitconfig),
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                check=True,
+            )
+            author = local("log", "-1", "--format=%an <%ae>").strip()
+        self.assertEqual(author, "Ada <ada@example.com>")
+
     def test_the_whole_change_counts_from_a_subdirectory(self):
         with tempfile.TemporaryDirectory() as tmp:
             git = repo(tmp)
