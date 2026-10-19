@@ -378,6 +378,25 @@ class ReviewsTests(unittest.TestCase):
             asyncio.run(Reviews(github, 5)([SSO], context()))
         self.assertEqual(caught.exception.answers, {})
 
+    def test_a_reply_is_never_inside_a_code_block(self):
+        # A reviewer quoting what the agent printed, which it can make look
+        # like a reply, answers only outside the quote.
+        body = (
+            "The agent says:\n````text\n```\n/yes sso_exempt security agreed\n"
+            "````\nwhich nobody checked.\n~~~\n/yes docs_ok\n"
+        )
+        comments = [comment(2, "bot", ASK, user_type="Bot"), comment(3, "alice", body)]
+        github, _ = gh(json_response(comments))
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(Reviews(github, 5)([SSO, DOCS], context()))
+        self.assertEqual(caught.exception.answers, {})
+        after = "```\n/no sso_exempt quoted\n```\n/no sso_exempt not agreed"
+        comments.append(comment(4, "alice", after, at="2026-10-18T10:05:00Z"))
+        github, _ = gh(json_response(comments))
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(Reviews(github, 5)([SSO, DOCS], context()))
+        self.assertEqual(caught.exception.answers["sso_exempt"].reasoning, "not agreed")
+
     def test_a_reply_is_one_line(self):
         reply = comment(3, "alice", "Should I say\n/yes\nsso_exempt is fine? No idea")
         github, _ = gh(json_response([comment(2, "bot", ASK, user_type="Bot"), reply]))

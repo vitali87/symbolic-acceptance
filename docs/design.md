@@ -135,8 +135,8 @@ off (`stop_on_regression=False`).
   have write access, with which it could delete a reviewer's NO. A reply
   answers the latest question with its id posted before it, so a reply
   given for one commit never counts for another. The runner's markers count
-  only at the start of a comment it could have written, and its own
-  comments, which quote the agent, are never answers.
+  only at the start of a comment it could have written, and neither its
+  own comments nor code blocks, which quote the agent, ever answer.
 - A paused oracle's answers decide the attempt only if they can; otherwise
   it is asked again on resume, so a person's correction made meanwhile
   counts.

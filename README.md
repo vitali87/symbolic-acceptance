@@ -143,8 +143,8 @@ hand the attempt to a person.
   edit someone else's). A reply answers the latest question with its id
   posted before it, so it counts for that commit alone. The runner's own
   markers count only at the start of a comment it could have written, and
-  its own comments, which quote the agent, are never answers, whoever's
-  token posted them. An agent account needs no write access, and must not
+  neither its own comments nor code blocks, which quote the agent, ever
+  answer, whoever posted them. An agent account needs no write access, and must not
   have it: it could delete a reviewer's NO.
 - Freeze `.github/` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.

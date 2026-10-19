@@ -52,6 +52,7 @@ _MARKER = "<!-- symbolic-acceptance:"
 _ASKED = re.compile(
     re.escape(_MARKER) + r"ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
 )
+_FENCE = re.compile(r" {0,3}(`{3,}|~{3,})(.*)$")
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 # Seconds between reads of check runs still going.
 POLL = 15.0
@@ -205,6 +206,21 @@ def _logins(names: Collection[str]) -> set[str]:
     return {name.strip().removeprefix("@").lower() for name in names if name.strip()}
 
 
+def _outside_code(body: str) -> str:
+    """The comment's own lines: a fenced code block quotes, it never replies."""
+    lines, fence = [], ""
+    for line in body.split("\n"):
+        match = _FENCE.match(line)
+        if not fence:
+            if match:
+                fence = match[1]
+            else:
+                lines.append(line)
+        elif match and match[1].startswith(fence) and not match[2].strip():
+            fence = ""
+    return "\n".join(lines)
+
+
 def _by_runner(comment: Comment, exclude: Collection[str]) -> bool:
     """Whether the runner could have written it: a bot, or a trusted account."""
     login, bot, association = _author(comment)
@@ -314,8 +330,9 @@ class Reviews:
     collaborators, never from bots or from ``exclude`` (the agent's own
     account). Edited comments never count, since anyone with write access
     can edit another person's comment; correct an answer with a new reply.
-    Nor do the runner's own comments, whoever posts them: a report quotes
-    what the agent printed. The latest reply to a question wins.
+    Nor do the runner's own comments, whoever posts them, or lines inside a
+    fenced code block: both quote what the agent printed, which can look
+    like a reply. The latest reply to a question wins.
     """
 
     def __init__(
@@ -369,7 +386,7 @@ class Reviews:
                 if match and _by_runner(comment, self.exclude):
                     latest.update(dict.fromkeys(match["ids"].split(","), match["ref"]))
             elif self._allowed(comment):
-                for verdict, qid, why in _REPLY.findall(comment["body"]):
+                for verdict, qid, why in _REPLY.findall(_outside_code(comment["body"])):
                     if latest.get(qid) == ref:
                         answers[qid] = Answer(
                             verdict.lower() == "yes",
