@@ -48,10 +48,10 @@ class ParseTests(unittest.TestCase):
             ],
         )
 
-    def test_a_renamed_file_loses_lines_under_its_old_name(self):
+    def test_lines_carry_the_files_name_after_the_change(self):
         _, lines = parse(RENAMED)
         self.assertEqual(
-            [d.where for d in lines], ["new.py:1", "old.py:-2", "new.py:2", "new.py:3"]
+            [d.where for d in lines], ["new.py:1", "new.py:-2", "new.py:2", "new.py:3"]
         )
 
     def test_no_newline_markers_and_escaped_paths(self):
@@ -84,21 +84,28 @@ class ParseTests(unittest.TestCase):
             [f.path for f in files][:2], ["src/auth.py", "tests/test_auth.py"]
         )
 
-    def test_quoted_paths_from_real_git(self):
+    def test_unusual_paths_from_real_git(self):
         with tempfile.TemporaryDirectory() as tmp:
             git = repo(tmp)
             Path(tmp, "docs").mkdir()
-            Path(tmp, "docs", "naïve café.md").write_text("hi\n")
+            Path(tmp, "docs", "naïve café.md").write_text("hello there\n")
+            Path(tmp, "docs", 'say "hi"\there.md').write_text("hi\n")
             Path(tmp, "app.py").write_text("print('v2')\n")
             git("add", ".")
             git("commit", "-qm", "change")
             changed = diff(tmp, "HEAD~1", "HEAD")
-        self.assertIn("\\303", changed, "git quoted the path with octal escapes")
-        files, _ = parse(changed)
+        self.assertIn("+++ b/docs/naïve café.md", changed, "shown as it is")
+        self.assertIn('"b/docs/say \\"hi\\"\\there.md"', changed, "quoted by git")
+        files, lines = parse(changed)
         self.assertEqual(
             [(f.path, f.status) for f in files],
-            [("app.py", "modified"), ("docs/naïve café.md", "added")],
+            [
+                ("app.py", "modified"),
+                ("docs/naïve café.md", "added"),
+                ('docs/say "hi"\there.md', "added"),
+            ],
         )
+        self.assertIsNotNone(locate("hello there", "b/docs/naïve café.md", lines))
         q = sa.Question("frozen", "Frozen?", "ci", options={"frozen": ["docs/*"]})
         self.assertFalse(frozen_files(q, context(changed)).is_met)
 
@@ -140,33 +147,81 @@ class ParseTests(unittest.TestCase):
                 ("+", "y = 2"),
             ],
         )
-        self.assertIsNone(locate("lock(user)", lines))
-        self.assertIsNotNone(locate("// TODO\r+lock(user)", lines), "the line itself")
+        self.assertIsNone(locate("lock(user)", "app.py", lines))
+        self.assertIsNotNone(
+            locate("// TODO\r+lock(user)", "app.py", lines), "the line itself"
+        )
 
     def test_locate(self):
         _, lines = parse(DIFF)
-        found = locate("if failures(user) > MAX_FAILURES:\n    lock(user)", lines)
-        assert found is not None
-        self.assertEqual([d.where for d in found], ["src/auth.py:12", "src/auth.py:13"])
-        self.assertIsNotNone(locate("+        record_failure(user)", lines))
-        self.assertIsNone(locate("rate_limit(user)", lines))
-        self.assertIsNone(locate("+ rate_limit(user)", lines))
-        self.assertIsNone(locate("lock", lines), "too short to prove anything")
-        self.assertIsNone(locate("MAX_FAILURES", lines), "part of a line is not a line")
+
+        def where(quote, path="src/auth.py"):
+            found = locate(quote, path, lines)
+            return found and [d.where for d in found]
+
+        self.assertEqual(
+            where("if failures(user) > MAX_FAILURES:\n    lock(user)"),
+            ["src/auth.py:12", "src/auth.py:13"],
+        )
+        self.assertEqual(where("+        record_failure(user)"), ["src/auth.py:11"])
+        self.assertIsNone(where("rate_limit(user)"))
+        self.assertIsNone(where("+ rate_limit(user)"))
+        self.assertIsNone(where("MAX_FAILURES"), "part of a line is not a line")
         self.assertIsNone(
-            locate("record_failure(user)\n    lock(user)", lines),
+            where("record_failure(user)\n    lock(user)"),
             "lines quoted together must be consecutive",
         )
+        self.assertIsNone(where("def test_lockout():"), "the line is in another file")
+
+    def test_locate_reads_lines_as_the_file_has_them(self):
+        _, lines = parse(SPREAD)
+
+        def where(quote, path="src/auth.py"):
+            found = locate(quote, path, lines)
+            return found and [d.where for d in found]
+
+        self.assertEqual(
+            where("def lock_account(user):\n\n    user.locked = True"),
+            ["src/auth.py:1", "src/auth.py:3"],
+            "blank lines don't count",
+        )
+        self.assertIsNone(where("x = 1\ny = 2"), "the lines are far apart")
+        self.assertIsNone(where("+z = 3"), "too short to prove anything")
+        self.assertEqual(where("lock(user)"), ["src/auth.py:83"])
         self.assertIsNone(
-            locate("return True\ndef test_lockout():", lines),
-            "and in one file",
+            where("user.locked = True", "docs/notes.txt"),
+            "a copy in another file is not this file's line",
         )
 
     def test_locate_prefers_where_the_line_changes(self):
         _, lines = parse(RENAMED)
-        found = locate("value = compute()", lines)
+        found = locate("value = compute()", "new.py", lines)
         assert found is not None
         self.assertEqual([d.where for d in found], ["new.py:3"])
+
+
+SPREAD = """\
+diff --git a/src/auth.py b/src/auth.py
+--- a/src/auth.py
++++ b/src/auth.py
+@@ -1,4 +1,6 @@
+ def lock_account(user):
++
++    user.locked = True
+     return user
+ 
+ x = 1
+@@ -80,2 +82,3 @@
+ y = 2
++lock(user)
+ z = 3
+diff --git a/docs/notes.txt b/docs/notes.txt
+new file mode 100644
+--- /dev/null
++++ b/docs/notes.txt
+@@ -0,0 +1 @@
++lock(user)
+"""
 
 
 RENAMED = """\

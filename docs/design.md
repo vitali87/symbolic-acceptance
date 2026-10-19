@@ -80,13 +80,15 @@ The judge instead:
 
 - returns structured JSON (`output_config.format`);
 - must back the answer that helps the attempt pass wherever it can: a YES
-  quotes the diff, at least one line the change adds or removes, and the
-  quotes are checked. An unbacked helpful answer gives way to the other one.
-  Which answer helps follows from where the question sits (YES in `that`, NO
-  in `when`, flipped by `not`); "an unsupported YES counts as NO" alone would
-  have let a misquoted YES on a `when` gate skip a person's review. A
-  question about absence (`kind = "absence"`) has nothing to quote for its
-  YES, so its NO quotes what breaks it;
+  quotes lines of one file of the diff, consecutive within a hunk, and among
+  them more than a trivial line the change adds or removes; the quotes are
+  checked. An unbacked helpful answer gives way to the other one. Which
+  answer helps follows from where the question sits (YES in `that`, NO in
+  `when`, flipped by `not`), and the judge is told it, so that when unsure
+  it gives the other; "an unsupported YES counts as NO" alone would have let
+  a misquoted YES on a `when` gate skip a person's review. A question about
+  absence (`kind = "absence"`) has nothing to quote for its YES, so its NO
+  quotes what breaks it;
 - with `samples > 1`, needs every sample to give the answer that helps;
 - escalates on text addressed to the reviewer, on a refusal, and on a diff
   too large to read whole (it never truncates);

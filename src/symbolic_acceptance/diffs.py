@@ -39,14 +39,17 @@ class FileChange:
 class DiffLine:
     """One line of hunk content: ``+`` added, ``-`` removed, ``" "`` context.
 
-    ``line`` is the new file's line number for added and context lines, and
-    the old file's for removed lines.
+    ``path`` is the file's name after the change (before it, for a deleted
+    file). ``line`` is the new file's line number for added and context
+    lines, and the old file's for removed lines. ``hunk`` counts the hunks
+    of the diff, so lines with the same one are consecutive in their file.
     """
 
     path: str
     side: Literal["+", "-", " "]
     line: int
     text: str
+    hunk: int
 
     @property
     def where(self) -> str:
@@ -127,6 +130,7 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
     """Files the diff touches, and every hunk line with its location."""
     files: list[_File] = []
     lines: list[DiffLine] = []
+    hunk = -1
     # Git ends lines with "\n" only; splitlines() would also break on form
     # feeds and Unicode separators inside a line and lose count of the hunk.
     rows = diff.split("\n")
@@ -163,6 +167,7 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
             old_left = int(match[2]) if match[2] is not None else 1
             new_left = int(match[4]) if match[4] is not None else 1
             path = current.new or current.old or ""
+            hunk += 1
             # Count the hunk out, so content that looks like a header
             # ("+++ x" as an added line) is still read as content.
             while (old_left > 0 or new_left > 0) and index < len(rows):
@@ -174,15 +179,15 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
                 if side == "\\":
                     continue
                 if side == "+":
-                    lines.append(DiffLine(path, "+", new_line, text))
+                    lines.append(DiffLine(path, "+", new_line, text, hunk))
                     new_line += 1
                     new_left -= 1
                 elif side == "-":
-                    lines.append(DiffLine(current.old or path, "-", old_line, text))
+                    lines.append(DiffLine(path, "-", old_line, text, hunk))
                     old_line += 1
                     old_left -= 1
                 else:
-                    lines.append(DiffLine(path, " ", new_line, text))
+                    lines.append(DiffLine(path, " ", new_line, text, hunk))
                     new_line += 1
                     old_line += 1
                     new_left -= 1
@@ -196,25 +201,28 @@ def _same(part: str, line: DiffLine) -> bool:
     return part == text or (part[:1] in "+-" and part[1:].strip() == text)
 
 
-def locate(quote: str, lines: list[DiffLine]) -> list[DiffLine] | None:
-    """Where ``quote`` appears in the diff, or ``None``.
+def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | None:
+    """Where ``quote`` appears in the diff of the file at ``path``, or ``None``.
 
-    The quote's non-blank lines must be whole lines of one file, one after
-    another in the diff; surrounding whitespace and a leading ``+`` or ``-``
+    The quote's non-blank lines must be whole non-blank lines of one hunk,
+    one after another; surrounding whitespace and a leading ``+`` or ``-``
     copied from the diff don't count. A place where the change adds or
     removes one of them is preferred. Quotes shorter than a few characters
     prove nothing and are rejected.
     """
     parts = [part.strip() for part in quote.split("\n") if part.strip()]
-    if sum(len(part) for part in parts) < MIN_QUOTE:
-        return None
+    # The path as the diff names it, with or without the a/ or b/ before it.
+    names = {path, path.removeprefix("a/"), path.removeprefix("b/")}
+    candidates = [line for line in lines if line.path in names and line.text.strip()]
     unchanged = None
-    for start in range(len(lines) - len(parts) + 1):
-        window = lines[start : start + len(parts)]
-        if len({line.path for line in window}) > 1 or not all(
+    for start in range(len(candidates) - len(parts) + 1):
+        window = candidates[start : start + len(parts)]
+        if len({line.hunk for line in window}) > 1 or not all(
             map(_same, parts, window)
         ):
             continue
+        if sum(len(line.text.strip()) for line in window) < MIN_QUOTE:
+            return None
         if any(line.side != " " for line in window):
             return window
         unchanged = unchanged or window

@@ -113,7 +113,7 @@ class CommandAgentTests(unittest.TestCase):
             for key, value in {
                 "core.hooksPath": str(hooks),
                 "core.fsmonitor": str(Path(hooks, "monitor")),
-                "core.quotePath": "false",
+                "core.quotePath": "true",
                 "color.ui": "always",
                 "diff.noprefix": "true",
                 "diff.context": "0",
@@ -160,7 +160,7 @@ class CommandAgentTests(unittest.TestCase):
                 ("tests/vendored", "added"),
             ],
         )
-        self.assertIn('"b/na\\303\\257ve.txt"', attempt.diff)
+        self.assertIn("+++ b/naïve.txt", attempt.diff)
         self.assertNotIn("HIDDEN", attempt.diff)
         self.assertNotIn("\x1b[", attempt.diff)
 

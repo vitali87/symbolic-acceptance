@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import unittest
 
 from helpers import DIFF, FakeHTTP, json_response, message
@@ -12,11 +13,17 @@ from symbolic_acceptance.judge import Judge, Verdict
 
 
 def verdict(answer, quotes=(), missing="", tampering=False, reasoning="looked"):
+    """A reply to one question; a quote is lines of src/auth.py or (path, lines)."""
     return message(
         {
             "reasoning": reasoning,
             "answer": answer,
-            "quotes": list(quotes),
+            "quotes": [
+                {"path": "src/auth.py", "lines": quote}
+                if isinstance(quote, str)
+                else {"path": quote[0], "lines": quote[1]}
+                for quote in quotes
+            ],
             "missing": missing,
             "tampering": tampering,
         }
@@ -101,7 +108,18 @@ class RequestTests(unittest.TestCase):
                     "properties": {
                         "reasoning": {"type": "string"},
                         "answer": {"type": "string", "enum": ["YES", "NO"]},
-                        "quotes": {"type": "array", "items": {"type": "string"}},
+                        "quotes": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "path": {"type": "string"},
+                                    "lines": {"type": "string"},
+                                },
+                                "required": ["path", "lines"],
+                                "additionalProperties": False,
+                            },
+                        },
                         "missing": {"type": "string"},
                         "tampering": {"type": "boolean"},
                     },
@@ -131,6 +149,41 @@ class RequestTests(unittest.TestCase):
             "trust me", json.dumps(body), "the agent's claims never reach the judge"
         )
         self.assertIn("NO if not applicable", question["text"])
+
+    def test_each_question_says_which_answer_helps(self):
+        for text, qid, note in (
+            (None, "locks_account", "A YES helps the change pass."),
+            (GATED, "touches_sso", "A NO helps the change pass."),
+            (BOTH_WAYS, "a", None),
+        ):
+            with self.subTest(qid):
+                j, fake = judge(verdict("NO", missing="x"))
+                ask(j, question=sa.Question(qid, "Q?", "llm"), checklist_text=text)
+                asked = fake.body()["messages"][0]["content"][1]["text"]
+                if note:
+                    self.assertIn(note, asked)
+                else:
+                    self.assertNotIn("helps the change pass", asked)
+
+    def test_the_first_question_is_asked_alone_to_cache_the_change(self):
+        events = []
+
+        def reply(request):
+            asked = json.loads(request.data)["messages"][0]["content"][1]["text"]
+            events.append(("start", asked))
+            time.sleep(0.05)
+            events.append(("end", asked))
+            return verdict("NO", missing="x")
+
+        j, _ = judge(reply, reply, reply)
+        questions = [sa.Question(q, f"{q}?", "llm") for q in ("a", "b", "c")]
+        checklist = sa.loads(
+            "".join(f'[q.{q.id}]\nask = "?"\nby = "llm"\n' for q in questions)
+            + '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c"] }\nfail = "x"\n'
+        )
+        context = sa.Context(checklist, sa.Attempt("abc", 1, diff=DIFF), {})
+        asyncio.run(j(questions, context))
+        self.assertEqual([kind for kind, _ in events[:2]], ["start", "end"])
 
     def test_boundary_is_stable_per_attempt_and_unpredictable(self):
         j, fake = judge(verdict("NO", missing="x"), verdict("NO", missing="x"))
@@ -211,7 +264,44 @@ class VerdictTests(unittest.TestCase):
         j, _ = judge(context_only, context_only)
         answer = ask(j)
         self.assertFalse(answer.is_met)
-        self.assertIn("only lines the change leaves as they were", answer.reasoning)
+        self.assertIn("too little of what the change adds", answer.reasoning)
+
+    def test_a_copy_of_the_line_in_another_file_does_not_back_it(self):
+        # The lockout was already there; the change only copies its line
+        # into a notes file.
+        diff = (
+            "diff --git a/src/auth.py b/src/auth.py\n--- a/src/auth.py\n"
+            "+++ b/src/auth.py\n@@ -1,2 +1,3 @@\n def login(user):\n"
+            "         lock(user)\n+    log(user)\n"
+            "diff --git a/notes.txt b/notes.txt\nnew file mode 100644\n"
+            "--- /dev/null\n+++ b/notes.txt\n@@ -0,0 +1 @@\n+lock(user)\n"
+        )
+        claims = verdict("YES", ["        lock(user)"])
+        j, _ = judge(claims, claims)
+        self.assertFalse(ask(j, diff=diff).is_met)
+
+    def test_a_trivial_changed_line_does_not_back_it(self):
+        head = (
+            "diff --git a/src/auth.py b/src/auth.py\n--- a/src/auth.py\n"
+            "+++ b/src/auth.py\n@@ -1,2 +1,3 @@\n"
+            " if failures(user) > MAX_FAILURES:\n     lock(user)\n"
+        )
+        quote = "if failures(user) > MAX_FAILURES:\n    lock(user)\n"
+        j, _ = judge(verdict("YES", [quote + "    notify(user)"]))
+        self.assertTrue(ask(j, diff=head + "+    notify(user)\n").is_met)
+        j, _ = judge(*[verdict("YES", [quote + "    }"])] * 2)
+        answer = ask(j, diff=head + "+    }\n")
+        self.assertFalse(answer.is_met)
+        self.assertIn("too little of what the change adds", answer.reasoning)
+
+    def test_evidence_names_what_the_change_did_to_each_quoted_line(self):
+        quote = "if not check(user, password):\n-        return False\n+record_failure(user)"
+        j, _ = judge(verdict("YES", [quote]))
+        evidence = (
+            "src/auth.py:10 (context, removed, added): "
+            "if not check(user, password): return False record_failure(user)"
+        )
+        self.assertEqual(ask(j).evidence, (evidence,))
 
     def test_absence_needs_no_quote_for_yes(self):
         j, fake = judge(verdict("YES", [], reasoning="no public signature changed"))

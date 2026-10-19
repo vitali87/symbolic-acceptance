@@ -46,7 +46,9 @@ _OVERRIDES = (
     "-c",
     "core.fsmonitor=false",
     "-c",
-    "core.quotePath=true",
+    # Names as they are, so the judge can quote them; git still quotes a
+    # name with quotes, backslashes or control characters in it.
+    "core.quotePath=false",
 )
 # Git without the user's or the system's configuration, which the agent may
 # have written too.

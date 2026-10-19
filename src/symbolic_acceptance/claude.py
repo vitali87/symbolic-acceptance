@@ -75,7 +75,8 @@ class _Message(TypedDict):
 def _schema(shape: object) -> dict[str, JSON]:
     """The JSON schema for ``shape``, a ``TypedDict`` whose keys are required.
 
-    Values may be strings, booleans, string ``Literal``s and lists of them.
+    Values may be strings, booleans, string ``Literal``s, such ``TypedDict``s
+    and lists of them.
     """
     if shape is str:
         return {"type": "string"}

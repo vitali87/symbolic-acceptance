@@ -122,14 +122,15 @@ hand the attempt to a person.
   checkout's configuration could change (hooks, replace refs, textconv and
   diff drivers, path prefixes), since the agent can write that configuration.
 - An answer from the judge that helps the attempt pass must be backed by the
-  diff wherever it can be: a YES quotes the lines that show it, whole and
-  in order, at least one of them a line the change adds or removes, and the
-  quotes are checked. An
-  unbacked helpful answer gives way to the other one. Which answer helps
-  follows from the checklist: YES inside `that`, NO inside a `when`
-  condition. A question marked `kind = "absence"` ("does it leave the API
-  unchanged?") has nothing to quote for its YES, so its NO quotes what
-  breaks it. With `samples > 1`, every sample must give the helpful answer.
+  diff wherever it can be: a YES quotes the lines of a file that show it,
+  whole and consecutive, and among them more than a trivial line the change
+  adds or removes; the quotes are checked. An unbacked helpful answer gives
+  way to the other one. Which answer helps follows from the checklist: YES
+  inside `that`, NO inside a `when` condition, and each question tells the
+  judge which, so that when unsure it gives the other. A question marked
+  `kind = "absence"` ("does it leave the API unchanged?") has nothing to
+  quote for its YES, so its NO quotes what breaks it. With `samples > 1`,
+  every sample must give the helpful answer.
 - `run` commands execute in a fresh clone of the attempt's commit that
   reads none of the checkout's git configuration or attributes, so nothing
   in the checkout outside the commit can change their result.
