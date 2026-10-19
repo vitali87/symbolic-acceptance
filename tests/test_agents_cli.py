@@ -1205,25 +1205,37 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("attempt 1 changed nothing", out)
 
-    def test_a_program_started_once_the_runner_is_stopping_ends_at_once(self):
+    def test_stopping_waits_for_the_programs_and_ends_any_started_after(self):
         # A process of its own, as stopping is for good.
         script = (
-            "import os, sys, time\n"
+            "import os, sys, threading, time\n"
             "from symbolic_acceptance.agents import run_program, stop_programs\n"
-            "stop_programs()\n"
+            "started = sys.argv[1]\n"
+            "program = [sys.executable, '-c',"
+            " f'import time; open({started!r}, \"w\"); time.sleep(60)']\n"
+            "def run():\n"
+            "    return run_program(program, cwd='.', env=os.environ, timeout=60)[0]\n"
+            "statuses = []\n"
+            "thread = threading.Thread(target=lambda: statuses.append(run()))\n"
+            "thread.start()\n"
+            "while not os.path.exists(started):\n"
+            "    time.sleep(0.05)\n"
             "start = time.monotonic()\n"
-            "status, _ = run_program([sys.executable, '-c', 'import time; time.sleep(30)'],"
-            " cwd='.', env=os.environ, timeout=60)\n"
-            "print(status, time.monotonic() - start < 10)\n"
+            "stop_programs(grace=60)\n"
+            "thread.join()\n"
+            "print(*statuses, run(), time.monotonic() - start < 30)\n"
         )
-        done = subprocess.run(
-            [sys.executable, "-c", script],
-            env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        self.assertEqual(done.stdout, f"{-signal.SIGKILL} True\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run(
+                [sys.executable, "-c", script, str(Path(tmp, "started"))],
+                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        # Asked to stop, it ended, and the stop with it, long before the
+        # grace was up; the program started after it was killed at once.
+        self.assertEqual(done.stdout, f"{-signal.SIGTERM} {-signal.SIGKILL} True\n")
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):

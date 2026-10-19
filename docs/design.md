@@ -116,7 +116,8 @@ conclusions: statuses are re-derived on load and must match. A resume
 needs the checkout at the last attempt, and one run must not be resumed
 twice at once. Every outcome is saved, including an agent that fails or
 changes nothing, which escalates rather than crashing the run; an error in
-the runner itself stops it, with the record left as it was.
+the runner itself, or Ctrl-C or SIGTERM, stops it with the record left as
+it was.
 
 ### 6. Stop conditions on requirements, not raw answers
 
