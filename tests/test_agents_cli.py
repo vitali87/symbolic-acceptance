@@ -709,16 +709,34 @@ class CLITests(unittest.TestCase):
         with (
             tempfile.TemporaryDirectory() as tmp,
             tempfile.TemporaryDirectory() as outside,
+            tempfile.TemporaryDirectory() as library,
         ):
-            repo(tmp)
-            Path(tmp, "notes.txt").write_text("mine, not the agent's\n")
+            git = repo(tmp)
+            repo(library)("commit", "-q", "--allow-empty", "-m", "newer")
+            allow = ("-c", "protocol.file.allow=always")
+            git(*allow, "submodule", "add", "-q", library, "vendored")
+            git("config", "-f", ".gitmodules", "submodule.vendored.ignore", "all")
+            git("add", ".gitmodules")
+            git("commit", "-qm", "vendor")
             checklist = Path(outside, "acceptance.toml")
             checklist.write_text(
                 '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
                 '[[require]]\nthat = "a"\nfail = "x"\n'
             )
+            run = ("run", str(checklist), "--agent", "true", "--cwd", tmp)
+            Path(tmp, "notes.txt").write_text("mine, not the agent's\n")
             with self.assertRaisesRegex(SystemExit, "changes no commit holds"):
-                cli("run", str(checklist), "--agent", "true", "--cwd", tmp)
+                cli(*run)
+            Path(tmp, "notes.txt").unlink()
+            # A submodule moved to another commit, which the checkout ignores.
+            git("-C", "vendored", "checkout", "-q", "HEAD~1")
+            with self.assertRaisesRegex(SystemExit, "changes no commit holds"):
+                cli(*run)
+            git("-C", "vendored", "checkout", "-q", "-")
+            # An edit inside it, which no commit here can hold, is not one.
+            Path(tmp, "vendored", "scratch.txt").write_text("x\n")
+            _, out = cli(*run)
+            self.assertIn("attempt 1 changed nothing", out)
 
     def test_a_resumed_run_keeps_diffing_from_where_it_started(self):
         with (
