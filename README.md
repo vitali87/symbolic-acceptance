@@ -260,6 +260,8 @@ symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 
 `run` starts from a checkout whose changes are all committed, and keeps the
 commit it started from in the record, so every attempt is compared with it.
+A checkout that belongs to another user, as in a container job, needs
+`safe.directory` in the runner's git configuration, as git asks of any.
 A resumed run needs the agent's checkout at its last attempt, and one run
 must not be resumed twice at once: the resumes would share the checkout and
 the record. An agent that fails, times out or changes nothing escalates the

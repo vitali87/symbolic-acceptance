@@ -154,7 +154,11 @@ class Commands:
             tree = str(Path(scratch, "tree"))
             source = Path(top).as_uri()
             git(scratch, "init", "--quiet", tree, isolated=True)
-            fetch = ("fetch", "--quiet", "--depth=1", "--no-tags", source)
+            # Git found the checkout trusted just above: the user's, or named
+            # by their safe.directory, which the git that reads it for this
+            # fetch does not see, so it is told.
+            upload = "--upload-pack=git -c 'safe.directory=*' upload-pack"
+            fetch = ("fetch", "--quiet", "--depth=1", "--no-tags", upload, source)
             git(tree, *fetch, context.attempt.ref, isolated=True)
             git(tree, "checkout", "--quiet", "--detach", "FETCH_HEAD", isolated=True)
             return self._run(argv, tree, expect == "pass")

@@ -429,6 +429,37 @@ class CommandsTests(unittest.TestCase):
             )
         self.assertEqual(done.stdout, "print('v1')\n")
 
+    @unittest.skipUnless(os.geteuid() == 0, "giving the checkout an owner takes root")
+    def test_a_checkout_another_owns_is_checked_once_the_user_trusts_it(self):
+        with tempfile.TemporaryDirectory() as user:
+            gitconfig = Path(user, "gitconfig")
+            gitconfig.write_text("[safe]\n\tdirectory = *\n")
+            for path in [Path(self.tmp.name), *Path(self.tmp.name).rglob("*")]:
+                os.chown(path, 65534, 65534)
+            script = (
+                "import sys, symbolic_acceptance as sa\n"
+                "from symbolic_acceptance.checks import Commands\n"
+                "checklist = sa.loads(sys.stdin.read())\n"
+                "context = sa.Context(checklist, sa.Attempt(sys.argv[2]), {})\n"
+                "answer = Commands(sys.argv[1])(checklist.questions['sees'], context)\n"
+                "print(*answer.evidence)\n"
+            )
+            done = subprocess.run(
+                [sys.executable, "-c", script, self.tmp.name, self.head],
+                input='[q.sees]\nask = "What is in app.py?"\nby = "ci"\n'
+                'run = "cat app.py"\n[[require]]\nthat = "sees"\nfail = "x"\n',
+                env=dict(
+                    os.environ,
+                    GIT_CONFIG_GLOBAL=str(gitconfig),
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout, "print('v1')\n")
+
     def test_commands_never_get_the_runners_github_token(self):
         env = {"PATH": os.environ["PATH"], "GITHUB_TOKEN": "t", "GH_TOKEN": "t"}
         commands = Commands(self.tmp.name, env={**env, "OTHER_TOKEN": "kept"})

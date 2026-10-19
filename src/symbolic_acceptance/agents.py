@@ -194,8 +194,13 @@ def git(
 
 def diff(cwd: str | Path, base: str, head: str) -> str:
     """The unified diff from ``base`` to ``head``, as plain text, with no
-    function names in its hunk headers."""
-    return _FUNCTION_NAME.sub(r"\1", git(cwd, *_DIFF, base, head, isolated=True))
+    function names in its hunk headers.
+
+    Its options override every setting that could shape it, so it may read
+    the user's configuration like the runner's other git commands, and their
+    ``safe.directory`` trusts a checkout someone else owns.
+    """
+    return _FUNCTION_NAME.sub(r"\1", git(cwd, *_DIFF, base, head))
 
 
 class CommandAgent:

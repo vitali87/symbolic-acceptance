@@ -88,6 +88,39 @@ class CommandAgentTests(unittest.TestCase):
             author = local("log", "-1", "--format=%an <%ae>").strip()
         self.assertEqual(author, "Ada <ada@example.com>")
 
+    def test_a_checkout_another_owns_works_once_the_user_trusts_it(self):
+        # As in a container job on GitHub Actions: git trusts a checkout
+        # someone else owns only if the user's own configuration says so.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as user,
+        ):
+            repo(tmp)
+            gitconfig = Path(user, "gitconfig")
+            gitconfig.write_text("[safe]\n\tdirectory = *\n")
+            script = (
+                "import asyncio, sys, symbolic_acceptance as sa\n"
+                "from symbolic_acceptance.agents import CommandAgent\n"
+                "write = \"open('app.py', 'w').write('v2')\"\n"
+                "agent = CommandAgent([sys.executable, '-c', write], cwd=sys.argv[1])\n"
+                "print(asyncio.run(agent(sa.Task('', sa.load(sys.argv[2]), 1))).diff)\n"
+            )
+            done = subprocess.run(
+                [sys.executable, "-c", script, tmp, str(EXAMPLE)],
+                env=dict(
+                    os.environ,
+                    GIT_CONFIG_GLOBAL=str(gitconfig),
+                    # Git's own switch to take every repository for another's.
+                    GIT_TEST_ASSUME_DIFFERENT_OWNER="1",
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("+v2", done.stdout)
+
     def test_the_whole_change_counts_from_a_subdirectory(self):
         with tempfile.TemporaryDirectory() as tmp:
             git = repo(tmp)
