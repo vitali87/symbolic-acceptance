@@ -1107,11 +1107,16 @@ class CLITests(unittest.TestCase):
                     '[[require]]\nthat = "ok"\nfail = "not ok"\n'
                 )
                 pid = Path(outside, "pid")
+                # Told to stop, it lets git end and ends cleanly, its work
+                # half done.
                 commits = (
-                    "import os, subprocess; open('app.py', 'w').write('v2');"
+                    "import os, signal, subprocess;"
+                    " signal.signal(signal.SIGTERM, lambda *_: None);"
+                    " open('app.py', 'w').write('v2');"
                     f" open({str(pid)!r}, 'w').write(str(os.getpid()));"
                     " subprocess.run(['git', 'commit', '-qam', 'v2'])"
                 )
+                head = git(tmp, "rev-parse", "HEAD")
                 saved = Path(outside, "run.json")
                 runner = subprocess.Popen(
                     [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
@@ -1143,6 +1148,9 @@ class CLITests(unittest.TestCase):
                     os.kill(int(pid.read_text()), 0)
                 self.assertFalse(lock.exists(), "git was let remove its lock")
                 self.assertTrue(cleaned.exists(), "the hook was let clean up")
+                self.assertEqual(
+                    git(tmp, "rev-parse", "HEAD"), head, "nothing was kept"
+                )
                 self.assertEqual(json.loads(saved.read_text())["status"], "running")
 
     def test_ctrl_c_stops_a_question_waiting_at_the_terminal(self):

@@ -210,7 +210,8 @@ _FUNCTION_NAME = re.compile(r"^(@@ [^@\n]* @@).*$", re.MULTILINE)
 
 
 class GitError(RuntimeError):
-    """A git command the runner ran failed."""
+    """A git command the runner ran failed, or was not run because the
+    runner is stopping (:func:`stop_programs`)."""
 
 
 def git(
@@ -224,6 +225,9 @@ def git(
     ``secrets``, for a push whose credential helper needs it. Git never
     stops to ask for a password, and gives up after five minutes.
     """
+    # A stopped run commits, pushes or checks nothing a program left.
+    if _stopped.is_set():
+        raise GitError(f"git {' '.join(args)} not run: the runner is stopping")
     hidden = _ELSEWHERE if secrets else _ELSEWHERE | RUNNER_SECRETS
     env = {k: v for k, v in os.environ.items() if k not in hidden}
     env["GIT_TERMINAL_PROMPT"] = "0"
