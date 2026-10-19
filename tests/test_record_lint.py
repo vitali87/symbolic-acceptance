@@ -1,28 +1,14 @@
-import asyncio
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import EXAMPLE, PASSING, Scripted, example
+from helpers import EXAMPLE, example, finished_run
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
 from symbolic_acceptance.lint import MAX_EXHAUSTIVE
 from symbolic_acceptance.report import markdown
-
-
-def finished_run(checklist):
-    truths = [dict(PASSING, new_test=False), PASSING]
-    script = Scripted(truths[0])
-    calls = []
-
-    async def agent(task):
-        calls.append(task)
-        script.truth = truths[len(calls) - 1]
-        return sa.Attempt(f"commit{len(calls)}", claims="I fixed it", base="base0")
-
-    return asyncio.run(sa.run(checklist, agent=agent, oracles=script.oracles()))
 
 
 class RecordTests(unittest.TestCase):

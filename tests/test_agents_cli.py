@@ -1,6 +1,4 @@
 import asyncio
-import contextlib
-import io
 import json
 import os
 import subprocess
@@ -9,12 +7,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import EXAMPLE, FakeHTTP, example, message, repo
+from helpers import EXAMPLE, FakeHTTP, cli, example, finished_run, message, repo
 
 import symbolic_acceptance as sa
+from symbolic_acceptance import record
 from symbolic_acceptance.agents import AgentError, CommandAgent, local_diff
 from symbolic_acceptance.claude import Claude
-from symbolic_acceptance.cli import main
 from symbolic_acceptance.draft import DraftError, draft
 
 
@@ -149,13 +147,6 @@ class DraftTests(unittest.TestCase):
             draft("x", claude=Claude(api_key="k", transport=fake), tries=2)
 
 
-def cli(*args):
-    out = io.StringIO()
-    with contextlib.redirect_stdout(out):
-        code = main(list(args))
-    return code, out.getvalue()
-
-
 class CLITests(unittest.TestCase):
     def test_lint_and_show(self):
         code, out = cli("lint", str(EXAMPLE))
@@ -226,6 +217,23 @@ class CLITests(unittest.TestCase):
                     "--record",
                     record,
                 )
+
+    def test_report_renders_a_recorded_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "run.json")
+            record.save(finished_run(example()), example(), path)
+            code, out = cli("report", str(EXAMPLE), str(path))
+        self.assertEqual(code, 0)
+        self.assertIn("**approved**: every requirement holds", out)
+
+    def test_draft_will_not_overwrite_before_asking_claude(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            issue, out = Path(tmp, "issue.md"), Path(tmp, "acceptance.toml")
+            issue.write_text("Logins are not throttled")
+            out.write_text("approved already")
+            with self.assertRaisesRegex(SystemExit, "exists; pass --force"):
+                cli("draft", str(issue), "--out", str(out))
+            self.assertEqual(out.read_text(), "approved already")
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):

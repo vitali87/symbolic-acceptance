@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import io
 import json
 import subprocess
 import urllib.request
@@ -9,6 +12,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 
 import symbolic_acceptance as sa
+from symbolic_acceptance.cli import main
 from symbolic_acceptance.http import Response
 from symbolic_acceptance.loop import Oracle
 
@@ -30,6 +34,28 @@ PASSING = {
 
 def example() -> sa.Checklist:
     return sa.load(EXAMPLE)
+
+
+def finished_run(checklist: sa.Checklist) -> sa.Result:
+    """A run of the example: one attempt sent back, the next approved."""
+    truths = [dict(PASSING, new_test=False), PASSING]
+    script = Scripted(truths[0])
+    calls: list[sa.Task] = []
+
+    async def agent(task: sa.Task) -> sa.Attempt:
+        calls.append(task)
+        script.truth = truths[len(calls) - 1]
+        return sa.Attempt(f"commit{len(calls)}", claims="I fixed it", base="base0")
+
+    return asyncio.run(sa.run(checklist, agent=agent, oracles=script.oracles()))
+
+
+def cli(*args: str) -> tuple[int, str]:
+    """Run the command line; its exit code and what it printed."""
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        code = main(list(args))
+    return code, out.getvalue()
 
 
 class Scripted:
