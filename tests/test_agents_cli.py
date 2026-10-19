@@ -1145,6 +1145,45 @@ class CLITests(unittest.TestCase):
                 self.assertTrue(cleaned.exists(), "the hook was let clean up")
                 self.assertEqual(json.loads(saved.read_text())["status"], "running")
 
+    def test_ctrl_c_stops_a_question_waiting_at_the_terminal(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            saved = Path(outside, "run.json")
+            keyboard, terminal = os.openpty()
+            runner = subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
+                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                stdin=terminal,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                assert runner.stdout is not None
+                asked = b""
+                while b"[y/n, then why]" not in asked:
+                    read = os.read(runner.stdout.fileno(), 1024)
+                    self.assertTrue(read, "the run never asked")
+                    asked += read
+                runner.send_signal(signal.SIGINT)
+                runner.wait(timeout=20)
+            finally:
+                os.close(keyboard)
+                os.close(terminal)
+                runner.kill()
+                runner.stdout.close()
+            self.assertEqual(runner.returncode, 128 + signal.SIGINT)
+            self.assertEqual(json.loads(saved.read_text())["status"], "running")
+
     def test_a_run_goes_on_through_a_ctrl_c_it_was_told_to_ignore(self):
         # As a shell runs a job in the background: SIGINT ignored from the start.
         with (

@@ -188,7 +188,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
 class TerminalReviewer:
     """A ``human`` oracle that asks on the terminal."""
 
-    def __call__(
+    async def __call__(
         self, questions: Sequence[Question], context: Context
     ) -> dict[str, Answer]:
         if not sys.stdin.isatty():
@@ -200,20 +200,36 @@ class TerminalReviewer:
             if question.context:
                 print(f"  ({' '.join(question.context.split())})")
             while True:
-                try:
-                    reply = input(
-                        f"  {question.id}: {question.ask} [y/n, then why] "
-                    ).strip()
-                except EOFError:
+                prompt = f"  {question.id}: {question.ask} [y/n, then why] "
+                print(prompt, end="", flush=True)
+                reply = await _typed()
+                if not reply:
                     raise Pending(
                         "the person at the terminal stopped answering", answers=answers
-                    ) from None
+                    )
+                reply = reply.strip()
                 if reply[:1].lower() in ("y", "n"):
                     break
             answers[question.id] = Answer(
                 reply[:1].lower() == "y", reply[1:].strip(" ,:-"), by="human:terminal"
             )
         return answers
+
+
+async def _typed() -> str:
+    """The next line typed at the terminal, or "" once its input ends.
+
+    It is waited for on the event loop, which a stopping run stops, rather
+    than by input() in a thread, which nothing can stop.
+    """
+    loop = asyncio.get_running_loop()
+    typed = asyncio.Event()
+    loop.add_reader(sys.stdin, typed.set)
+    try:
+        await typed.wait()
+    finally:
+        loop.remove_reader(sys.stdin)
+    return sys.stdin.readline()
 
 
 # Ctrl-C, and what a supervisor or a cancelled CI job sends.
