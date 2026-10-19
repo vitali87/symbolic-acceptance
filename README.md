@@ -120,20 +120,27 @@ hand the attempt to a person.
   of its change is never shown to it. The runner's git overrides whatever the
   checkout's configuration could change (hooks, replace refs, textconv and
   diff drivers, path prefixes), since the agent can write that configuration.
-- A YES from the judge must quote the diff, at least one line the change adds
-  or removes, and the quotes are checked; an unsupported YES counts as NO.
-  A question marked `kind = "absence"` ("does it leave the API unchanged?")
-  has nothing to quote for its YES, so its NO quotes what breaks it instead.
-  With `samples > 1`, every sample must say YES.
+- An answer from the judge that helps the attempt pass must be backed by the
+  diff wherever it can be: a YES quotes the lines that show it, at least one
+  of them a line the change adds or removes, and the quotes are checked. An
+  unbacked helpful answer gives way to the other one. Which answer helps
+  follows from the checklist: YES inside `that`, NO inside a `when`
+  condition. A question marked `kind = "absence"` ("does it leave the API
+  unchanged?") has nothing to quote for its YES, so its NO quotes what
+  breaks it. With `samples > 1`, every sample must give the helpful answer.
+- `run` commands execute in a fresh checkout of the attempt's commit, so
+  nothing outside the commit can change their result.
 - Text in the change addressed to a reviewer escalates instead of being
   answered, and so does a diff too large to judge whole.
 - `check = "frozen"` fails any change to the checklist, CI configuration or
   existing tests; a new regression test can be allowed with `allow_new`.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
-  answer, never bots or the agent's own account, and only after the question
-  was asked about that commit. The runner's own markers count only at the
-  start of a comment it could have written, so text quoted in a comment
-  cannot pose as one.
+  answer, never bots or the agent's own account, only after the question was
+  asked about that commit, and never in an edited comment (anyone with write
+  access can edit someone else's). The runner's own markers count only at
+  the start of a comment it could have written.
+- Freeze `.github/` when CI check runs answer questions; otherwise an attempt
+  could add a workflow that reports a check of the same name. Lint warns.
 - Keep the run record outside the agent's checkout; inside it, the record
   would be committed with the attempt. The command line refuses to.
 - Run the agent without credentials that can comment as a reviewer. A reply
@@ -169,7 +176,7 @@ result = asyncio.run(sa.run(
         push="agent/issue-342",   # so CI runs on every attempt
     ),
     oracles={
-        "ci": Checks(cwd="work", fallback=GitHubChecks(github, wait=1800)),
+        "ci": Checks(repo="work", fallback=GitHubChecks(github, wait=1800)),
         "llm": Judge(),
         "human": Reviews(github, number=57, exclude=["agent-account"]),
     },

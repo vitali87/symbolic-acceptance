@@ -253,6 +253,30 @@ class RunTests(unittest.TestCase):
         self.assertEqual(second.status, sa.APPROVED)
         self.assertEqual(len(agent.tasks), 1)
 
+    def test_resume_keeps_the_issue(self):
+        truth = dict(PASSING, touches_sso=True)
+        script = Scripted(truth, silent={"human"})
+        agent = Agent(script, [truth])
+        first = asyncio.run(
+            sa.run(self.checklist, agent=agent, oracles=script.oracles(), issue="#342")
+        )
+        self.assertEqual(first.issue, "#342")
+        script.silent.clear()
+        second = asyncio.run(
+            sa.run(self.checklist, agent=agent, oracles=script.oracles(), resume=first)
+        )
+        self.assertEqual(second.issue, "#342")
+        with self.assertRaisesRegex(ValueError, "issue text differs"):
+            asyncio.run(
+                sa.run(
+                    self.checklist,
+                    agent=agent,
+                    oracles=script.oracles(),
+                    resume=first,
+                    issue="another issue",
+                )
+            )
+
     def test_resume_rejects_a_changed_checklist(self):
         result, agent = run(
             self.checklist, [dict(PASSING, new_test=False), PASSING], max_attempts=1

@@ -149,6 +149,17 @@ def _author(comment: dict[str, Any]) -> tuple[str, bool, str]:
     return login, bot, str(comment.get("author_association", ""))
 
 
+def _edited(comment: dict[str, Any]) -> bool:
+    """Whether the comment changed after it was posted.
+
+    Anyone with write access can edit another account's comment, and the
+    comment keeps its author, so an edited comment cannot vouch for anyone.
+    """
+    return comment.get("updated_at", comment.get("created_at")) != comment.get(
+        "created_at"
+    )
+
+
 def _by_runner(comment: dict[str, Any], exclude: Collection[str]) -> bool:
     """Whether the runner could have written it: a bot, or a trusted account."""
     login, bot, association = _author(comment)
@@ -245,7 +256,9 @@ class Reviews:
     reply counts only if it comes after the comment that asked it, from
     ``reviewers`` when given and otherwise from the repository's owners,
     members and collaborators, never from bots or from ``exclude`` (the
-    agent's own account). The latest reply to a question wins.
+    agent's own account). Edited comments never count, since anyone with
+    write access can edit another person's comment; correct an answer with
+    a new reply. The latest reply to a question wins.
     """
 
     def __init__(
@@ -292,7 +305,12 @@ class Reviews:
         asked_at: dict[str, str] = {}
         for comment in comments:
             match = _ASKED.match(comment.get("body") or "")
-            if match and match["ref"] == ref and _by_runner(comment, self.exclude):
+            if (
+                match
+                and match["ref"] == ref
+                and _by_runner(comment, self.exclude)
+                and not _edited(comment)
+            ):
                 for qid in match["ids"].split(","):
                     asked_at.setdefault(qid, comment["created_at"])
         new = [q for q in questions if q.id not in asked_at]
@@ -300,7 +318,7 @@ class Reviews:
             self.github.comment(self.number, self._ask_body(new, ref))
         answers: dict[str, Answer] = {}
         for comment in comments:
-            if not self._allowed(comment):
+            if _edited(comment) or not self._allowed(comment):
                 continue
             for verdict, qid, why in _REPLY.findall(comment.get("body") or ""):
                 if qid in asked_at and comment["created_at"] >= asked_at[qid]:

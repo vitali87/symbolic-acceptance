@@ -48,6 +48,7 @@ __all__ = [
     "status",
     "statuses",
     "value",
+    "wanted",
 ]
 
 Status = Literal["pass", "fail", "n/a", "open"]
@@ -172,6 +173,31 @@ def plan(
             gate_open = when is not None and value(when, facts) is None
             _deciding(when if gate_open else requirement.that, facts, late)
     return list(late)
+
+
+def wanted(checklist: Checklist) -> dict[str, frozenset[bool]]:
+    """For each question, the answers that help the attempt pass.
+
+    A requirement fails only when it applies and its ``that`` is NO, so YES
+    helps inside ``that`` and NO helps inside ``when``; ``not`` flips which.
+    A question read in both ways is helped by both answers.
+    """
+    helps: dict[str, set[bool]] = {}
+
+    def walk(expr: Expr, good: bool) -> None:
+        if isinstance(expr, Ref):
+            helps.setdefault(expr.id, set()).add(good)
+        elif isinstance(expr, Not):
+            walk(expr.item, not good)
+        else:
+            for item in expr.items:
+                walk(item, good)
+
+    for requirement in checklist.requirements:
+        walk(requirement.that, True)
+        if requirement.when is not None:
+            walk(requirement.when, False)
+    return {qid: frozenset(answers) for qid, answers in helps.items()}
 
 
 def by_oracle(

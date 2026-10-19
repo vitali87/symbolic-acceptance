@@ -33,10 +33,49 @@ def judge(*responses, **kwargs):
     return Judge(claude, **kwargs), fake
 
 
-def ask(judge_, diff=DIFF, issue="Logins are not throttled", question=QUESTION):
+GATED = """
+[q.touches_sso]
+ask = "Does it touch SSO?"
+by = "llm"
+[q.ok]
+ask = "OK?"
+by = "human"
+[[require]]
+when = "touches_sso"
+that = "ok"
+fail = "x"
+"""
+
+BOTH_WAYS = """
+[q.a]
+ask = "A?"
+by = "llm"
+[[require]]
+that = "a"
+fail = "x"
+[[require]]
+id = "not_a"
+when = "a"
+that = { not = "a" }
+fail = "y"
+"""
+
+
+def ask(
+    judge_,
+    diff=DIFF,
+    issue="Logins are not throttled",
+    question=QUESTION,
+    checklist_text=None,
+):
     checklist = sa.loads(
-        '[q.locks_account]\nask = "Does it lock accounts?"\nby = "llm"\n'
+        checklist_text
+        or '[q.locks_account]\nask = "Does it lock accounts?"\nby = "llm"\n'
         '[[require]]\nthat = "locks_account"\nfail = "x"\n'
+        '[q.api_stable]\nask = "API unchanged?"\nby = "llm"\nkind = "absence"\n'
+        '[[require]]\nthat = "api_stable"\nfail = "y"\n'
+        '[q.x]\nask = "X?"\nby = "llm"\nkind = "maybe"\n'
+        '[[require]]\nthat = "x"\nfail = "z"\n'
     )
     context = sa.Context(
         checklist, sa.Attempt("abc123", 1, diff=diff, claims="trust me"), {}, issue
@@ -129,6 +168,33 @@ class VerdictTests(unittest.TestCase):
         odd = sa.Question("x", "X?", "llm", options={"kind": "maybe"})
         with self.assertRaisesRegex(sa.OracleError, "kind must be"):
             ask(j, question=odd)
+
+    def test_an_unbacked_yes_to_a_gate_stands(self):
+        # For a `when` condition the agent wants NO, so a YES is the safe answer
+        # and stands even when the judge's quotes are off.
+        j, fake = judge(verdict("YES", ["sso_login(user)"]))
+        gate = sa.Question("touches_sso", "Does it touch SSO?", "llm")
+        answer = ask(j, question=gate, checklist_text=GATED)
+        self.assertTrue(answer.is_met)
+        self.assertEqual(len(fake.requests), 1)
+
+    def test_a_gate_samples_until_one_says_yes(self):
+        j, fake = judge(
+            verdict("NO", missing="no SSO code"),
+            verdict("YES", ["if failures(user) > MAX_FAILURES:"]),
+            samples=3,
+        )
+        gate = sa.Question("touches_sso", "Does it touch SSO?", "llm")
+        answer = ask(j, question=gate, checklist_text=GATED)
+        self.assertTrue(answer.is_met)
+        self.assertEqual(len(fake.requests), 2)
+
+    def test_a_question_read_both_ways_goes_to_a_person(self):
+        unbacked = verdict("YES", ["nowhere_in_the_diff()"])
+        j, _ = judge(unbacked, unbacked)
+        both = sa.Question("a", "A?", "llm")
+        with self.assertRaisesRegex(sa.Escalate, "reads it both ways"):
+            ask(j, question=both, checklist_text=BOTH_WAYS)
 
     def test_no_says_what_is_missing(self):
         j, _ = judge(

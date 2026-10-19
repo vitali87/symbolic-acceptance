@@ -78,10 +78,14 @@ the dangerous error is a false YES, which re-sampling NOs does nothing about.
 The judge instead:
 
 - returns structured JSON (`output_config.format`);
-- must quote the diff for a YES, at least one line the change adds or
-  removes; the quotes are checked, and an unsupported YES counts as NO. A
+- must back the answer that helps the attempt pass wherever it can: a YES
+  quotes the diff, at least one line the change adds or removes, and the
+  quotes are checked. An unbacked helpful answer gives way to the other one.
+  Which answer helps follows from where the question sits (YES in `that`, NO
+  in `when`, flipped by `not`); "an unsupported YES counts as NO" alone would
+  have let a misquoted YES on a `when` gate skip a person's review. A
   question about absence (`kind = "absence"`) has nothing to quote for its
-  YES, so its NO quotes what breaks it instead;
+  YES, so its NO quotes what breaks it;
 - with `samples > 1`, needs every sample to say YES;
 - escalates on text addressed to the reviewer, on a refusal, and on a diff
   too large to read whole (it never truncates);
@@ -120,9 +124,12 @@ off (`stop_on_regression=False`).
   never bots or the agent's account, and only after the question was asked
   about that commit. The runner's markers count only at the start of a
   comment it could have written.
-- The runner's git overrides what the agent's checkout configuration could
-  change (hooks, replace refs, textconv, diff prefixes), and the run record
-  is kept outside the checkout.
+- The runner's git overrides what the agent's checkout configuration and
+  attributes could change (hooks, replace refs, filters, textconv, diff
+  prefixes); `run` commands execute in a fresh checkout of the commit; and
+  the run record, with the issue text, is kept outside the checkout.
+- Edited comments never count as answers, and lint warns when CI check runs
+  answer questions but `.github/workflows` is not frozen.
 - An oracle may only answer the questions it was asked.
 - The checklist's digest is recorded; resuming with a changed checklist
   fails.

@@ -263,6 +263,7 @@ class Result:
     reason: str
     evaluations: tuple[Evaluation, ...]
     digest: str
+    issue: str = ""
 
     @property
     def attempts(self) -> tuple[Attempt, ...]:
@@ -440,7 +441,7 @@ async def run(
     diff from its ref, so the judge never reads a diff the agent supplied.
     ``on_progress`` gets the run so far after each evaluation, e.g. to save
     it with :func:`symbolic_acceptance.record.save`. Pass a saved ``Result``
-    as ``resume`` to continue it.
+    as ``resume`` to continue it; its issue text carries over.
     """
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
@@ -450,7 +451,7 @@ async def run(
     async def finished(evaluation: Evaluation) -> None:
         evaluations.append(evaluation)
         if on_progress is not None:
-            progress = Result(RUNNING, "", tuple(evaluations), checklist.digest)
+            progress = Result(RUNNING, "", tuple(evaluations), checklist.digest, issue)
             await _call(on_progress, progress)
 
     if resume is not None:
@@ -458,6 +459,9 @@ async def run(
             raise ValueError(
                 "the checklist changed since this run started; start a new run"
             )
+        if issue and resume.issue and issue != resume.issue:
+            raise ValueError("the issue text differs from the run being resumed")
+        issue = issue or resume.issue
         evaluations = list(resume.evaluations)
         if evaluations and evaluations[-1].status == WAITING:
             waiting = evaluations.pop()
@@ -478,7 +482,7 @@ async def run(
             verdict = _verdict(evaluations, max_attempts, stop_on_regression)
             if verdict is not None:
                 return Result(
-                    verdict[0], verdict[1], tuple(evaluations), checklist.digest
+                    verdict[0], verdict[1], tuple(evaluations), checklist.digest, issue
                 )
         previous = evaluations[-1] if evaluations else None
         task = Task(

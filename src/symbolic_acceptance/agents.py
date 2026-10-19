@@ -9,9 +9,9 @@ uncommitted, they are committed for it, so every attempt is one commit; the
 diff is computed here with git, from where the run started to that commit,
 and the agent's own output is kept only as its claims.
 
-The agent can write to the checkout's git configuration, so every git
-command here overrides what that configuration could change: hooks,
-replace refs, textconv and external diff drivers, path prefixes, quoting.
+The agent can write to the checkout's git configuration and attributes, so
+every git command here overrides what they could change: hooks, replace
+refs, filters, textconv and external diff drivers, path prefixes, quoting.
 """
 
 from __future__ import annotations
@@ -25,8 +25,12 @@ from symbolic_acceptance.loop import Attempt, Task
 
 __all__ = ["AgentError", "CommandAgent", "diff", "git", "local_diff"]
 
+# Git's empty tree: reading attributes from it means none apply, so no
+# smudge filter or diff attribute in the checkout can alter what git shows.
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 _OVERRIDES = (
     "--no-replace-objects",
+    f"--attr-source={EMPTY_TREE}",
     "-c",
     "core.hooksPath=/dev/null",
     "-c",
@@ -56,7 +60,8 @@ def git(cwd: str | Path, *args: str) -> str:
         ["git", *_OVERRIDES, *args],
         cwd=cwd,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",  # binary and non-UTF-8 files in a diff
         timeout=300,
         check=False,
     )
@@ -124,7 +129,8 @@ class CommandAgent:
                 cwd=self.cwd,
                 input=task.prompt(),
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.timeout,
                 check=False,
             )

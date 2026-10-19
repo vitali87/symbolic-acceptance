@@ -141,7 +141,8 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
-    out.write_text(result.text if result.text.endswith("\n") else result.text + "\n")
+    text = result.text if result.text.endswith("\n") else result.text + "\n"
+    out.write_text(text, encoding="utf-8")
     print(f"wrote {out}; review it before approving")
     for issue_found in result.issues:
         print(f"  {issue_found}")
@@ -208,7 +209,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             exclude=exclude,
         )
     claude = Claude(model=args.model) if args.model else Claude()
-    ci = Checks(cwd=args.cwd, fallback=ci_fallback)
+    ci = Checks(repo=args.cwd, fallback=ci_fallback)
     remote = [
         qid
         for qid in checklist.used()

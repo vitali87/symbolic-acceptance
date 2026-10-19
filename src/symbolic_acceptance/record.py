@@ -43,6 +43,7 @@ def dumps(result: Result, checklist: Checklist) -> str:
         "format": FORMAT,
         "version": VERSION,
         "checklist": {"digest": checklist.digest, "source": checklist.source},
+        "issue": result.issue,
         "status": result.status,
         "reason": result.reason,
         "evaluations": [_evaluation(e) for e in result.evaluations],
@@ -90,7 +91,9 @@ def loads(text: str, checklist: Checklist) -> Result:
         raise ValueError(
             f"the run is recorded as {status} but its last attempt is {last}"
         )
-    return Result(status, data.get("reason", ""), tuple(evaluations), digest)
+    return Result(
+        status, data.get("reason", ""), tuple(evaluations), digest, data["issue"]
+    )
 
 
 def save(result: Result, checklist: Checklist, path: str | Path) -> None:

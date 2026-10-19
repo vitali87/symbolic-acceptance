@@ -106,6 +106,7 @@ def request(
     retries: int = 2,
     transport: Transport | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    repeatable: bool | None = None,
 ) -> Response:
     """Send a request, retrying failures that are safe to retry.
 
@@ -113,7 +114,8 @@ def request(
     otherwise. Idempotent methods are retried on connection failures, rate
     limits and server errors. Other methods, such as POST, may already have
     taken effect when they fail, so they are retried only when the server
-    says it did not process the request (408, 429, 529).
+    says it did not process the request (408, 429, 529). Pass ``repeatable``
+    to say whether sending this request twice is harmless.
     """
     send = transport or urlopen
     data = None
@@ -121,7 +123,7 @@ def request(
     if json_body is not None:
         data = json.dumps(json_body).encode("utf-8")
         all_headers.setdefault("content-type", "application/json")
-    idempotent = method in IDEMPOTENT
+    idempotent = method in IDEMPOTENT if repeatable is None else repeatable
     attempt = 0
     while True:
         final = attempt == retries

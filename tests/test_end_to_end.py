@@ -104,7 +104,7 @@ class EndToEndTests(unittest.TestCase):
                         checklist,
                         agent=CommandAgent([sys.executable, "-c", AGENT], cwd=tmp),
                         oracles={
-                            "ci": Checks(cwd=tmp),
+                            "ci": Checks(repo=tmp),
                             "llm": judge,
                             "human": lambda q, c: {},
                         },

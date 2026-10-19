@@ -9,6 +9,7 @@ be approved, unknown oracles, and checks held up behind a person.
 
 from __future__ import annotations
 
+import fnmatch
 import itertools
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
@@ -131,6 +132,41 @@ def _option_issues(question: Question) -> list[Issue]:
     return [Issue("error", "bad-option", problem, question.id) for problem in problems]
 
 
+def _freezes(question: Question, path: str) -> bool:
+    """Whether ``question`` is a frozen check that fails a new file at ``path``."""
+    if question.options.get("check") != "frozen":
+        return False
+    try:
+        frozen, allowed = question.strings("paths"), question.strings("allow_new")
+    except ValueError:
+        return False  # reported as a bad option
+    hit = any(fnmatch.fnmatchcase(path, p) for p in frozen)
+    return hit and not any(fnmatch.fnmatchcase(path, p) for p in allowed)
+
+
+def _check_runs_issues(checklist: Checklist) -> list[Issue]:
+    """CI check runs can be faked by a workflow the attempt adds."""
+    used = [checklist.questions[qid] for qid in checklist.used()]
+    probe = ".github/workflows/added-by-the-attempt.yml"
+    if any(_freezes(q, probe) for q in used):
+        return []
+    return [
+        Issue(
+            "warning",
+            "unfrozen-workflows",
+            f"answered by the CI check run {q.options['check']!r}, but no frozen "
+            "check covers .github/workflows, so an attempt could add a workflow "
+            "that reports a check of that name",
+            q.id,
+        )
+        for q in used
+        if q.by == "ci"
+        and "run" not in q.options
+        and isinstance(q.options.get("check"), str)
+        and q.options["check"] != "frozen"
+    ]
+
+
 def lint(
     checklist: Checklist,
     *,
@@ -200,6 +236,8 @@ def lint(
                         requirement.id,
                     )
                 )
+
+    issues.extend(_check_runs_issues(checklist))
 
     ordered = checklist.used()
     if len(ordered) <= MAX_EXHAUSTIVE:

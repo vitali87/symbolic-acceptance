@@ -110,7 +110,9 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
     """Files the diff touches, and every hunk line with its location."""
     files: list[_File] = []
     lines: list[DiffLine] = []
-    rows = diff.splitlines()
+    # Git ends lines with "\n" only; splitlines() would also break on form
+    # feeds and Unicode separators inside a line and lose count of the hunk.
+    rows = diff.split("\n")
     index = 0
     while index < len(rows):
         row = rows[index]
@@ -177,20 +179,23 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
 def locate(quote: str, lines: list[DiffLine]) -> list[DiffLine] | None:
     """Where each line of ``quote`` appears in the diff, or ``None``.
 
-    Every non-blank line of the quote must occur within one diff line; a
-    leading ``+`` or ``-`` copied from the diff is tolerated. Quotes shorter
-    than a few characters prove nothing and are rejected.
+    Every non-blank line of the quote must occur within one diff line,
+    preferring added and removed lines; a leading ``+`` or ``-`` copied from
+    the diff is tolerated. Quotes shorter than a few characters prove nothing
+    and are rejected.
     """
     parts = [part.strip() for part in quote.splitlines() if part.strip()]
     if sum(len(part) for part in parts) < MIN_QUOTE:
         return None
+    # A line that also appears unchanged elsewhere is credited to the change.
+    ordered = sorted(lines, key=lambda line: line.side == " ")
     found: list[DiffLine] = []
     for part in parts:
         candidates = [part]
         if part[:1] in "+-" and len(part) > 1:
             candidates.append(part[1:].strip())
         match = next(
-            (line for c in candidates for line in lines if c and c in line.text),
+            (line for c in candidates for line in ordered if c and c in line.text),
             None,
         )
         if match is None:

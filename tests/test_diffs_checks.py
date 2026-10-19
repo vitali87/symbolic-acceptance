@@ -100,59 +100,72 @@ class FrozenTests(unittest.TestCase):
             frozen_files(self.question(paths=3), context(DIFF))
 
 
+def run_question(name, code, **options):
+    return sa.Question(
+        name, f"{name}?", "ci", options={"run": [sys.executable, "-c", code], **options}
+    )
+
+
 class CommandsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.git = repo(self.tmp.name)
+        self.head = self.git("rev-parse", "HEAD").strip()
+        self.commands = Commands(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def check(self, question):
+        return self.commands(question, context(ref=self.head))
+
     def test_exit_status_decides(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            commands = Commands(tmp)
-            ok = sa.Question(
-                "ok",
-                "OK?",
-                "ci",
-                options={"run": [sys.executable, "-c", "print('fine')"]},
-            )
-            bad = sa.Question(
-                "bad",
-                "Bad?",
-                "ci",
-                options={"run": [sys.executable, "-c", "raise SystemExit(3)"]},
-            )
-            inverted = sa.Question(
-                "inv",
-                "Inv?",
-                "ci",
-                options={
-                    "run": [sys.executable, "-c", "raise SystemExit(1)"],
-                    "expect": "fail",
-                },
-            )
-            self.assertTrue(commands(ok, context()).is_met)
-            self.assertEqual(commands(ok, context()).evidence, ("fine",))
-            answer = commands(bad, context())
-            self.assertFalse(answer.is_met)
-            self.assertIn("exit 3", answer.reasoning)
-            self.assertTrue(commands(inverted, context()).is_met)
+        ok = self.check(run_question("ok", "print('fine')"))
+        self.assertTrue(ok.is_met)
+        self.assertEqual(ok.evidence, ("fine",))
+        bad = self.check(run_question("bad", "raise SystemExit(3)"))
+        self.assertFalse(bad.is_met)
+        self.assertIn("exit 3", bad.reasoning)
+        inverted = run_question("inv", "raise SystemExit(1)", expect="fail")
+        self.assertTrue(self.check(inverted).is_met)
+
+    def test_commands_see_only_the_commit(self):
+        # Files outside the commit, such as ignored ones, are not there.
+        Path(self.tmp.name, ".gitignore").write_text("planted.py\n")
+        Path(self.tmp.name, "planted.py").write_text("x = 1\n")
+        Path(self.tmp.name, "app.py").write_text("print('edited, not committed')\n")
+        sees = run_question(
+            "sees",
+            "import os, sys; print(open('app.py').read().strip());"
+            "sys.exit(os.path.exists('planted.py'))",
+        )
+        answer = self.check(sees)
+        self.assertTrue(answer.is_met)
+        self.assertEqual(answer.evidence, ("print('v1')",))
+        listed = self.git("worktree", "list")
+        self.assertEqual(len(listed.strip().splitlines()), 1, "the worktree is removed")
+
+    def test_invalid_utf8_output_is_kept(self):
+        noisy = run_question(
+            "noisy", "import sys; sys.stdout.buffer.write(b'caf\\xe9\\n')"
+        )
+        self.assertEqual(self.check(noisy).evidence, ("caf\ufffd",))
 
     def test_a_command_that_cannot_start_is_for_a_person(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            missing = sa.Question(
-                "m", "M?", "ci", options={"run": "no-such-command-xyz --flag"}
-            )
-            with self.assertRaisesRegex(sa.OracleError, "could not start"):
-                Commands(tmp)(missing, context())
+        missing = sa.Question("m", "M?", "ci", options={"run": "no-such-command-xyz"})
+        with self.assertRaisesRegex(sa.OracleError, "could not start"):
+            self.check(missing)
 
     def test_router_merges_local_answers_into_pending(self):
         async def github(questions, ctx):
             raise sa.Pending("CI running")
 
-        with tempfile.TemporaryDirectory() as tmp:
-            router = Checks(cwd=tmp, fallback=github)
-            local = sa.Question(
-                "local", "L?", "ci", options={"run": [sys.executable, "-c", "pass"]}
-            )
-            remote = sa.Question("remote", "R?", "ci", options={"check": "tests"})
-            with self.assertRaises(sa.Pending) as caught:
-                asyncio.run(router([local, remote], context()))
-            self.assertEqual(list(caught.exception.answers), ["local"])
+        router = Checks(repo=self.tmp.name, fallback=github)
+        local = run_question("local", "pass")
+        remote = sa.Question("remote", "R?", "ci", options={"check": "tests"})
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(router([local, remote], context(ref=self.head)))
+        self.assertEqual(list(caught.exception.answers), ["local"])
 
     def test_router_without_fallback(self):
         with self.assertRaisesRegex(sa.OracleError, "no local check"):

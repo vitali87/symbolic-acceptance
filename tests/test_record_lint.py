@@ -163,6 +163,14 @@ class LintTests(unittest.TestCase):
         self.assertEqual([i.where for i in issues], ["a", "b", "c"])
         self.assertTrue(all(i.level == "error" for i in issues))
 
+    def test_check_runs_need_frozen_workflows(self):
+        unfrozen = sa.loads(
+            '[q.t]\nask = "Tests pass?"\nby = "ci"\ncheck = "tests"\n'
+            '[[require]]\nthat = "t"\nfail = "x"\n'
+        )
+        self.assertEqual(self.codes(unfrozen), ["unfrozen-workflows"])
+        self.assertNotIn("unfrozen-workflows", self.codes(example()))
+
     def test_duplicate_question(self):
         c = sa.loads(
             '[q.a]\nask = "Same?"\nby = "ci"\n[q.b]\nask = "same?"\nby = "ci"\n'

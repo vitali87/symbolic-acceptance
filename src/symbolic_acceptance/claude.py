@@ -113,6 +113,9 @@ class Claude:
             json_body=body,
             timeout=self.timeout,
             transport=self.transport,
+            # A repeated request costs tokens but changes nothing, so server
+            # errors are retried, as the official SDKs do.
+            repeatable=True,
         )
         message = response.json()
         stop = message.get("stop_reason")

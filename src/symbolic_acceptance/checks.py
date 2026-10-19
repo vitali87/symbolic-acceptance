@@ -6,8 +6,9 @@
   lists the frozen glob patterns, and ``allow_new`` the patterns a new file
   may match anyway (the regression test). Patterns use :mod:`fnmatch`, where
   ``*`` also matches ``/``.
-* ``run = "<command>"``: the command passes in a checkout of the attempt.
-  ``expect = "fail"`` inverts it. Commands run without a shell.
+* ``run = "<command>"``: the command passes in a fresh checkout of the
+  attempt's commit. ``expect = "fail"`` inverts it. Commands run without a
+  shell.
 * ``check = "<name>"`` with a handler registered under that name.
 
 Anything else goes to ``fallback``, such as
@@ -20,9 +21,11 @@ import asyncio
 import fnmatch
 import shlex
 import subprocess
+import tempfile
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 
+from symbolic_acceptance.agents import git
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
@@ -68,34 +71,22 @@ def frozen_files(question: Question, context: Context) -> Answer:
 
 
 class Commands:
-    """Run a question's ``run`` command in ``cwd``; exit status 0 is YES.
+    """Run a question's ``run`` command on the attempt's commit; exit 0 is YES.
 
-    ``cwd`` must be checked out at the attempt's commit; when it is a git
-    checkout at another commit the check refuses to run. A command that runs
-    past ``timeout`` counts as failing, but one that cannot start at all is
-    an :class:`OracleError`: that is for a person to fix, not the agent.
+    Each command runs in a fresh checkout of exactly that commit, made with
+    ``git worktree`` from the repository at ``repo`` and removed afterwards.
+    Nothing outside the commit (ignored files, skip-worktree edits, a smudge
+    filter) can change the result, and one command cannot affect the next. A
+    command that runs past ``timeout`` counts as failing; one that cannot
+    start at all is an :class:`OracleError`, for a person to fix.
     """
 
     def __init__(
-        self, cwd: str | Path, *, timeout: float = 1800.0, tail: int = 30
+        self, repo: str | Path, *, timeout: float = 1800.0, tail: int = 30
     ) -> None:
-        self.cwd = Path(cwd)
+        self.repo = Path(repo)
         self.timeout = timeout
         self.tail = tail
-
-    def _head(self) -> str | None:
-        try:
-            done = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                cwd=self.cwd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return None
-        return done.stdout.strip() if done.returncode == 0 else None
 
     def __call__(self, question: Question, context: Context) -> Answer:
         command = question.options.get("run")
@@ -107,22 +98,34 @@ class Commands:
             raise OracleError(f"q.{question.id}.run must be a command string or list")
         if not argv:
             raise OracleError(f"q.{question.id}.run is empty")
-        head = self._head()
-        ref = context.attempt.ref
-        if head is not None and not head.startswith(ref):
-            raise OracleError(
-                f"{self.cwd} is at {head[:12]}, not at the attempt's commit {ref[:12]}"
-            )
         expect = question.options.get("expect", "pass")
         if expect not in ("pass", "fail"):
             raise OracleError(f'q.{question.id}.expect must be "pass" or "fail"')
+        with tempfile.TemporaryDirectory(prefix="symbolic-acceptance-") as scratch:
+            tree = str(Path(scratch, "tree"))
+            git(
+                self.repo,
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                tree,
+                context.attempt.ref,
+            )
+            try:
+                return self._run(argv, tree, expect == "pass")
+            finally:
+                git(self.repo, "worktree", "remove", "--force", tree)
+
+    def _run(self, argv: list[str], tree: str, wanted: bool) -> Answer:
         shown = shlex.join(argv)
         try:
             done = subprocess.run(
                 argv,
-                cwd=self.cwd,
+                cwd=tree,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=self.timeout,
                 check=False,
             )
@@ -134,9 +137,8 @@ class Commands:
             raise OracleError(f"`{shown}` could not start: {error}") from None
         output = (done.stdout + done.stderr).strip().splitlines()[-self.tail :]
         passed = done.returncode == 0
-        is_met = passed if expect == "pass" else not passed
         verb = "passed" if passed else f"failed (exit {done.returncode})"
-        return Answer(is_met, f"`{shown}` {verb}", tuple(output), by="ci:run")
+        return Answer(passed == wanted, f"`{shown}` {verb}", tuple(output), by="ci:run")
 
 
 class Checks:
@@ -146,12 +148,12 @@ class Checks:
         self,
         handlers: Mapping[str, Handler] | None = None,
         *,
-        cwd: str | Path | None = None,
+        repo: str | Path | None = None,
         fallback: Oracle | None = None,
         timeout: float = 1800.0,
     ) -> None:
         self.handlers: dict[str, Handler] = {"frozen": frozen_files, **(handlers or {})}
-        self.commands = Commands(cwd, timeout=timeout) if cwd is not None else None
+        self.commands = Commands(repo, timeout=timeout) if repo is not None else None
         self.fallback = fallback
 
     def handles(self, question: Question) -> bool:
