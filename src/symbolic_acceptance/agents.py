@@ -14,7 +14,8 @@ a check run or comment as the runner. It can write to the checkout's git
 configuration and attributes, so every git command here overrides what they
 could change: hooks, replace refs, the file monitor, and in the diff
 textconv and external drivers, binary files, path prefixes, quoting,
-renames, submodules and context lines. A filter can still rewrite what the
+renames, submodules, context lines and the function names in hunk
+headers, which it leaves out. A filter can still rewrite what the
 agent's changes are committed as, which is the agent's to decide anyway:
 everyone judges the commit.
 """
@@ -24,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import signal
 import subprocess
 import tempfile
@@ -139,9 +141,13 @@ _DIFF = (
     "--submodule=short",
     "--find-renames",
     "--unified=3",
+    "--inter-hunk-context=0",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 )
+# What follows a hunk's line numbers: the name of the function it is in, as
+# a line the checkout's attributes can choose (diff.<driver>.xfuncname).
+_FUNCTION_NAME = re.compile(r"^(@@ [^@\n]* @@).*$", re.MULTILINE)
 
 
 class GitError(RuntimeError):
@@ -183,8 +189,9 @@ def git(
 
 
 def diff(cwd: str | Path, base: str, head: str) -> str:
-    """The unified diff from ``base`` to ``head``, as plain text."""
-    return git(cwd, *_DIFF, base, head, isolated=True)
+    """The unified diff from ``base`` to ``head``, as plain text, with no
+    function names in its hunk headers."""
+    return _FUNCTION_NAME.sub(r"\1", git(cwd, *_DIFF, base, head, isolated=True))
 
 
 class CommandAgent:

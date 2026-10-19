@@ -202,6 +202,26 @@ class CommandAgentTests(unittest.TestCase):
         self.assertNotIn("HIDDEN", attempt.diff)
         self.assertNotIn("\x1b[", attempt.diff)
 
+    def test_the_checkout_cannot_join_hunks_or_name_their_functions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            lines = [f"line_{n} = {n}" for n in range(40)]
+            Path(tmp, "app.py").write_text("\n".join(["def login():", *lines, ""]))
+            git("commit", "-qam", "long")
+            # One hunk for the whole file, under a header naming any line.
+            git("config", "diff.interHunkContext", "1000")
+            git("config", "diff.pick.xfuncname", "^(line_3 .*)$")
+            Path(tmp, ".git", "info", "attributes").write_text("*.py diff=pick\n")
+            lines[5], lines[35] = "line_5 = 'five'", "line_35 = 'thirty-five'"
+            text = "\n".join(["def login():", *lines, ""])
+            write = f"open('app.py', 'w').write({text!r})"
+            attempt = asyncio.run(
+                CommandAgent([sys.executable, "-c", write], cwd=tmp)(self.task())
+            )
+        assert attempt.diff is not None
+        headers = [line for line in attempt.diff.splitlines() if line[:2] == "@@"]
+        self.assertEqual(headers, ["@@ -4,7 +4,7 @@", "@@ -34,7 +34,7 @@"])
+
     def test_attempts_are_pushed_even_when_the_agent_rewrites_them(self):
         with (
             tempfile.TemporaryDirectory() as remote,
