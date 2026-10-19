@@ -57,7 +57,7 @@ FAIL: Status = "fail"
 NA: Status = "n/a"
 OPEN: Status = "open"
 
-# The oracles asked only once nothing else is left: people, by default.
+# The oracles asked last: people, by default.
 DEFAULT_LAST = ("human",)
 
 Facts = Mapping[str, bool]
@@ -148,9 +148,11 @@ def plan(
     check is never asked while it might not apply.
 
     The ``last`` questions (people, by default) come only when nothing else is
-    left to ask and no requirement has failed, and then only those that can
-    still change a requirement's status. A failure is therefore never held up
-    by a person, and nobody is asked a question whose answer cannot matter.
+    left to ask, but the questions they gate, and no requirement has failed,
+    and then only those that can still change a requirement's status as
+    three-valued logic sees it. A failure is therefore never held up by a
+    person, and nobody is asked a question whose answer cannot matter, unless
+    a requirement reads it twice and the logic cannot see it is moot.
     """
     early: dict[str, None] = {}
     for requirement in checklist.requirements:

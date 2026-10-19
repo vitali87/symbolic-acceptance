@@ -57,9 +57,12 @@ gate"), the planner (`logic.plan`) decides:
   parallel, so all failures come back at once; parts that already hold are
   skipped.
 - A `when` is settled before the `that` it gates.
-- `human` questions come only when nothing automated is left, nothing has
-  failed, and the answer can still change a requirement. A failure never
-  waits for a person, and a moot question is never asked.
+- `human` questions come only when nothing automated is left but what they
+  gate, nothing has failed, and the answer can still change a requirement.
+  A failure never waits for a person, and a moot question is never asked,
+  except where a requirement reads one question twice: three-valued logic
+  cannot see that `all(not(q), any(r, q))` fails with `r` NO, whatever
+  `q` is.
 
 ### 3. Feedback follows the logic, not the NO answers
 

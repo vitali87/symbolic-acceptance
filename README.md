@@ -89,9 +89,10 @@ template bug` and `template feature` print starting points.
    the agent hears about every failure at once, not just the first. A `when`
    condition is settled before the checks it gates.
 2. **People last, and only when it matters.** `human` questions are asked
-   only once nothing automated is left, no requirement has failed, and their
-   answer can still change the result. A failure never waits for a person,
-   and nobody is asked a question whose answer cannot matter.
+   only once no automated question is left but those their answers gate, no
+   requirement has failed, and their answer can still change the result. A
+   failure never waits for a person, and unless a requirement reads one
+   question twice, nobody is asked a question whose answer cannot matter.
 3. **Feedback follows the logic.** A failed `all` lists the items to fix, a
    failed `any` lists the alternatives (fix any one), and `not` flips what was
    wanted. Each item carries the oracle's reasoning and evidence:
