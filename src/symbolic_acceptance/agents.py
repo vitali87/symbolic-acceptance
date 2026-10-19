@@ -13,7 +13,7 @@ The agent runs without the runner's GitHub token, which would let it report
 a check run or comment as the runner. It can write to the checkout's git
 configuration and attributes, so every git command here overrides what they
 could change: hooks, replace refs, filters, textconv and external diff
-drivers, path prefixes, quoting.
+drivers, path prefixes, quoting, ignored submodules, context lines.
 """
 
 from __future__ import annotations
@@ -68,6 +68,8 @@ _DIFF = (
     "--no-textconv",
     "--text",
     "--no-relative",
+    "--ignore-submodules=none",
+    "--unified=3",
     "--src-prefix=a/",
     "--dst-prefix=b/",
 )
@@ -99,7 +101,7 @@ def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
 
 def diff(cwd: str | Path, base: str, head: str) -> str:
     """The unified diff from ``base`` to ``head``, as plain text."""
-    return git(cwd, *_DIFF, base, head)
+    return git(cwd, *_DIFF, base, head, isolated=True)
 
 
 def local_diff(cwd: str | Path) -> Callable[[Attempt], str]:

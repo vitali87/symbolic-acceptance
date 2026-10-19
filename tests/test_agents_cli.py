@@ -51,7 +51,13 @@ class CommandAgentTests(unittest.TestCase):
             # What an agent could do to hide a change to a frozen test file.
             git("config", "diff.noprefix", "true")
             git("config", "diff.relative", "true")
+            git("config", "diff.ignoreSubmodules", "all")
+            git("config", "diff.context", "0")
             Path(tmp, ".gitattributes").write_text("*.py -diff\n")
+            # ... and a gitlink, which ignoreSubmodules would hide.
+            head = git("rev-parse", "HEAD").strip()
+            Path(tmp, "tests", "vendored").mkdir()
+            git("update-index", "--add", "--cacheinfo", f"160000,{head},tests/vendored")
             script = "open('tests/test_app.py', 'w').write('assert False or True\\n')"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
             attempt = asyncio.run(agent(self.task()))
@@ -60,6 +66,7 @@ class CommandAgentTests(unittest.TestCase):
             "diff --git a/tests/test_app.py b/tests/test_app.py", attempt.diff
         )
         self.assertIn("+assert False or True", attempt.diff)
+        self.assertIn("new file mode 160000", attempt.diff, "the gitlink shows")
 
     def test_attempts_are_pushed(self):
         with (

@@ -9,7 +9,6 @@ be approved, unknown oracles, and checks held up behind a person.
 
 from __future__ import annotations
 
-import fnmatch
 import itertools
 from collections.abc import Collection, Iterator
 from dataclasses import dataclass
@@ -23,7 +22,7 @@ from symbolic_acceptance.checklist import (
     refs,
     render,
 )
-from symbolic_acceptance.checks import command
+from symbolic_acceptance.checks import command, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
 from symbolic_acceptance.loop import OracleError
 
@@ -144,8 +143,7 @@ def _freezes(question: Question, path: str) -> bool:
         frozen, allowed = question.strings("paths"), question.strings("allow_new")
     except ValueError:
         return False  # reported as a bad option
-    hit = any(fnmatch.fnmatchcase(path, p) for p in frozen)
-    return hit and not any(fnmatch.fnmatchcase(path, p) for p in allowed)
+    return matches(path, frozen) and not matches(path, allowed)
 
 
 def _check_runs_issues(checklist: Checklist) -> list[Issue]:

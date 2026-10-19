@@ -121,8 +121,9 @@ hand the attempt to a person.
   checkout's configuration could change (hooks, replace refs, textconv and
   diff drivers, path prefixes), since the agent can write that configuration.
 - An answer from the judge that helps the attempt pass must be backed by the
-  diff wherever it can be: a YES quotes the lines that show it, at least one
-  of them a line the change adds or removes, and the quotes are checked. An
+  diff wherever it can be: a YES quotes the lines that show it, whole and
+  in order, at least one of them a line the change adds or removes, and the
+  quotes are checked. An
   unbacked helpful answer gives way to the other one. Which answer helps
   follows from the checklist: YES inside `that`, NO inside a `when`
   condition. A question marked `kind = "absence"` ("does it leave the API
@@ -143,6 +144,8 @@ hand the attempt to a person.
   it could have written.
 - Freeze `.github/` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.
+  Only runs from GitHub Actions count, unless `GitHubChecks(app=...)` names
+  another CI app, whose configuration should then be frozen too.
 - Keep the run record outside the agent's checkout; inside it, the record
   would be committed with the attempt. The command line refuses to.
 - The agent, and the `run` commands that execute its code, get no GitHub

@@ -133,12 +133,18 @@ off (`stop_on_regression=False`).
   user's; and the run record, with the issue text, is kept outside the
   checkout.
 - Edited comments never count as answers, and lint warns when CI check runs
-  answer questions but `.github/workflows` is not frozen.
+  answer questions but `.github/workflows` is not frozen. Only check runs
+  from GitHub Actions count by default, since another installed CI app
+  could run a configuration the attempt added.
+- The diff ignores what the checkout's or the user's git configuration says
+  about submodules and context, so a gitlink cannot drop out of it, and
+  frozen paths match whatever their case.
 - The agent, and the `run` commands that execute its code, run without the
   runner's GitHub token, so they cannot report a check run or comment as
   the runner. Runner and agent still share a user and a machine, so what
-  the agent writes outside its checkout (user site-packages, say) can still
-  change a local `run` check. Checks that must hold against an agent set
+  the agent writes outside its checkout (user site-packages, say, or a
+  file a symlink in the commit points to) can still change a local `run`
+  check. Checks that must hold against an agent set
   on gaming them belong in CI, behind frozen workflows; against one
   attacking the runner itself, run the agent in a sandbox that holds none
   of the runner's credentials, with a checkout that has none persisted.

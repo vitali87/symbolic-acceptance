@@ -191,29 +191,31 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
     return changes, lines
 
 
-def locate(quote: str, lines: list[DiffLine]) -> list[DiffLine] | None:
-    """Where each line of ``quote`` appears in the diff, or ``None``.
+def _same(part: str, line: DiffLine) -> bool:
+    text = line.text.strip()
+    return part == text or (part[:1] in "+-" and part[1:].strip() == text)
 
-    Every non-blank line of the quote must occur within one diff line,
-    preferring added and removed lines; a leading ``+`` or ``-`` copied from
-    the diff is tolerated. Quotes shorter than a few characters prove nothing
-    and are rejected.
+
+def locate(quote: str, lines: list[DiffLine]) -> list[DiffLine] | None:
+    """Where ``quote`` appears in the diff, or ``None``.
+
+    The quote's non-blank lines must be whole lines of one file, one after
+    another in the diff; surrounding whitespace and a leading ``+`` or ``-``
+    copied from the diff don't count. A place where the change adds or
+    removes one of them is preferred. Quotes shorter than a few characters
+    prove nothing and are rejected.
     """
     parts = [part.strip() for part in quote.splitlines() if part.strip()]
     if sum(len(part) for part in parts) < MIN_QUOTE:
         return None
-    # A line that also appears unchanged elsewhere is credited to the change.
-    ordered = sorted(lines, key=lambda line: line.side == " ")
-    found: list[DiffLine] = []
-    for part in parts:
-        candidates = [part]
-        if part[:1] in "+-" and len(part) > 1:
-            candidates.append(part[1:].strip())
-        match = next(
-            (line for c in candidates for line in ordered if c and c in line.text),
-            None,
-        )
-        if match is None:
-            return None
-        found.append(match)
-    return found
+    unchanged = None
+    for start in range(len(lines) - len(parts) + 1):
+        window = lines[start : start + len(parts)]
+        if len({line.path for line in window}) > 1 or not all(
+            map(_same, parts, window)
+        ):
+            continue
+        if any(line.side != " " for line in window):
+            return window
+        unchanged = unchanged or window
+    return unchanged

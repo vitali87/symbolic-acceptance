@@ -5,8 +5,7 @@
 * :class:`Reviews` answers ``human`` questions from pull request comments. It
   posts the questions once per attempt and reads replies such as
   ``/yes sso_exempt reviewed with security`` from people allowed to answer.
-* :func:`compare_diff` fetches a diff, and :func:`post_report` keeps one
-  report comment up to date.
+* :func:`post_report` keeps one report comment up to date.
 """
 
 from __future__ import annotations
@@ -29,6 +28,7 @@ from symbolic_acceptance.loop import Context, OracleError, Pending
 __all__ = [
     "API_VERSION",
     "REPORT_MARKER",
+    "App",
     "CheckRun",
     "Comment",
     "GitHub",
@@ -36,7 +36,6 @@ __all__ = [
     "Output",
     "Reviews",
     "User",
-    "compare_diff",
     "post_report",
 ]
 
@@ -79,11 +78,16 @@ class Output(TypedDict):
     summary: str | None
 
 
+class App(TypedDict):
+    slug: str
+
+
 class CheckRun(TypedDict):
     """The fields of a check run that are read here."""
 
     id: int
     name: str
+    app: App | None
     status: str
     conclusion: str | None
     output: Output
@@ -171,12 +175,6 @@ class GitHub:
         self.call("PATCH", f"/issues/comments/{comment_id}", body={"body": body})
 
 
-def compare_diff(github: GitHub, base: str, head: str) -> str:
-    """The unified diff from ``base`` to ``head``, as GitHub computes it."""
-    path = f"/compare/{urllib.parse.quote(base)}...{urllib.parse.quote(head)}"
-    return github.call("GET", path, accept="application/vnd.github.diff").text()
-
-
 def _author(comment: Comment) -> tuple[str, bool, str]:
     """The comment's login (lowercased), whether a bot wrote it, its association.
 
@@ -230,11 +228,18 @@ class GitHubChecks:
     are NO, and so are ``skipped`` and ``neutral``, because a check that did
     not run proves nothing. Runs still going, or not started, are waited for
     up to ``wait`` seconds and then reported as :class:`Pending`.
+
+    Only runs reported by ``app`` count, GitHub Actions by default: another
+    CI app installed on the repository could run a configuration the attempt
+    added and report a check of the same name.
     """
 
-    def __init__(self, github: GitHub, *, wait: float = 0.0) -> None:
+    def __init__(
+        self, github: GitHub, *, wait: float = 0.0, app: str = "github-actions"
+    ) -> None:
         self.github = github
         self.wait = wait
+        self.app = app
 
     def _read(
         self, questions: Sequence[Question], ref: str
@@ -246,9 +251,15 @@ class GitHubChecks:
             name = question.options.get("check")
             if not isinstance(name, str):
                 raise OracleError(f'q.{question.id} needs check = "<check run name>"')
-            matching = [run for run in runs if run["name"] == name]
+            matching = [
+                run
+                for run in runs
+                if run["name"] == name and run["app"] and run["app"]["slug"] == self.app
+            ]
             if not matching:
-                waiting.append(f"{question.id} (no check run named {name!r} yet)")
+                waiting.append(
+                    f"{question.id} (no check run named {name!r} from {self.app} yet)"
+                )
                 continue
             latest = max(matching, key=lambda run: run["id"])
             if latest["status"] != "completed":

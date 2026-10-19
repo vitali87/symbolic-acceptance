@@ -110,6 +110,11 @@ class ParseTests(unittest.TestCase):
         self.assertIsNotNone(locate("+        record_failure(user)", lines))
         self.assertIsNone(locate("rate_limit(user)", lines))
         self.assertIsNone(locate("lock", lines), "too short to prove anything")
+        self.assertIsNone(locate("MAX_FAILURES", lines), "part of a line is not a line")
+        self.assertIsNone(
+            locate("record_failure(user)\n    lock(user)", lines),
+            "lines quoted together must be consecutive",
+        )
 
 
 def context(diff: str | None = "", ref="abc"):
@@ -129,6 +134,16 @@ class FrozenTests(unittest.TestCase):
         )
         diff = DIFF.split("diff --git a/old.py")[0]
         self.assertTrue(frozen_files(q, context(diff)).is_met)
+
+    def test_frozen_paths_ignore_case(self):
+        # On a case-insensitive file system TESTS/ is tests/.
+        q = self.question(paths=["tests/*"], allow_new=["tests/test_*.py"])
+        diff = (
+            "diff --git a/TESTS/conftest.py b/TESTS/conftest.py\nnew file mode 100644\n"
+        )
+        self.assertEqual(
+            frozen_files(q, context(diff)).evidence, ("TESTS/conftest.py (added)",)
+        )
 
     def test_deleting_or_renaming_frozen_files_fails(self):
         q = self.question(paths=["tests/*", "old.py"], allow_new=["tests/test_*.py"])

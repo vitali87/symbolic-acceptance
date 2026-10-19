@@ -9,10 +9,8 @@ from symbolic_acceptance.github import (
     GitHub,
     GitHubChecks,
     Reviews,
-    compare_diff,
     post_report,
 )
-from symbolic_acceptance.http import Response
 
 
 def gh(*responses):
@@ -27,10 +25,17 @@ def context(ref="abc123"):
     return sa.Context(checklist, sa.Attempt(ref, 1), {})
 
 
-def run(name, status="completed", conclusion: str | None = "success", run_id=1):
+def run(
+    name,
+    status="completed",
+    conclusion: str | None = "success",
+    run_id=1,
+    app="github-actions",
+):
     return {
         "id": run_id,
         "name": name,
+        "app": {"slug": app},
         "status": status,
         "conclusion": conclusion,
         "html_url": f"https://github.com/octo/repo/runs/{run_id}",
@@ -80,12 +85,6 @@ class ClientTests(unittest.TestCase):
                 "https://api.github.com/repos/octo/repo/commits/abc123/check-runs?per_page=100"
             )
         )
-
-    def test_compare_diff_asks_for_the_diff_media_type(self):
-        github, fake = gh(Response(200, b"diff --git a/x b/x\n"))
-        self.assertEqual(compare_diff(github, "main", "abc"), "diff --git a/x b/x\n")
-        self.assertEqual(fake.header("accept"), "application/vnd.github.diff")
-        self.assertTrue(fake.requests[0].full_url.endswith("/compare/main...abc"))
 
     def test_report_ignores_look_alikes(self):
         github, fake = gh(
@@ -152,6 +151,16 @@ class ChecksTests(unittest.TestCase):
             asyncio.run(GitHubChecks(github)([TESTS, REPRO], context()))
         self.assertIn("in_progress", str(caught.exception))
         self.assertEqual(list(caught.exception.answers), ["suite_green"])
+
+    def test_only_runs_from_the_trusted_app_count(self):
+        github, _ = gh(
+            json_response({"check_runs": [run("tests", app="other-ci", run_id=9)]})
+        )
+        with self.assertRaises(sa.Pending) as caught:
+            asyncio.run(GitHubChecks(github)([TESTS], context()))
+        self.assertIn(
+            "no check run named 'tests' from github-actions", str(caught.exception)
+        )
 
     def test_question_needs_a_check_name(self):
         github, _ = gh(json_response({"check_runs": []}))

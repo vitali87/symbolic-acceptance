@@ -5,7 +5,7 @@
 * ``check = "frozen"``: the attempt leaves the frozen files alone. ``paths``
   lists the frozen glob patterns, and ``allow_new`` the patterns a new file
   may match anyway (the regression test). Patterns use :mod:`fnmatch`, where
-  ``*`` also matches ``/``.
+  ``*`` also matches ``/``, and ignore case.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
   attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts it.
   Commands run without a shell.
@@ -31,14 +31,18 @@ from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Context, Oracle, OracleError, Pending, _call
 
-__all__ = ["Checks", "Commands", "command", "frozen_files"]
+__all__ = ["Checks", "Commands", "command", "frozen_files", "matches"]
 
 # Lines of a command's output kept as evidence.
 TAIL = 30
 
 
-def _matches(path: str | None, patterns: Sequence[str]) -> bool:
-    return path is not None and any(fnmatch.fnmatchcase(path, p) for p in patterns)
+def matches(path: str | None, patterns: Sequence[str]) -> bool:
+    """Whether ``path`` matches one of the glob ``patterns``, ignoring case:
+    on a case-insensitive file system ``Tests/x.py`` is ``tests/x.py``."""
+    return path is not None and any(
+        fnmatch.fnmatchcase(path.casefold(), pattern.casefold()) for pattern in patterns
+    )
 
 
 def command(question: Question) -> list[str]:
@@ -68,9 +72,9 @@ def frozen_files(question: Question, context: Context) -> Answer:
     files, _ = parse(diff)
     violations = []
     for change in files:
-        if not (_matches(change.path, frozen) or _matches(change.old_path, frozen)):
+        if not (matches(change.path, frozen) or matches(change.old_path, frozen)):
             continue
-        if change.status == "added" and _matches(change.path, allow_new):
+        if change.status == "added" and matches(change.path, allow_new):
             continue
         violations.append(
             f"{change.old_path} -> {change.path} (renamed)"

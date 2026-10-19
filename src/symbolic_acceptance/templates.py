@@ -82,6 +82,11 @@ ask = "Does the existing test suite pass?"
 by = "ci"
 check = "tests"
 
+[q.tests_intact]
+ask = "Does the change leave the tests and how they run alone: nothing skipped, deselected or loosened, no test settings changed?"
+by = "llm"
+kind = "absence"
+
 [q.frozen_untouched]
 ask = "Does the commit leave the checklist, CI configuration and existing tests unchanged?"
 by = "ci"
@@ -104,6 +109,10 @@ fail = "The new test does not exercise the reported bug"
 [[require]]
 that = "suite_green"
 fail = "The existing test suite fails"
+
+[[require]]
+that = "tests_intact"
+fail = "The change skips, deselects or loosens tests, or changes how they run"
 
 [[require]]
 that = "frozen_untouched"
@@ -138,6 +147,11 @@ ask = "Does the existing test suite pass?"
 by = "ci"
 check = "tests"
 
+[q.tests_intact]
+ask = "Does the change leave the tests and how they run alone: nothing skipped, deselected or loosened, no test settings changed?"
+by = "llm"
+kind = "absence"
+
 [q.frozen_untouched]
 ask = "Does the commit leave the checklist, CI configuration and existing tests unchanged?"
 by = "ci"
@@ -160,6 +174,10 @@ fail = "Some acceptance criteria have no test"
 [[require]]
 that = "suite_green"
 fail = "The existing test suite fails"
+
+[[require]]
+that = "tests_intact"
+fail = "The change skips, deselects or loosens tests, or changes how they run"
 
 [[require]]
 that = "frozen_untouched"
