@@ -2,13 +2,15 @@ import asyncio
 import os
 import sys
 import tempfile
+import time
 import unittest
+import zlib
 from pathlib import Path
 
 from helpers import DIFF, repo
 
 import symbolic_acceptance as sa
-from symbolic_acceptance.agents import diff
+from symbolic_acceptance.agents import GitError, diff
 from symbolic_acceptance.checks import Checks, Commands, frozen_files
 from symbolic_acceptance.diffs import locate, parse
 
@@ -256,6 +258,17 @@ class FrozenTests(unittest.TestCase):
         diff = DIFF.split("diff --git a/old.py")[0]
         self.assertTrue(frozen_files(q, context(diff)).is_met)
 
+    def test_a_new_file_is_allowed_only_as_deep_as_its_pattern(self):
+        q = self.question(frozen=["tests/*"], allow_new=["tests/test_*.py"])
+        diff = (
+            "diff --git a/tests/test_x/conftest.py b/tests/test_x/conftest.py\n"
+            "new file mode 100644\n"
+        )
+        self.assertEqual(
+            frozen_files(q, context(diff)).evidence,
+            ("tests/test_x/conftest.py (added)",),
+        )
+
     def test_frozen_paths_ignore_case(self):
         # On a case-insensitive file system TESTS/ is tests/.
         q = self.question(frozen=["tests/*"], allow_new=["tests/test_*.py"])
@@ -350,7 +363,48 @@ class CommandsTests(unittest.TestCase):
         slow = run_question("slow", "import time; time.sleep(5)")
         answer = Commands(self.tmp.name, timeout=0.5)(slow, context(ref=self.head))
         self.assertFalse(answer.is_met)
-        self.assertIn("timed out", answer.reasoning)
+        self.assertIn("timed out after 0.5s", answer.reasoning)
+
+    def test_what_a_command_leaves_running_neither_holds_it_up_nor_outlives_it(self):
+        marker = Path(self.tmp.name).parent / f"{Path(self.tmp.name).name}-late"
+        late = f"import time; time.sleep(0.5); open({str(marker)!r}, 'w')"
+        script = f"import subprocess, sys; subprocess.Popen([sys.executable, '-c', {late!r}])"
+        started = time.monotonic()
+        answer = Commands(self.tmp.name, timeout=30)(
+            run_question("leaves", script), context(ref=self.head)
+        )
+        self.assertTrue(answer.is_met)
+        self.assertLess(time.monotonic() - started, 10)
+        time.sleep(1)
+        self.assertFalse(marker.exists(), "the child it left was stopped")
+
+    def test_a_command_gets_no_input_and_its_output_in_order(self):
+        script = (
+            "import sys; print('one', flush=True); print('two', file=sys.stderr,"
+            " flush=True); print(repr(sys.stdin.read()))"
+        )
+        self.assertEqual(
+            self.check(run_question("io", script)).evidence, ("one", "two", "''")
+        )
+
+    def test_a_program_of_the_attempt_that_cannot_run_fails_the_check(self):
+        for expect in ("pass", "fail"):
+            with self.subTest(expect=expect):
+                gone = sa.Question(
+                    "g", "G?", "ci", options={"run": "./repro.sh", "expect": expect}
+                )
+                answer = self.check(gone)
+                self.assertFalse(answer.is_met)
+                self.assertIn("could not start", answer.reasoning)
+
+    def test_bytes_rewritten_in_the_object_store_are_refused(self):
+        blob = self.git("rev-parse", "HEAD:app.py").strip()
+        loose = Path(self.tmp.name, ".git", "objects", blob[:2], blob[2:])
+        loose.chmod(0o644)
+        forged = b"print('forged')\n"
+        loose.write_bytes(zlib.compress(b"blob %d\0" % len(forged) + forged))
+        with self.assertRaisesRegex(GitError, "fetch"):
+            self.check(run_question("sees", "print(open('app.py').read())"))
 
     def test_invalid_utf8_output_is_kept(self):
         noisy = run_question(

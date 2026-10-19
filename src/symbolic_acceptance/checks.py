@@ -5,7 +5,9 @@
 * ``frozen = [<globs>]``: the attempt leaves the files matching these
   patterns alone; ``allow_new`` lists the patterns a new file may match
   anyway (the regression test). Patterns use :mod:`fnmatch`, where ``*``
-  also matches ``/``, and ignore case.
+  also matches ``/``, and ignore case; in ``allow_new``, which lets files
+  in, a pattern matches only paths as deep as itself, so ``*`` stays within
+  a directory.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
   attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts it.
   Commands run without a shell.
@@ -17,9 +19,11 @@ Anything else goes to ``fallback``, such as
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fnmatch
 import os
 import shlex
+import signal
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
@@ -80,7 +84,9 @@ def frozen_files(question: Question, context: Context) -> Answer:
     for change in files:
         if not (matches(change.path, frozen) or matches(change.old_path, frozen)):
             continue
-        if change.status == "added" and matches(change.path, allow_new):
+        depth = change.path.count("/")
+        allowed = [pattern for pattern in allow_new if pattern.count("/") == depth]
+        if change.status == "added" and matches(change.path, allowed):
             continue
         violations.append(
             f"{change.old_path} -> {change.path} (renamed)"
@@ -102,16 +108,19 @@ def frozen_files(question: Question, context: Context) -> Answer:
 class Commands:
     """Run a question's ``run`` command on the attempt's commit; exit 0 is YES.
 
-    Each command runs in a fresh checkout of exactly that commit, in a clone
-    of the repository at ``repo`` that shares its objects but none of its
-    configuration or attributes, nor the user's, and is removed afterwards.
-    Nothing in the checkout outside the commit (ignored files, skip-worktree
-    edits, a filter set up to rewrite files on checkout) can change the
-    result, and one command cannot affect the next. The command runs the
-    attempt's code, so like the agent it gets ``env`` (by default this
-    process's environment) without the runner's GitHub token. A command
-    that runs past ``timeout`` counts as failing; one that cannot start at
-    all is an :class:`OracleError`, for a person to fix.
+    Each command runs in a fresh checkout of exactly that commit, fetched
+    from the repository at ``repo`` with none of its configuration or
+    attributes, nor the user's, and removed afterwards. The fetch checks
+    every object against its id, so neither anything in the checkout outside
+    the commit (ignored files, skip-worktree edits, a filter set up to
+    rewrite files on checkout) nor bytes rewritten in its object store can
+    change the result, and one command cannot affect the next. The command
+    runs the attempt's code, so like the agent it gets ``env`` (by default
+    this process's environment) without the runner's GitHub token, and no
+    input; whatever it starts is stopped when it ends. A command that runs
+    past ``timeout`` counts as failing, as does a program of the attempt's
+    own (a path, like ``./repro.sh``) that is gone or cannot run; a program
+    the machine lacks is an :class:`OracleError`, for a person to fix.
     """
 
     def __init__(
@@ -130,42 +139,50 @@ class Commands:
         expect = question.choice("expect", "pass", "fail")
         with tempfile.TemporaryDirectory(prefix="symbolic-acceptance-") as scratch:
             tree = str(Path(scratch, "tree"))
-            source = str(self.repo.resolve())
-            clone = ("clone", "--quiet", "--shared", "--no-checkout", source, tree)
-            git(scratch, *clone, isolated=True)
-            git(
-                tree,
-                "checkout",
-                "--quiet",
-                "--detach",
-                context.attempt.ref,
-                isolated=True,
-            )
+            source = self.repo.resolve().as_uri()
+            git(scratch, "init", "--quiet", tree, isolated=True)
+            fetch = ("fetch", "--quiet", "--depth=1", "--no-tags", source)
+            git(tree, *fetch, context.attempt.ref, isolated=True)
+            git(tree, "checkout", "--quiet", "--detach", "FETCH_HEAD", isolated=True)
             return self._run(argv, tree, expect == "pass")
 
     def _run(self, argv: list[str], tree: str, wanted: bool) -> Answer:
         shown = shlex.join(argv)
-        try:
-            done = subprocess.run(
-                argv,
-                cwd=tree,
-                env=for_agent(self.env),
-                capture_output=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            return Answer(
-                False, f"`{shown}` timed out after {self.timeout:.0f}s", by="ci:run"
-            )
-        except OSError as error:
-            raise OracleError(f"`{shown}` could not start: {error}") from None
-        output = (done.stdout + done.stderr).strip().splitlines()[-TAIL:]
-        passed = done.returncode == 0
-        verb = "passed" if passed else f"failed (exit {done.returncode})"
-        return Answer(passed == wanted, f"`{shown}` {verb}", tuple(output), by="ci:run")
+        with tempfile.TemporaryFile() as log:
+            try:
+                process = subprocess.Popen(
+                    argv,
+                    cwd=tree,
+                    env=for_agent(self.env) | {"PWD": tree},
+                    stdin=subprocess.DEVNULL,
+                    # A file rather than a pipe, so a child left running with
+                    # the output open cannot hold the check up.
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+            except OSError as error:
+                # A program the commit holds (./repro.sh) is the attempt's
+                # to keep working; one the machine lacks is not.
+                if "/" not in argv[0] or os.path.isabs(argv[0]):
+                    raise OracleError(f"`{shown}` could not start: {error}") from None
+                return Answer(False, f"`{shown}` could not start: {error}", by="ci:run")
+            try:
+                status: int | None = process.wait(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                status = None
+            finally:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            log.seek(0)
+            text = log.read().decode("utf-8", errors="replace")
+        output = tuple(text.strip().splitlines()[-TAIL:])
+        if status is None:
+            reason = f"`{shown}` timed out after {self.timeout:g}s"
+            return Answer(False, reason, output, by="ci:run")
+        verb = "passed" if status == 0 else f"failed (exit {status})"
+        return Answer((status == 0) == wanted, f"`{shown}` {verb}", output, by="ci:run")
 
 
 class Checks:
