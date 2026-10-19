@@ -23,7 +23,6 @@ is the agent's to decide anyway: everyone judges the commit.
 
 from __future__ import annotations
 
-import asyncio
 import os
 import re
 import signal
@@ -307,7 +306,7 @@ class CommandAgent:
     def _tree(self, commit: str) -> str:
         return git(self.cwd, "rev-parse", f"{commit}^{{tree}}").strip()
 
-    def _attempt(self, task: Task) -> Attempt:
+    def __call__(self, task: Task) -> Attempt:
         before = self._head()
         if task.previous is not None and before != task.previous.ref:
             raise Escalate(
@@ -367,6 +366,3 @@ class CommandAgent:
             diff=changed,
             claims=output.strip()[-4000:],
         )
-
-    async def __call__(self, task: Task) -> Attempt:
-        return await asyncio.to_thread(self._attempt, task)

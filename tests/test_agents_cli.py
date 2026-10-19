@@ -1,4 +1,3 @@
-import asyncio
 import contextlib
 import http.server
 import io
@@ -49,7 +48,7 @@ class CommandAgentTests(unittest.TestCase):
             script = "import sys; prompt = sys.stdin.read(); open('app.py', 'w').write(\"print('v2')\\n\"); print('done:', 'make it v2' in prompt)"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
             self.assertEqual(agent.base, git(tmp, "rev-parse", "HEAD").strip())
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
             assert attempt.diff is not None
             self.assertEqual(attempt.claims, "done: True")
             self.assertIn("+print('v2')", attempt.diff)
@@ -71,11 +70,11 @@ class CommandAgentTests(unittest.TestCase):
             # The user's configuration comes from this process's environment;
             # a process of its own has it.
             script = (
-                "import asyncio, sys, symbolic_acceptance as sa\n"
+                "import sys, symbolic_acceptance as sa\n"
                 "from symbolic_acceptance.agents import CommandAgent\n"
                 "write = \"open('app.py', 'w').write('v2')\"\n"
                 "agent = CommandAgent([sys.executable, '-c', write], cwd=sys.argv[1])\n"
-                "asyncio.run(agent(sa.Task('', sa.load(sys.argv[2]), 1)))\n"
+                "agent(sa.Task('', sa.load(sys.argv[2]), 1))\n"
             )
             subprocess.run(
                 [sys.executable, "-c", script, tmp, str(EXAMPLE)],
@@ -100,11 +99,11 @@ class CommandAgentTests(unittest.TestCase):
             gitconfig = Path(user, "gitconfig")
             gitconfig.write_text("[safe]\n\tdirectory = *\n")
             script = (
-                "import asyncio, sys, symbolic_acceptance as sa\n"
+                "import sys, symbolic_acceptance as sa\n"
                 "from symbolic_acceptance.agents import CommandAgent\n"
                 "write = \"open('app.py', 'w').write('v2')\"\n"
                 "agent = CommandAgent([sys.executable, '-c', write], cwd=sys.argv[1])\n"
-                "print(asyncio.run(agent(sa.Task('', sa.load(sys.argv[2]), 1))).diff)\n"
+                "print(agent(sa.Task('', sa.load(sys.argv[2]), 1)).diff)\n"
             )
             done = subprocess.run(
                 [sys.executable, "-c", script, tmp, str(EXAMPLE)],
@@ -131,7 +130,7 @@ class CommandAgentTests(unittest.TestCase):
                 "open('../app.py', 'w').write('v2\\n'); open('x.py', 'w').write('')"
             )
             agent = CommandAgent([sys.executable, "-c", script], cwd=Path(tmp, "sub"))
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
         assert attempt.diff is not None
         self.assertIn("diff --git a/app.py b/app.py", attempt.diff)
 
@@ -157,7 +156,7 @@ class CommandAgentTests(unittest.TestCase):
             agent = CommandAgent(
                 [sys.executable, "-c", move], cwd=tmp, env=NO_GIT_CONFIG
             )
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
         assert attempt.diff is not None
         self.assertIn(f"+Subproject commit {newer}", attempt.diff)
 
@@ -167,7 +166,7 @@ class CommandAgentTests(unittest.TestCase):
             git("config", "status.showUntrackedFiles", "no")
             script = "open('new.py', 'w').write('x = 1\\n')"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
         assert attempt.diff is not None
         self.assertIn("+++ b/new.py", attempt.diff)
 
@@ -223,7 +222,7 @@ class CommandAgentTests(unittest.TestCase):
                 "open('tests/test_copy.py', 'w').write('a = 1\\nassert True\\nb = 2\\n')"
             )
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
             self.assertFalse(ran.exists(), "the file monitor never ran")
         assert attempt.diff is not None
         self.assertIn(
@@ -288,9 +287,7 @@ class CommandAgentTests(unittest.TestCase):
                 "[os.rename(f'{n}.txt', f'moved_{n}.txt') for n in ('r1', 'r2')]; "
                 "[open(f'moved_{n}.txt', 'a').write('more\\n') for n in ('r1', 'r2')]"
             )
-            attempt = asyncio.run(
-                CommandAgent([sys.executable, "-c", write], cwd=tmp)(self.task())
-            )
+            attempt = CommandAgent([sys.executable, "-c", write], cwd=tmp)(self.task())
             for key in settings:
                 git("config", "--unset", key)
             Path(tmp, ".git", "info", "attributes").unlink()
@@ -313,7 +310,7 @@ class CommandAgentTests(unittest.TestCase):
             repo(tmp)("remote", "add", "origin", remote)
             script = "open('app.py', 'w').write(\"print('v2')\\n\")"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp, push="agent")
-            first = asyncio.run(agent(self.task()))
+            first = agent(self.task())
             amend = (
                 "import subprocess; open('app.py', 'w').write('v3\\n');"
                 "subprocess.run(['git', 'commit', '-qa', '--amend', '-m', 'v3'])"
@@ -321,7 +318,7 @@ class CommandAgentTests(unittest.TestCase):
             rewriter = CommandAgent(
                 [sys.executable, "-c", amend], cwd=tmp, push="agent", base=agent.base
             )
-            second = asyncio.run(rewriter(self.task(2, previous=first)))
+            second = rewriter(self.task(2, previous=first))
             pushed = git(remote, "rev-parse", "refs/heads/agent").strip()
         self.assertEqual(pushed, second.ref)
 
@@ -340,7 +337,7 @@ class CommandAgentTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 sa.Escalate, r"changes \.github/workflows/ci\.yml"
             ):
-                asyncio.run(agent(self.task()))
+                agent(self.task())
             self.assertEqual(git(remote, "branch", "--list").strip(), "")
 
     def test_a_push_never_overwrites_someone_elses_commit(self):
@@ -353,7 +350,7 @@ class CommandAgentTests(unittest.TestCase):
             local("remote", "add", "origin", remote)
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             base = local("rev-parse", "HEAD").strip()
-            first = asyncio.run(CommandAgent(write, cwd=tmp, push="agent")(self.task()))
+            first = CommandAgent(write, cwd=tmp, push="agent")(self.task())
             # Someone else pushes to the branch, on top of the first attempt.
             local("commit", "-q", "--allow-empty", "-m", "theirs")
             local("push", "-q", "origin", "HEAD:refs/heads/agent")
@@ -362,7 +359,7 @@ class CommandAgentTests(unittest.TestCase):
             again = [sys.executable, "-c", "open('app.py', 'w').write('v3\\n')"]
             agent = CommandAgent(again, cwd=tmp, push="agent", base=base)
             with self.assertRaisesRegex(GitError, "push"):
-                asyncio.run(agent(self.task(2, previous=first)))
+                agent(self.task(2, previous=first))
             self.assertEqual(
                 git(remote, "rev-parse", "refs/heads/agent").strip(), theirs
             )
@@ -373,7 +370,7 @@ class CommandAgentTests(unittest.TestCase):
             agent = CommandAgent([sys.executable, "-c", "pass"], cwd=tmp)
             elsewhere = sa.Attempt("0" * 40, 1)
             with self.assertRaisesRegex(sa.Escalate, "not at attempt 1"):
-                asyncio.run(agent(self.task(2, previous=elsewhere)))
+                agent(self.task(2, previous=elsewhere))
 
     def test_the_agent_never_gets_the_runners_github_token(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -388,7 +385,7 @@ class CommandAgentTests(unittest.TestCase):
                 cwd=tmp,
                 env={**env, "ANTHROPIC_AUTH_TOKEN": "its own"},
             )
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
         self.assertEqual(attempt.claims, "['ANTHROPIC_AUTH_TOKEN']")
 
     def test_the_runners_git_keeps_its_token_from_the_checkouts_programs(self):
@@ -432,12 +429,12 @@ class CommandAgentTests(unittest.TestCase):
             spy = f"sh -c 'echo ${{GITHUB_TOKEN:-none}} >> {seen}; exec git-receive-pack \"$1\"' -"
             local("config", "remote.origin.receivepack", spy)
             script = (
-                "import asyncio, sys, symbolic_acceptance as sa\n"
+                "import sys, symbolic_acceptance as sa\n"
                 "from symbolic_acceptance.agents import CommandAgent\n"
                 "write = \"open('app.py', 'w').write('v2')\"\n"
                 "agent = CommandAgent([sys.executable, '-c', write], cwd=sys.argv[1],"
                 " push='agent')\n"
-                "asyncio.run(agent(sa.Task('', sa.load(sys.argv[2]), 1)))\n"
+                "agent(sa.Task('', sa.load(sys.argv[2]), 1))\n"
             )
             subprocess.run(
                 [sys.executable, "-c", script, tmp, str(EXAMPLE)],
@@ -462,7 +459,7 @@ class CommandAgentTests(unittest.TestCase):
             sleeper = [sys.executable, "-c", "import time; time.sleep(5)"]
             agent = CommandAgent(sleeper, cwd=tmp, timeout=0.5)
             with self.assertRaisesRegex(sa.Escalate, "ran past"):
-                asyncio.run(agent(self.task()))
+                agent(self.task())
 
     def test_no_change_is_an_error(self):
         empty = "git commit -q --allow-empty -m nothing"
@@ -486,7 +483,7 @@ class CommandAgentTests(unittest.TestCase):
                 git("config", "core.autocrlf", "input")
                 agent = CommandAgent(["sh", "-c", script], cwd=tmp, env=NO_GIT_CONFIG)
                 with self.assertRaisesRegex(sa.Escalate, "changed nothing"):
-                    asyncio.run(agent(self.task()))
+                    agent(self.task())
 
     def test_what_the_agent_leaves_running_does_not_hold_the_runner_up(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -494,7 +491,7 @@ class CommandAgentTests(unittest.TestCase):
             script = "echo v2 > app.py; sleep 30 & echo done"
             agent = CommandAgent(["sh", "-c", script], cwd=tmp, timeout=20)
             started = time.monotonic()
-            attempt = asyncio.run(agent(self.task()))
+            attempt = agent(self.task())
             self.assertLess(time.monotonic() - started, 10)
             self.assertEqual(attempt.claims, "done")
 
@@ -505,7 +502,7 @@ class CommandAgentTests(unittest.TestCase):
                 [sys.executable, "-c", "raise SystemExit('boom')"], cwd=tmp
             )
             with self.assertRaisesRegex(sa.Escalate, "exited with 1: boom"):
-                asyncio.run(agent(self.task()))
+                agent(self.task())
 
 
 class DraftTests(unittest.TestCase):
