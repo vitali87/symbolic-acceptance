@@ -260,6 +260,12 @@ class DraftTests(unittest.TestCase):
         fake = FakeHTTP(
             message({"checklist": "[q.a\n", "questions_for_reporter": []}),
             message(
+                {
+                    "checklist": good.replace('by = "llm"', 'by = "robot"'),
+                    "questions_for_reporter": [],
+                }
+            ),
+            message(
                 {"checklist": good, "questions_for_reporter": ["Which lockout limit?"]}
             ),
         )
@@ -271,6 +277,7 @@ class DraftTests(unittest.TestCase):
         retry = fake.body(1)["messages"][0]["content"]
         self.assertIn("It has these problems", retry)
         self.assertIn("Logins are not throttled", retry)
+        self.assertIn("unknown-oracle", fake.body(2)["messages"][0]["content"])
 
     def test_gives_up_after_tries(self):
         bad = message({"checklist": "nope = 1", "questions_for_reporter": []})
@@ -285,6 +292,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("ok (6 requirements)", out)
         code, out = cli("show", str(EXAMPLE))
+        self.assertTrue(out.startswith("Throttle brute-force logins (#342)\n"))
         self.assertIn("protected: any(all(locks_account, can_unlock), backs_off)", out)
         self.assertEqual(cli("digest", str(EXAMPLE))[1].strip(), example().digest)
 
@@ -297,6 +305,21 @@ class CLITests(unittest.TestCase):
             code, out = cli("lint", str(path))
             self.assertEqual(code, 1)
             self.assertIn("unknown-oracle", out)
+            with self.assertRaisesRegex(SystemExit, "lint errors"):
+                cli("run", str(path), "--agent", "true", "--cwd", tmp)
+
+    def test_strict_lint_fails_on_warnings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp, "unused.toml")
+            path.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[q.b]\nask = "B?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            code, out = cli("lint", str(path))
+            self.assertEqual(code, 0)
+            self.assertIn("unused-question", out)
+            self.assertEqual(cli("lint", "--strict", str(path))[0], 1)
 
     def test_explain_exit_codes(self):
         with tempfile.TemporaryDirectory() as tmp:

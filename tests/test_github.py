@@ -128,7 +128,10 @@ class ChecksTests(unittest.TestCase):
                     "check_runs": [
                         run("tests", conclusion="failure", run_id=1),
                         run("tests", conclusion="success", run_id=2),
-                        run("repro", conclusion="skipped", run_id=3),
+                        dict(
+                            run("repro", conclusion="skipped", run_id=3),
+                            output={"title": None, "summary": "Nothing to do"},
+                        ),
                     ]
                 }
             )
@@ -139,8 +142,13 @@ class ChecksTests(unittest.TestCase):
             answers["repro_fixed"].is_met, "a skipped check proves nothing"
         )
         self.assertEqual(answers["suite_green"].by, "ci:tests")
-        self.assertIn(
-            "https://github.com/octo/repo/runs/2", answers["suite_green"].evidence
+        self.assertEqual(
+            answers["suite_green"].evidence,
+            ("https://github.com/octo/repo/runs/2", "tests success"),
+        )
+        self.assertEqual(
+            answers["repro_fixed"].evidence,
+            ("https://github.com/octo/repo/runs/3", "Nothing to do"),
         )
 
     def test_runs_in_progress_are_pending(self):
@@ -170,9 +178,12 @@ class ChecksTests(unittest.TestCase):
         )
 
     def test_question_needs_a_check_name(self):
-        github, _ = gh(json_response({"check_runs": []}))
-        with self.assertRaisesRegex(ValueError, "needs check"):
-            asyncio.run(GitHubChecks(github)([sa.Question("x", "X?", "ci")], context()))
+        for options in ({}, {"check": ""}, {"check": 3}):
+            with self.subTest(options):
+                github, _ = gh(json_response({"check_runs": []}))
+                question = sa.Question("x", "X?", "ci", options=options)
+                with self.assertRaisesRegex(ValueError, "needs check"):
+                    asyncio.run(GitHubChecks(github)([question], context()))
 
 
 SSO = sa.Question(
@@ -202,7 +213,8 @@ class ReviewsTests(unittest.TestCase):
                 "/yes sso_exempt before the question",
                 at="2026-10-18T09:00:00Z",
             ),
-            comment(2, "bot", ASK, user_type="Bot"),
+            # The runner's bot asks; a bot counts whatever its association.
+            comment(2, "github-actions[bot]", ASK, user_type="Bot", association="NONE"),
             comment(
                 3, "agent-bot[bot]", "/yes sso_exempt trust me", association="NONE"
             ),

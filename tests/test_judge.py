@@ -191,6 +191,12 @@ class VerdictTests(unittest.TestCase):
         )
         self.assertEqual(answer.by, "llm:claude-opus-5-5")
 
+    def test_a_yes_keeps_its_own_reasoning(self):
+        j, _ = judge(
+            verdict("YES", ["lock(user)"], missing="nothing", reasoning="it locks")
+        )
+        self.assertEqual(ask(j).reasoning, "it locks")
+
     def test_unsupported_yes_is_retried_then_counts_as_no(self):
         j, fake = judge(
             verdict("YES", ["rate_limit(user, window=60)"]), verdict("YES", [])
@@ -324,6 +330,7 @@ class VerdictTests(unittest.TestCase):
 
     def test_credentials_are_not_shown(self):
         self.assertNotIn("sk-secret", repr(Claude(api_key="sk-secret")))
+        self.assertNotIn("sk-token", repr(Claude(auth_token="sk-token")))
         self.assertNotIn("t0k", repr(GitHub("octo/repo", token="t0k")))
 
 
@@ -342,6 +349,17 @@ class HTTPTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(response.body), {"ok": True})
         self.assertEqual(slept, [3.0, 2.0])
+
+    def test_claude_retries_server_errors(self):
+        # Asking again costs tokens but changes nothing, so even a POST is
+        # repeated.
+        fake = FakeHTTP(
+            json_response({}, 500, {"retry-after": "0"}), verdict("NO", missing="x")
+        )
+        claude = Claude(api_key="test-key", transport=fake)
+        reply = claude.json(system="s", content="c", shape=Verdict)
+        self.assertEqual(reply.data["answer"], "NO")
+        self.assertEqual(len(fake.requests), 2)
 
     def test_client_errors_are_not_retried(self):
         fake = FakeHTTP(json_response({"error": {"message": "bad schema"}}, 400))

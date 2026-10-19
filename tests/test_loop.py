@@ -395,15 +395,26 @@ class RunTests(unittest.TestCase):
         self.assertEqual(result.status, sa.ESCALATED)
         self.assertEqual(result.reason, "agent: attempt 1 changed nothing")
         self.assertEqual(seen, [result], "the outcome is reported, so it is saved")
+        script = Scripted(PASSING)
+        fixed = Agent(script, [PASSING])
+        resumed = asyncio.run(
+            sa.run(self.checklist, agent=fixed, oracles=script.oracles(), resume=result)
+        )
+        self.assertEqual(resumed.status, sa.APPROVED, "a fixed agent can go on")
 
     def test_agent_must_return_a_ref(self):
-        async def agent(task):
-            return ""
-
-        with self.assertRaisesRegex(TypeError, "non-empty ref"):
-            asyncio.run(
-                sa.run(self.checklist, agent=agent, oracles=Scripted(PASSING).oracles())
-            )
+        for empty in ("", sa.Attempt("")):
+            with (
+                self.subTest(empty=empty),
+                self.assertRaisesRegex(TypeError, "non-empty ref"),
+            ):
+                asyncio.run(
+                    sa.run(
+                        self.checklist,
+                        agent=lambda task, empty=empty: empty,
+                        oracles=Scripted(PASSING).oracles(),
+                    )
+                )
 
 
 if __name__ == "__main__":

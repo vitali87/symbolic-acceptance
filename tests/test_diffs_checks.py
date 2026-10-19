@@ -28,11 +28,31 @@ class ParseTests(unittest.TestCase):
 
     def test_lines_and_header_lookalike(self):
         _, lines = parse(DIFF)
-        added = [(d.path, d.line, d.text) for d in lines if d.side == "+"]
-        self.assertIn(("src/auth.py", 13, "            lock(user)"), added)
-        self.assertIn(("src/auth.py", 14, "++ not a header, an added line"), added)
-        removed = [d for d in lines if d.side == "-"]
-        self.assertEqual(removed[0].where, "src/auth.py:-11")
+        self.assertEqual(
+            [(d.where, d.kind, d.text) for d in lines],
+            [
+                ("src/auth.py:10", "context", "    if not check(user, password):"),
+                ("src/auth.py:-11", "removed", "        return False"),
+                ("src/auth.py:11", "added", "        record_failure(user)"),
+                (
+                    "src/auth.py:12",
+                    "added",
+                    "        if failures(user) > MAX_FAILURES:",
+                ),
+                ("src/auth.py:13", "added", "            lock(user)"),
+                ("src/auth.py:14", "added", "++ not a header, an added line"),
+                ("src/auth.py:15", "context", "    return True"),
+                ("tests/test_auth.py:1", "added", "def test_lockout():"),
+                ("tests/test_auth.py:2", "added", "    assert locks_after(5)"),
+                ("tests/test_old.py:-1", "removed", "def test_old(): pass"),
+            ],
+        )
+
+    def test_a_renamed_file_loses_lines_under_its_old_name(self):
+        _, lines = parse(RENAMED)
+        self.assertEqual(
+            [d.where for d in lines], ["new.py:1", "old.py:-2", "new.py:2", "new.py:3"]
+        )
 
     def test_no_newline_markers_and_escaped_paths(self):
         diff = (
@@ -109,6 +129,7 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([d.where for d in found], ["src/auth.py:12", "src/auth.py:13"])
         self.assertIsNotNone(locate("+        record_failure(user)", lines))
         self.assertIsNone(locate("rate_limit(user)", lines))
+        self.assertIsNone(locate("+ rate_limit(user)", lines))
         self.assertIsNone(locate("lock", lines), "too short to prove anything")
         self.assertIsNone(locate("MAX_FAILURES", lines), "part of a line is not a line")
         self.assertIsNone(
@@ -119,6 +140,28 @@ class ParseTests(unittest.TestCase):
             locate("return True\ndef test_lockout():", lines),
             "and in one file",
         )
+
+    def test_locate_prefers_where_the_line_changes(self):
+        _, lines = parse(RENAMED)
+        found = locate("value = compute()", lines)
+        assert found is not None
+        self.assertEqual([d.where for d in found], ["new.py:3"])
+
+
+RENAMED = """\
+diff --git a/old.py b/new.py
+similarity index 50%
+rename from old.py
+rename to new.py
+index 1111111..2222222 100644
+--- a/old.py
++++ b/new.py
+@@ -1,2 +1,3 @@
+ value = compute()
+-print(value)
++log(value)
++value = compute()
+"""
 
 
 def context(diff: str | None = "", ref="abc"):

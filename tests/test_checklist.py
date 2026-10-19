@@ -82,6 +82,9 @@ class RejectTests(unittest.TestCase):
 
     def test_needs_a_requirement(self):
         self.assertRejected('[q.a]\nask = "x"\nby = "ci"\n', "at least one")
+        self.assertRejected(
+            'require = []\n[q.a]\nask = "x"\nby = "ci"\n', "at least one"
+        )
 
     def test_question_needs_ask_and_by(self):
         self.assertRejected(
@@ -134,6 +137,9 @@ class DigestTests(unittest.TestCase):
             'ask = "Is A done?"', 'ask   =   "Is A done?"   # same'
         )
         self.assertEqual(sa.loads(MINIMAL).digest, sa.loads(reformatted).digest)
+        options = MINIMAL.replace('by = "ci"', 'by = "ci"\ncheck = "t"\nrun = "x"')
+        reordered = MINIMAL.replace('by = "ci"', 'by = "ci"\nrun = "x"\ncheck = "t"')
+        self.assertEqual(sa.loads(options).digest, sa.loads(reordered).digest)
 
     def test_meaning_changes_the_digest(self):
         changed = MINIMAL.replace('by = "ci"', 'by = "llm"')

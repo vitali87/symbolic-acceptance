@@ -38,6 +38,8 @@ class RecordTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not a symbolic-acceptance/run v1"):
             record.loads('{"format": "something else"}', self.checklist)
         data = json.loads(record.dumps(self.result, self.checklist))
+        with self.assertRaisesRegex(ValueError, "not a symbolic-acceptance/run v1"):
+            record.loads(json.dumps(dict(data, version=2)), self.checklist)
         data["evaluations"][0]["answers"]["planted"] = {"is_met": True}
         with self.assertRaisesRegex(ValueError, r"unknown questions: \['planted'\]"):
             record.loads(json.dumps(data), self.checklist)
@@ -102,7 +104,7 @@ class RecordTests(unittest.TestCase):
         # Only the newest attempt shows its answers; the record has the rest.
         self.assertEqual(text.count("<summary>Answers</summary>"), 1)
         self.assertNotIn("Feedback sent to the agent", text)
-        self.assertIn("What the agent says it did", text)
+        self.assertEqual(text.count("What the agent says it did"), 1)
         self.assertIn("I fixed it", text)
         waiting = sa.Evaluation.from_answers(
             self.checklist, sa.Attempt("abc", 1), {}, [], "waiting", "CI: tests queued"
@@ -184,6 +186,11 @@ class LintTests(unittest.TestCase):
             '[[require]]\nwhen = "h"\nthat = "c"\nfail = "x"\n'
         )
         self.assertIn("gated-by-person", self.codes(c))
+        people_only = sa.loads(
+            '[q.h]\nask = "H?"\nby = "human"\n[q.g]\nask = "G?"\nby = "human"\n'
+            '[[require]]\nwhen = "h"\nthat = "g"\nfail = "x"\n'
+        )
+        self.assertNotIn("gated-by-person", self.codes(people_only))
 
     def test_bad_options(self):
         c = sa.loads(
@@ -218,6 +225,18 @@ class LintTests(unittest.TestCase):
         )
         self.assertEqual(self.codes(unfrozen), ["unfrozen-workflows"])
         self.assertNotIn("unfrozen-workflows", self.codes(example()))
+        for frozen in (
+            'frozen = ["src/*"]',
+            'frozen = [".github/*"]\nallow_new = [".github/workflows/*"]',
+            "frozen = []",
+        ):
+            with self.subTest(frozen):
+                elsewhere = sa.loads(
+                    '[q.t]\nask = "Tests pass?"\nby = "ci"\ncheck = "tests"\n'
+                    f'[q.f]\nask = "Frozen?"\nby = "ci"\n{frozen}\n'
+                    '[[require]]\nid = "r"\nthat = { all = ["t", "f"] }\nfail = "x"\n'
+                )
+                self.assertIn("unfrozen-workflows", self.codes(elsewhere))
 
     def test_large_checklists_skip_exhaustive_checks(self):
         ids = [f"q{n}" for n in range(MAX_EXHAUSTIVE + 1)]

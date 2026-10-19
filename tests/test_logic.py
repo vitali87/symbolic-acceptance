@@ -173,6 +173,27 @@ class PlanTests(unittest.TestCase):
             ["docs"],
         )
 
+    def test_not_turns_around_what_is_wanted_beneath_it(self):
+        checklist = sa.loads(
+            """
+            [q.a]
+            ask = "A?"
+            by = "llm"
+            [q.b]
+            ask = "B?"
+            by = "llm"
+            [q.c]
+            ask = "C?"
+            by = "llm"
+            [[require]]
+            id = "neither"
+            that = { not = { any = [{ all = ["a", "b"] }, "c"] } }
+            fail = "x"
+            """
+        )
+        # With a NO, a and b can no longer both be YES; only c still matters.
+        self.assertEqual(plan(checklist, {"a": False}, last=()), ["c"])
+
     def test_a_check_gated_by_a_person_waits_for_the_gate(self):
         checklist = sa.loads(
             """

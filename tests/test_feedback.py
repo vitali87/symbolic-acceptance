@@ -91,6 +91,8 @@ class AnswerTests(unittest.TestCase):
             sa.Answer(data["is_met"])
         with self.assertRaisesRegex(TypeError, "not one string"):
             sa.Answer(True, evidence=data["evidence"])
+        with self.assertRaisesRegex(TypeError, "must be strings"):
+            sa.Answer(True, by=json.loads("null"))
         self.assertEqual(sa.Answer(True, evidence=["a", "b"]).evidence, ("a", "b"))
 
 
@@ -154,6 +156,24 @@ class AssessTests(unittest.TestCase):
         self.assertIn(
             "Applies because all(a, not(b)) is YES (a is YES, b is NO).",
             sa.render_failures(failures.failures),
+        )
+
+    def test_render_shows_each_cause_and_who_answered(self):
+        truth = {
+            "a": sa.Answer(False),
+            "b": sa.Answer(True, "B happened", ("x.py:3 (added): b()",), "llm:m"),
+            "c": sa.Answer(False),
+        }
+        self.assertEqual(
+            sa.render_failures(sa.assess(CHECKLIST, truth).failures),
+            "1. a_and_not_b: Need A without B\n"
+            "   - all(a, not(b)): needs YES; fix each of:\n"
+            "     - a: needs YES, got NO [ci]\n"
+            "       Q: A?\n"
+            "     - b: needs NO, got YES [llm:m]\n"
+            "       Q: B?\n"
+            "       Why: B happened\n"
+            "       Evidence: x.py:3 (added): b()\n",
         )
 
     def test_render_without_failures(self):

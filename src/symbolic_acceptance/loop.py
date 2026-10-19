@@ -490,12 +490,11 @@ async def run(
             produced = await _call(agent, task)
         except Escalate as stop:
             return await report(ESCALATED, f"agent: {stop}")
-        if isinstance(produced, Attempt):
-            attempt = replace(produced, number=task.number)
-        elif isinstance(produced, str) and produced:
-            attempt = Attempt(ref=produced, number=task.number)
-        else:
+        if isinstance(produced, str):
+            produced = Attempt(ref=produced)
+        if not isinstance(produced, Attempt) or not produced.ref:
             raise TypeError("the agent must return an Attempt or a non-empty ref")
+        attempt = replace(produced, number=task.number)
         evaluations.append(
             await evaluate(checklist, attempt, oracles, last=last, issue=issue)
         )
