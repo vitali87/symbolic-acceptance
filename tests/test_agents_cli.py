@@ -20,6 +20,10 @@ from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.draft import DraftError, draft
 
+# For agents that run git themselves: like the test's own git, theirs reads
+# no one's settings, which could run hooks or refuse to commit.
+NO_GIT_CONFIG = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+
 
 class CommandAgentTests(unittest.TestCase):
     def task(self, number=1, previous=None):
@@ -105,7 +109,9 @@ class CommandAgentTests(unittest.TestCase):
                 "import subprocess; subprocess.run(['git', '-C', 'vendored',"
                 f" 'checkout', '-q', '{newer}'], check=True)"
             )
-            agent = CommandAgent([sys.executable, "-c", move], cwd=tmp)
+            agent = CommandAgent(
+                [sys.executable, "-c", move], cwd=tmp, env=NO_GIT_CONFIG
+            )
             attempt = asyncio.run(agent(self.task()))
         assert attempt.diff is not None
         self.assertIn(f"+Subproject commit {newer}", attempt.diff)
@@ -327,12 +333,10 @@ class CommandAgentTests(unittest.TestCase):
     def test_no_change_is_an_error(self):
         empty = "git commit -q --allow-empty -m nothing"
         undone = "git commit -qam v2 && git revert --no-edit HEAD >/dev/null"
-        # The agent's own git, like the test's, reads no one's settings.
-        env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
         for script in ("true", empty, f"echo v2 > app.py && {undone}"):
             with self.subTest(script), tempfile.TemporaryDirectory() as tmp:
                 repo(tmp)
-                agent = CommandAgent(["sh", "-c", script], cwd=tmp, env=env)
+                agent = CommandAgent(["sh", "-c", script], cwd=tmp, env=NO_GIT_CONFIG)
                 with self.assertRaisesRegex(sa.Escalate, "changed nothing"):
                     asyncio.run(agent(self.task()))
 
