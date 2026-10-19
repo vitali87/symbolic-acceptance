@@ -43,6 +43,16 @@ class CommandAgentTests(unittest.TestCase):
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(local_diff(tmp)(attempt), attempt.diff)
 
+    def test_a_new_file_is_an_attempt_whatever_the_checkout_says(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            git("config", "status.showUntrackedFiles", "no")
+            script = "open('new.py', 'w').write('x = 1\\n')"
+            agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
+            attempt = asyncio.run(agent(self.task()))
+        assert attempt.diff is not None
+        self.assertIn("+++ b/new.py", attempt.diff)
+
     def test_the_checkout_cannot_rig_the_diff(self):
         with tempfile.TemporaryDirectory() as tmp:
             git = repo(tmp)

@@ -109,7 +109,7 @@ def local_diff(cwd: str | Path) -> Callable[[Attempt], str]:
 
     def source(attempt: Attempt) -> str:
         if not attempt.base:
-            raise AgentError("the attempt has no base commit to diff against")
+            raise ValueError("the attempt has no base commit to diff against")
         return diff(cwd, attempt.base, attempt.ref)
 
     return source
@@ -180,7 +180,9 @@ class CommandAgent:
         if done.returncode != 0:
             tail = (done.stderr or done.stdout).strip()[-2000:]
             raise Escalate(f"the agent exited with {done.returncode}: {tail}")
-        if git(self.cwd, "status", "--porcelain").strip():
+        # Untracked files and submodules count, whatever the checkout says.
+        status = ("status", "--porcelain", "--untracked-files=all")
+        if git(self.cwd, *status, "--ignore-submodules=none").strip():
             git(self.cwd, "add", "--all")
             git(self.cwd, "commit", "--quiet", "-m", f"Attempt {task.number}")
         after = self._head()
