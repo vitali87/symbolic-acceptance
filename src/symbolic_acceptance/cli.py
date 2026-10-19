@@ -12,7 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
-from symbolic_acceptance.agents import CommandAgent, GitError
+from symbolic_acceptance.agents import CommandAgent, GitError, git
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import (
     Checklist,
@@ -254,7 +254,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.resume:
         resume = _record(args.resume, checklist)
     record_path = args.record or args.resume
-    if args.record and args.record != args.resume and Path(args.record).exists():
+    resuming_it = (
+        args.resume and Path(args.record or "").resolve() == Path(args.resume).resolve()
+    )
+    if args.record and not resuming_it and Path(args.record).exists():
         raise SystemExit(
             f"error: {args.record} holds a run; pass --resume {args.record} to "
             "continue it"
@@ -269,8 +272,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "inside it, the record would be committed with the attempt and the "
             "agent could rewrite it"
         )
+    if resume is None and git(
+        args.cwd, "status", "--porcelain", "--untracked-files=all"
+    ):
+        raise SystemExit(
+            "error: the checkout (--cwd) has changes no commit holds; commit or "
+            "stash them, so that the attempts hold only what the agent does"
+        )
     # A resumed run keeps diffing against the commit it started from.
-    base = resume.evaluations[0].attempt.base if resume and resume.evaluations else ""
+    agent = CommandAgent(
+        shlex.split(args.agent),
+        cwd=args.cwd,
+        base=(resume.base if resume else "") or None,
+        push=args.push,
+    )
 
     def progress(result: Result) -> None:
         if record_path:
@@ -281,15 +296,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     result = asyncio.run(
         run(
             checklist,
-            agent=CommandAgent(
-                shlex.split(args.agent), cwd=args.cwd, base=base or None, push=args.push
-            ),
+            agent=agent,
             oracles=oracles,
             issue=issue,
             max_attempts=args.max_attempts,
             resume=resume,
             on_progress=progress,
             stop_on_regression=not args.keep_going_on_regression,
+            base=agent.base,
         )
     )
     print(f"{result.status}: {result.reason}")

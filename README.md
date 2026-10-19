@@ -190,15 +190,17 @@ from symbolic_acceptance.judge import Judge
 
 checklist = sa.load("acceptance/issue-342.toml")
 github = GitHub("owner/repo")
+agent = CommandAgent(
+    ["claude", "-p", "--permission-mode", "auto"],
+    cwd="work",  # the agent's checkout
+    push="agent/issue-342",  # so CI runs on every attempt
+)
 
 result = asyncio.run(
     sa.run(
         checklist,
-        agent=CommandAgent(
-            ["claude", "-p", "--permission-mode", "auto"],
-            cwd="work",  # the agent's checkout
-            push="agent/issue-342",  # so CI runs on every attempt
-        ),
+        agent=agent,
+        base=agent.base,  # kept with the run, so a resume diffs from it
         oracles={
             "ci": Checks(Commands("work"), fallback=GitHubChecks(github, wait=1800)),
             "llm": Judge(),
@@ -228,12 +230,15 @@ symbolic-acceptance run acceptance.toml --resume run.json \
 symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 ```
 
+`run` starts from a checkout whose changes are all committed, and keeps the
+commit it started from in the record, so every attempt is compared with it.
 A resumed run needs the agent's checkout at its last attempt, and one run
-must not be resumed twice at once: the resumes would share the checkout
-and the record. An agent that fails, times out or changes nothing
-escalates the run, which is saved like any other outcome. An error in the
-runner itself (git, the network, a misconfigured oracle) stops it instead,
-and the record keeps the run as it was, ready to resume.
+must not be resumed twice at once: the resumes would share the checkout and
+the record. An agent that fails, times out or changes nothing escalates the
+run, which is saved like any other outcome. An error in the runner itself
+(git, the network, a misconfigured oracle) stops it instead, and the record
+keeps the run as it was, ready to resume; an attempt that was being checked
+is checked again, without asking the agent for another.
 
 `explain acceptance.toml answers.json` decides a checklist from answers you
 supply, which is handy for checking a checklist by hand.

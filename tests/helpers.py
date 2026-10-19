@@ -45,9 +45,11 @@ def finished_run(checklist: sa.Checklist) -> sa.Result:
     async def agent(task: sa.Task) -> sa.Attempt:
         calls.append(task)
         script.truth = truths[len(calls) - 1]
-        return sa.Attempt(f"commit{len(calls)}", claims="I fixed it", base="base0")
+        return sa.Attempt(f"commit{len(calls)}", claims="I fixed it")
 
-    return asyncio.run(sa.run(checklist, agent=agent, oracles=script.oracles()))
+    return asyncio.run(
+        sa.run(checklist, agent=agent, oracles=script.oracles(), base="base0")
+    )
 
 
 def cli(*args: str) -> tuple[int, str]:

@@ -429,11 +429,50 @@ class RunTests(unittest.TestCase):
                 self.checklist,
                 agent=agent,
                 oracles=script.oracles(),
-                on_progress=lambda r: seen.append((r.status, len(r.evaluations))),
+                on_progress=lambda r: seen.append(
+                    (r.status, [e.status for e in r.evaluations])
+                ),
             )
         )
         self.assertEqual(result.status, sa.APPROVED)
-        self.assertEqual(seen, [(sa.RUNNING, 1), (sa.APPROVED, 2)])
+        self.assertEqual(
+            seen,
+            [
+                (sa.RUNNING, []),
+                (sa.RUNNING, [sa.WAITING]),
+                (sa.RUNNING, [sa.CHANGES]),
+                (sa.RUNNING, [sa.CHANGES, sa.WAITING]),
+                (sa.APPROVED, [sa.CHANGES, sa.APPROVED]),
+            ],
+        )
+
+    def test_a_run_stopped_while_checking_resumes_by_checking_the_attempt(self):
+        seen = []
+        script = Scripted(PASSING)
+        agent = Agent(script, [PASSING])
+
+        async def broken(questions, context):
+            raise RuntimeError("the network went away")
+
+        with self.assertRaisesRegex(RuntimeError, "network"):
+            asyncio.run(
+                sa.run(
+                    self.checklist,
+                    agent=agent,
+                    oracles=dict(script.oracles(), llm=broken),
+                    on_progress=seen.append,
+                    base="b0",
+                )
+            )
+        saved = seen[-1]
+        self.assertEqual(saved.base, "b0")
+        self.assertEqual(saved.last.reason if saved.last else "", "being checked")
+        resumed = asyncio.run(
+            sa.run(self.checklist, agent=agent, oracles=script.oracles(), resume=saved)
+        )
+        self.assertEqual(resumed.status, sa.APPROVED)
+        self.assertEqual(len(agent.tasks), 1, "the agent was not asked again")
+        self.assertEqual(resumed.base, "b0")
 
     def test_an_agent_that_cannot_go_on_escalates(self):
         seen = []
@@ -447,11 +486,13 @@ class RunTests(unittest.TestCase):
                 agent=agent,
                 oracles=Scripted(PASSING).oracles(),
                 on_progress=seen.append,
+                base="b0",
             )
         )
         self.assertEqual(result.status, sa.ESCALATED)
         self.assertEqual(result.reason, "agent: attempt 1 changed nothing")
-        self.assertEqual(seen, [result], "the outcome is reported, so it is saved")
+        self.assertEqual(seen[-1], result, "the outcome is reported, so it is saved")
+        self.assertEqual(seen[0].base, "b0", "the base is saved before the agent runs")
         script = Scripted(PASSING)
         fixed = Agent(script, [PASSING])
         resumed = asyncio.run(

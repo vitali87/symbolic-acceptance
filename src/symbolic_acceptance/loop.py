@@ -71,7 +71,6 @@ class Attempt:
     number: int = 0
     diff: str | None = None
     claims: str = ""
-    base: str = ""
 
 
 @dataclass(frozen=True)
@@ -256,6 +255,7 @@ class Result:
     evaluations: tuple[Evaluation, ...]
     digest: str
     issue: str = ""
+    base: str = ""
 
     @property
     def last(self) -> Evaluation | None:
@@ -448,6 +448,7 @@ async def run(
     resume: Result | None = None,
     on_progress: Listener | None = None,
     stop_on_regression: bool = True,
+    base: str = "",
 ) -> Result:
     """Run the agent until approval or escalation.
 
@@ -455,10 +456,14 @@ async def run(
     when it cannot make an attempt. It is the runner's code around the
     coding agent, such as :class:`symbolic_acceptance.agents.CommandAgent`,
     which computes the attempt's diff itself.
-    ``on_progress`` gets the run after each evaluation, ``running`` or as it
-    ended, e.g. to save it with :func:`symbolic_acceptance.record.save`.
-    Pass a saved ``Result`` as ``resume`` to continue it; its issue text
-    carries over.
+    ``on_progress`` gets the run whenever it changes: before each attempt,
+    when an attempt is made and is being checked, and when the check ends,
+    ``running`` or as the run ended, e.g. to save it with
+    :func:`symbolic_acceptance.record.save`. A run saved that way can be
+    resumed from any of these points. ``base`` names what the run started
+    from, such as :attr:`symbolic_acceptance.agents.CommandAgent.base`, and
+    is kept with it. Pass a saved ``Result`` as ``resume`` to continue it;
+    its issue text and base carry over.
     """
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
@@ -466,7 +471,9 @@ async def run(
     evaluations: list[Evaluation] = []
 
     async def report(status: RunStatus, reason: str = "") -> Result:
-        result = Result(status, reason, tuple(evaluations), checklist.digest, issue)
+        result = Result(
+            status, reason, tuple(evaluations), checklist.digest, issue, base
+        )
         if on_progress is not None:
             await _call(on_progress, result)
         return result
@@ -478,7 +485,10 @@ async def run(
             )
         if issue and resume.issue and issue != resume.issue:
             raise ValueError("the issue text differs from the run being resumed")
+        if base and resume.base and base != resume.base:
+            raise ValueError("the base differs from the run being resumed")
         issue = issue or resume.issue
+        base = base or resume.base
         evaluations = list(resume.evaluations)
         if evaluations and evaluations[-1].status == WAITING:
             waiting = evaluations.pop()
@@ -499,7 +509,7 @@ async def run(
             verdict = _verdict(evaluations, max_attempts, stop_on_regression)
             if verdict is not None:
                 return await report(*verdict)
-            await report(RUNNING)
+        await report(RUNNING)
         previous = evaluations[-1] if evaluations else None
         task = Task(
             issue=issue,
@@ -517,6 +527,14 @@ async def run(
         if not isinstance(produced, Attempt) or not produced.ref:
             raise TypeError("the agent must return an Attempt or a non-empty ref")
         attempt = replace(produced, number=task.number)
+        # Kept before it is checked, so a run stopped by an error meanwhile
+        # resumes by checking it rather than asking the agent again.
         evaluations.append(
-            await evaluate(checklist, attempt, oracles, last=last, issue=issue)
+            Evaluation.from_answers(
+                checklist, attempt, {}, (), WAITING, "being checked"
+            )
+        )
+        await report(RUNNING)
+        evaluations[-1] = await evaluate(
+            checklist, attempt, oracles, last=last, issue=issue
         )

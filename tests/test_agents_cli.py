@@ -31,15 +31,15 @@ class CommandAgentTests(unittest.TestCase):
             repo(tmp)
             script = "import sys; prompt = sys.stdin.read(); open('app.py', 'w').write(\"print('v2')\\n\"); print('done:', 'make it v2' in prompt)"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
+            self.assertEqual(agent.base, git(tmp, "rev-parse", "HEAD").strip())
             attempt = asyncio.run(agent(self.task()))
             assert attempt.diff is not None
             self.assertEqual(attempt.claims, "done: True")
             self.assertIn("+print('v2')", attempt.diff)
             self.assertEqual(len(attempt.ref), 40)
-            self.assertNotEqual(attempt.base, attempt.ref)
             log = git(tmp, "log", "-1", "--format=%s")
             self.assertEqual(log.strip(), "Attempt 1")
-            self.assertEqual(diff(tmp, attempt.base, attempt.ref), attempt.diff)
+            self.assertEqual(diff(tmp, agent.base, attempt.ref), attempt.diff)
 
     def test_the_whole_change_counts_from_a_subdirectory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -179,7 +179,7 @@ class CommandAgentTests(unittest.TestCase):
                 "subprocess.run(['git', 'commit', '-qa', '--amend', '-m', 'v3'])"
             )
             rewriter = CommandAgent(
-                [sys.executable, "-c", amend], cwd=tmp, push="agent", base=first.base
+                [sys.executable, "-c", amend], cwd=tmp, push="agent", base=agent.base
             )
             second = asyncio.run(rewriter(self.task(2, previous=first)))
             pushed = git(remote, "rev-parse", "refs/heads/agent").strip()
@@ -212,6 +212,7 @@ class CommandAgentTests(unittest.TestCase):
             local = repo(tmp)
             local("remote", "add", "origin", remote)
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            base = local("rev-parse", "HEAD").strip()
             first = asyncio.run(CommandAgent(write, cwd=tmp, push="agent")(self.task()))
             # Someone else pushes to the branch, on top of the first attempt.
             local("commit", "-q", "--allow-empty", "-m", "theirs")
@@ -219,7 +220,7 @@ class CommandAgentTests(unittest.TestCase):
             theirs = local("rev-parse", "HEAD").strip()
             local("reset", "-q", "--hard", first.ref)
             again = [sys.executable, "-c", "open('app.py', 'w').write('v3\\n')"]
-            agent = CommandAgent(again, cwd=tmp, push="agent", base=first.base)
+            agent = CommandAgent(again, cwd=tmp, push="agent", base=base)
             with self.assertRaisesRegex(GitError, "push"):
                 asyncio.run(agent(self.task(2, previous=first)))
             self.assertEqual(
@@ -506,9 +507,26 @@ class CLITests(unittest.TestCase):
             self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
             saved = record.load(record_path, sa.load(checklist))
             self.assertEqual(saved.status, sa.APPROVED)
-            # Resuming a finished run runs no agent: `false` would fail.
-            code, out = cli(*args, "false", "--resume", record_path)
+            # Resuming a finished run runs no agent: `false` would fail. The
+            # record may be named twice, any way that names the same file.
+            same = os.path.join(outside, ".", "run.json")
+            code, out = cli(*args, "false", "--resume", record_path, "--record", same)
             self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+
+    def test_run_starts_from_a_checkout_whose_changes_are_all_committed(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            Path(tmp, "notes.txt").write_text("mine, not the agent's\n")
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            with self.assertRaisesRegex(SystemExit, "changes no commit holds"):
+                cli("run", str(checklist), "--agent", "true", "--cwd", tmp)
 
     def test_a_resumed_run_keeps_diffing_from_where_it_started(self):
         with (
@@ -533,8 +551,10 @@ class CLITests(unittest.TestCase):
             self.assertEqual(code, 1, "escalated at the attempt cap")
             code, _ = cli(*args, agent(3), "--resume", saved, "--max-attempts", "2")
             self.assertEqual(code, 0)
-            first, second = record.load(saved, sa.load(checklist)).evaluations
-        self.assertEqual(second.attempt.base, first.attempt.base)
+            resumed = record.load(saved, sa.load(checklist))
+            base = git(tmp, "rev-parse", "HEAD~2").strip()
+        self.assertEqual(resumed.base, base)
+        second = resumed.evaluations[1]
         assert second.attempt.diff is not None
         self.assertIn("-print('v1')\n+V = 3", second.attempt.diff)
 
@@ -556,7 +576,9 @@ class CLITests(unittest.TestCase):
             work = Path(tmp, "work")
             work.mkdir()
             args = ("run", str(checklist), "--agent", "true", "--cwd", str(work))
-            with self.assertRaisesRegex(SystemExit, "^error: git rev-parse HEAD"):
+            with self.assertRaisesRegex(
+                SystemExit, "^error: git .*not a git repository"
+            ):
                 cli(*args)
 
     def test_files_it_cannot_read_are_errors_not_crashes(self):

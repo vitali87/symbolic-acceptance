@@ -136,9 +136,11 @@ class CommandAgent:
     """Run ``argv`` in ``cwd`` once per attempt.
 
     ``base`` is the commit attempts are compared with; it defaults to the
-    checkout's HEAD when the first attempt starts, so pass the recorded base
-    when resuming a run. Each later attempt starts from the previous one,
-    which the checkout must have checked out. With ``push``, each attempt is
+    checkout's HEAD now, before the agent has run, so pass it to
+    :func:`symbolic_acceptance.loop.run` to keep it with the run, and pass
+    the recorded one back when resuming. Each later attempt starts from the
+    previous one, which the checkout must have checked out. With ``push``,
+    each attempt is
     pushed to that branch of ``origin``, so CI runs on it; the agent may
     rewrite its earlier attempts, and the branch follows as long as nobody
     else has pushed to it. An attempt that changes ``.github/`` is not
@@ -166,17 +168,15 @@ class CommandAgent:
         self.argv = list(argv)
         self.cwd = Path(cwd)
         self.timeout = timeout
-        self.base = base
         self.push = push
         self.env = env
+        self.base = base or self._head()
 
     def _head(self) -> str:
         return git(self.cwd, "rev-parse", "HEAD").strip()
 
     def _attempt(self, task: Task) -> Attempt:
         before = self._head()
-        if self.base is None:
-            self.base = before
         if task.previous is not None and before != task.previous.ref:
             raise Escalate(
                 f"the checkout is at {before[:12]}, not at attempt "
@@ -236,7 +236,6 @@ class CommandAgent:
             ref=after,
             diff=changed,
             claims=done.stdout.strip()[-4000:],
-            base=self.base,
         )
 
     async def __call__(self, task: Task) -> Attempt:

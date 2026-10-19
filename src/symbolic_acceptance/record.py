@@ -33,12 +33,13 @@ __all__ = ["dumps", "load", "loads", "save"]
 
 FORMAT = "symbolic-acceptance/run"
 VERSION = 1
-# What the last attempt of a run with each status can be; every attempt
-# before it was sent back with changes.
+# What the last attempt of a run with each status can be (a running run's
+# may still be being checked); every attempt before it was sent back with
+# changes.
 _LAST: dict[str, set[str | None]] = {
     APPROVED: {APPROVED},
     WAITING: {WAITING},
-    RUNNING: {CHANGES},
+    RUNNING: {None, CHANGES, WAITING},
     ESCALATED: {None, CHANGES, ESCALATED},
 }
 
@@ -48,7 +49,6 @@ class _Attempt(TypedDict):
     number: int
     diff: str | None
     claims: str
-    base: str
 
 
 class _Evaluation(TypedDict):
@@ -70,6 +70,7 @@ class _Record(TypedDict):
     version: int
     checklist: _Checklist
     issue: str
+    base: str
     status: RunStatus
     reason: str
     evaluations: list[_Evaluation]
@@ -83,7 +84,6 @@ def _evaluation(evaluation: Evaluation) -> _Evaluation:
             "number": attempt.number,
             "diff": attempt.diff,
             "claims": attempt.claims,
-            "base": attempt.base,
         },
         "status": evaluation.status,
         "reason": evaluation.reason,
@@ -102,6 +102,7 @@ def dumps(result: Result, checklist: Checklist) -> str:
         "version": VERSION,
         "checklist": {"digest": checklist.digest, "source": checklist.source},
         "issue": result.issue,
+        "base": result.base,
         "status": result.status,
         "reason": result.reason,
         "evaluations": [_evaluation(e) for e in result.evaluations],
@@ -159,7 +160,14 @@ def _loads(text: str, checklist: Checklist) -> Result:
             f"the run is recorded as {recorded} but its attempts end "
             f"{[evaluation.status for evaluation in evaluations]}"
         )
-    return Result(recorded, data["reason"], tuple(evaluations), digest, data["issue"])
+    return Result(
+        recorded,
+        data["reason"],
+        tuple(evaluations),
+        digest,
+        data["issue"],
+        data["base"],
+    )
 
 
 def save(result: Result, checklist: Checklist, path: str | Path) -> None:
