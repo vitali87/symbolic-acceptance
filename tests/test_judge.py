@@ -7,7 +7,7 @@ from helpers import DIFF, FakeHTTP, json_response, message
 import symbolic_acceptance as sa
 from symbolic_acceptance import http
 from symbolic_acceptance.claude import Claude, ClaudeError
-from symbolic_acceptance.judge import Judge
+from symbolic_acceptance.judge import Judge, Verdict
 
 
 def verdict(answer, quotes=(), missing="", tampering=False, reasoning="looked"):
@@ -91,7 +91,30 @@ class RequestTests(unittest.TestCase):
         self.assertEqual(body["model"], "claude-opus-5-5")
         self.assertEqual(body["fallbacks"], "default")
         self.assertEqual(body["output_config"]["effort"], "high")
-        self.assertEqual(body["output_config"]["format"]["type"], "json_schema")
+        self.assertEqual(
+            body["output_config"]["format"],
+            {
+                "type": "json_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "reasoning": {"type": "string"},
+                        "answer": {"type": "string", "enum": ["YES", "NO"]},
+                        "quotes": {"type": "array", "items": {"type": "string"}},
+                        "missing": {"type": "string"},
+                        "tampering": {"type": "boolean"},
+                    },
+                    "required": [
+                        "reasoning",
+                        "answer",
+                        "quotes",
+                        "missing",
+                        "tampering",
+                    ],
+                    "additionalProperties": False,
+                },
+            },
+        )
         for banned in ("temperature", "top_p", "top_k", "thinking"):
             self.assertNotIn(banned, body)
         self.assertEqual(
@@ -124,7 +147,10 @@ class RequestTests(unittest.TestCase):
         claude = Claude(auth_token="tok", transport=fake)
         ask(Judge(claude))
         self.assertEqual(fake.header("authorization"), "Bearer tok")
-        self.assertIn("oauth-2025-04-20", fake.header("anthropic-beta"))
+        self.assertEqual(
+            fake.header("anthropic-beta"),
+            "server-side-fallback-2026-07-01,oauth-2025-04-20",
+        )
 
 
 class VerdictTests(unittest.TestCase):
@@ -257,7 +283,9 @@ class VerdictTests(unittest.TestCase):
         }
         try:
             with self.assertRaisesRegex(ClaudeError, "no credentials"):
-                Claude(transport=FakeHTTP()).json(system="s", content="c", schema={})
+                Claude(transport=FakeHTTP()).json(
+                    system="s", content="c", shape=Verdict
+                )
         finally:
             os.environ.update(saved)
 
@@ -275,7 +303,7 @@ class HTTPTests(unittest.TestCase):
         response = http.request(
             "GET", "https://example.test/x", transport=fake, sleep=slept.append
         )
-        self.assertEqual(response.json(), {"ok": True})
+        self.assertEqual(json.loads(response.body), {"ok": True})
         self.assertEqual(slept, [3.0, 2.0])
 
     def test_client_errors_are_not_retried(self):

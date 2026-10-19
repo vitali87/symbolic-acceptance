@@ -34,7 +34,27 @@ def run(name, status="completed", conclusion="success", run_id=1):
         "status": status,
         "conclusion": conclusion,
         "html_url": f"https://github.com/octo/repo/runs/{run_id}",
-        "output": {"title": f"{name} {conclusion}"},
+        "output": {"title": f"{name} {conclusion}", "summary": None},
+    }
+
+
+def comment(
+    cid,
+    login,
+    body,
+    *,
+    association="MEMBER",
+    user_type="User",
+    at="2026-10-18T10:00:00Z",
+):
+    return {
+        "id": cid,
+        "user": {"login": login, "type": user_type},
+        "author_association": association,
+        "body": body,
+        "created_at": at,
+        "updated_at": at,
+        "html_url": f"https://github.com/octo/repo/pull/5#issuecomment-{cid}",
     }
 
 
@@ -71,17 +91,10 @@ class ClientTests(unittest.TestCase):
         github, fake = gh(
             json_response(
                 [
-                    {
-                        "id": 1,
-                        "body": f"quoting {REPORT_MARKER}",
-                        "user": {"login": "bot", "type": "Bot"},
-                    },
-                    {
-                        "id": 2,
-                        "body": f"{REPORT_MARKER}\nfake",
-                        "user": {"login": "agent"},
-                        "author_association": "COLLABORATOR",
-                    },
+                    comment(1, "bot", f"quoting {REPORT_MARKER}", user_type="Bot"),
+                    comment(
+                        2, "agent", f"{REPORT_MARKER}\nfake", association="COLLABORATOR"
+                    ),
                 ]
             ),
             json_response({"id": 3}),
@@ -92,13 +105,7 @@ class ClientTests(unittest.TestCase):
     def test_report_is_updated_in_place(self):
         github, fake = gh(
             json_response(
-                [
-                    {
-                        "id": 7,
-                        "body": f"{REPORT_MARKER}\nold",
-                        "user": {"login": "bot", "type": "Bot"},
-                    }
-                ]
+                [comment(7, "bot", f"{REPORT_MARKER}\nold", user_type="Bot")]
             ),
             json_response({"id": 7}),
         )
@@ -152,25 +159,6 @@ class ChecksTests(unittest.TestCase):
             asyncio.run(GitHubChecks(github)([sa.Question("x", "X?", "ci")], context()))
 
 
-def comment(
-    cid,
-    login,
-    body,
-    *,
-    association="MEMBER",
-    user_type="User",
-    at="2026-10-18T10:00:00Z",
-):
-    return {
-        "id": cid,
-        "user": {"login": login, "type": user_type},
-        "author_association": association,
-        "body": body,
-        "created_at": at,
-        "html_url": f"https://github.com/octo/repo/pull/5#issuecomment-{cid}",
-    }
-
-
 SSO = sa.Question("sso_exempt", "Is the SSO change fine?", "human")
 DOCS = sa.Question("docs_ok", "Are the docs right?", "human")
 ASK = "<!-- symbolic-acceptance:ask ref=abc123 ids=sso_exempt,docs_ok -->\nquestions"
@@ -214,6 +202,11 @@ class ReviewsTests(unittest.TestCase):
                 "bob",
                 "/YES sso_exempt: security signed off",
                 at="2026-10-18T12:00:00Z",
+            ),
+            # A deleted account's comment has no user.
+            dict(
+                comment(8, "gone", "/no sso_exempt", at="2026-10-18T13:00:00Z"),
+                user=None,
             ),
         ]
         github, _ = gh(json_response(comments))

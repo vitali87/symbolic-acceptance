@@ -12,13 +12,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import time
 import urllib.parse
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TypedDict
 
 from symbolic_acceptance import http
 from symbolic_acceptance.answer import Answer
@@ -28,9 +29,13 @@ from symbolic_acceptance.loop import Attempt, Context, OracleError, Pending
 __all__ = [
     "API_VERSION",
     "REPORT_MARKER",
+    "CheckRun",
+    "Comment",
     "GitHub",
     "GitHubChecks",
+    "Output",
     "Reviews",
+    "User",
     "compare_diff",
     "diff_source",
     "post_report",
@@ -38,17 +43,57 @@ __all__ = [
 
 API_VERSION = "2026-03-10"
 _NEXT = re.compile(r'<([^>]+)>;\s*rel="next"')
-_REPLY = re.compile(r"^/(yes|no)\s+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$", re.I | re.M | re.A)
+_REPLY = re.compile(
+    r"^/(yes|no)\s+([A-Za-z_]\w*)\b[ \t:—-]*(.*)$",
+    re.IGNORECASE | re.MULTILINE | re.ASCII,
+)
 # Markers count only at the very start of a comment, so text quoted inside a
 # comment (CI output in a report, say) can never pose as one.
 _ASKED = re.compile(
-    r"<!-- symbolic-acceptance:ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.A
+    r"<!-- symbolic-acceptance:ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
 )
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 _FAILED = frozenset(
     {"failure", "cancelled", "timed_out", "action_required", "startup_failure", "stale"}
 )
 REPORT_MARKER = "<!-- symbolic-acceptance:report -->"
+
+
+class User(TypedDict):
+    login: str
+    type: str
+
+
+class Comment(TypedDict):
+    """The fields of an issue comment that are read here."""
+
+    id: int
+    body: str
+    user: User | None
+    author_association: str
+    created_at: str
+    updated_at: str
+    html_url: str
+
+
+class Output(TypedDict):
+    title: str | None
+    summary: str | None
+
+
+class CheckRun(TypedDict):
+    """The fields of a check run that are read here."""
+
+    id: int
+    name: str
+    status: str
+    conclusion: str | None
+    output: Output
+    html_url: str | None
+
+
+class _CheckRuns(TypedDict):
+    check_runs: list[CheckRun]
 
 
 @dataclass(frozen=True)
@@ -73,34 +118,29 @@ class GitHub:
             headers["authorization"] = f"Bearer {token}"
         return headers
 
-    def _url(self, path: str, params: dict[str, Any] | None = None) -> str:
-        url = f"{self.api.rstrip('/')}/repos/{self.repo}{path}"
-        if params:
-            url += "?" + urllib.parse.urlencode(params)
-        return url
+    def _url(self, path: str) -> str:
+        return f"{self.api.rstrip('/')}/repos/{self.repo}{path}"
 
     def call(
         self,
         method: str,
         path: str,
         *,
-        params: dict[str, Any] | None = None,
-        body: Any = None,
+        body: http.JSON = None,
         accept: str = "application/vnd.github+json",
     ) -> http.Response:
         return http.request(
             method,
-            self._url(path, params),
+            self._url(path),
             headers=self._headers(accept),
             json_body=body,
             timeout=60,
             transport=self.transport,
         )
 
-    def pages(self, path: str, *, key: str | None = None, **params: Any) -> list[Any]:
-        """Every item of a paginated list, following ``Link: rel="next"``."""
-        items: list[Any] = []
-        url: str | None = self._url(path, {"per_page": 100, **params})
+    def _pages(self, path: str) -> Iterator[bytes]:
+        """The body of every page of a list, following ``Link: rel="next"``."""
+        url: str | None = self._url(f"{path}?per_page=100")
         while url:
             response = http.request(
                 "GET",
@@ -109,30 +149,25 @@ class GitHub:
                 timeout=60,
                 transport=self.transport,
             )
-            data = response.json()
-            items.extend(data[key] if key else data)
-            link = response.header("link") or ""
-            match = _NEXT.search(link)
+            yield response.body
+            match = _NEXT.search(response.header("link") or "")
             url = match.group(1) if match else None
-        return items
 
-    def check_runs(self, ref: str) -> list[dict[str, Any]]:
-        return self.pages(
-            f"/commits/{urllib.parse.quote(ref)}/check-runs", key="check_runs"
-        )
+    def check_runs(self, ref: str) -> list[CheckRun]:
+        path = f"/commits/{urllib.parse.quote(ref)}/check-runs"
+        pages: list[_CheckRuns] = [json.loads(page) for page in self._pages(path)]
+        return [run for page in pages for run in page["check_runs"]]
 
-    def comments(self, number: int) -> list[dict[str, Any]]:
-        return self.pages(f"/issues/{number}/comments")
+    def comments(self, number: int) -> list[Comment]:
+        path = f"/issues/{number}/comments"
+        pages: list[list[Comment]] = [json.loads(page) for page in self._pages(path)]
+        return [comment for page in pages for comment in page]
 
-    def comment(self, number: int, body: str) -> dict[str, Any]:
-        return self.call(
-            "POST", f"/issues/{number}/comments", body={"body": body}
-        ).json()
+    def comment(self, number: int, body: str) -> None:
+        self.call("POST", f"/issues/{number}/comments", body={"body": body})
 
-    def edit_comment(self, comment_id: int, body: str) -> dict[str, Any]:
-        return self.call(
-            "PATCH", f"/issues/comments/{comment_id}", body={"body": body}
-        ).json()
+    def edit_comment(self, comment_id: int, body: str) -> None:
+        self.call("PATCH", f"/issues/comments/{comment_id}", body={"body": body})
 
 
 def compare_diff(github: GitHub, base: str, head: str) -> str:
@@ -141,26 +176,27 @@ def compare_diff(github: GitHub, base: str, head: str) -> str:
     return github.call("GET", path, accept="application/vnd.github.diff").text()
 
 
-def _author(comment: dict[str, Any]) -> tuple[str, bool, str]:
-    """The comment's login (lowercased), whether a bot wrote it, its association."""
-    user = comment.get("user") or {}
-    login = str(user.get("login", "")).lower()
-    bot = user.get("type") == "Bot" or login.endswith("[bot]")
-    return login, bot, str(comment.get("author_association", ""))
+def _author(comment: Comment) -> tuple[str, bool, str]:
+    """The comment's login (lowercased), whether a bot wrote it, its association.
+
+    A deleted account has no user, so its login is empty.
+    """
+    user = comment["user"]
+    login = user["login"].lower() if user else ""
+    bot = user is not None and (user["type"] == "Bot" or login.endswith("[bot]"))
+    return login, bot, comment["author_association"]
 
 
-def _edited(comment: dict[str, Any]) -> bool:
+def _edited(comment: Comment) -> bool:
     """Whether the comment changed after it was posted.
 
     Anyone with write access can edit another account's comment, and the
     comment keeps its author, so an edited comment cannot vouch for anyone.
     """
-    return comment.get("updated_at", comment.get("created_at")) != comment.get(
-        "created_at"
-    )
+    return comment["updated_at"] != comment["created_at"]
 
 
-def _by_runner(comment: dict[str, Any], exclude: Collection[str]) -> bool:
+def _by_runner(comment: Comment, exclude: Collection[str]) -> bool:
     """Whether the runner could have written it: a bot, or a trusted account."""
     login, bot, association = _author(comment)
     return login not in exclude and (bot or association in _TRUSTED)
@@ -168,7 +204,7 @@ def _by_runner(comment: dict[str, Any], exclude: Collection[str]) -> bool:
 
 def post_report(
     github: GitHub, number: int, markdown: str, *, exclude: Collection[str] = ()
-) -> dict[str, Any]:
+) -> None:
     """Create or update the single report comment on an issue or pull request.
 
     ``exclude`` lists accounts (the agent's) whose comments are never taken
@@ -177,10 +213,12 @@ def post_report(
     body = f"{REPORT_MARKER}\n{markdown}"
     excluded = {login.lower() for login in exclude}
     for existing in github.comments(number):
-        text = existing.get("body") or ""
-        if text.startswith(REPORT_MARKER) and _by_runner(existing, excluded):
-            return github.edit_comment(existing["id"], body)
-    return github.comment(number, body)
+        if existing["body"].startswith(REPORT_MARKER) and _by_runner(
+            existing, excluded
+        ):
+            github.edit_comment(existing["id"], body)
+            return
+    github.comment(number, body)
 
 
 class GitHubChecks:
@@ -210,18 +248,17 @@ class GitHubChecks:
             name = question.options.get("check")
             if not isinstance(name, str):
                 raise OracleError(f'q.{question.id} needs check = "<check run name>"')
-            matching = [run for run in runs if run.get("name") == name]
+            matching = [run for run in runs if run["name"] == name]
             if not matching:
                 waiting.append(f"{question.id} (no check run named {name!r} yet)")
                 continue
-            latest = max(matching, key=lambda run: run.get("id", 0))
-            if latest.get("status") != "completed":
-                waiting.append(f"{question.id} ({name!r} is {latest.get('status')})")
+            latest = max(matching, key=lambda run: run["id"])
+            if latest["status"] != "completed":
+                waiting.append(f"{question.id} ({name!r} is {latest['status']})")
                 continue
-            conclusion = latest.get("conclusion")
-            output = latest.get("output") or {}
-            summary = output.get("title") or output.get("summary") or ""
-            evidence = tuple(item for item in (latest.get("html_url"), summary) if item)
+            conclusion = latest["conclusion"]
+            summary = latest["output"]["title"] or latest["output"]["summary"]
+            evidence = tuple(item for item in (latest["html_url"], summary) if item)
             if conclusion == "success":
                 answers[question.id] = Answer(
                     True, f"{name} passed", evidence, by=f"ci:{name}"
@@ -274,7 +311,7 @@ class Reviews:
         self.reviewers = {r.lower() for r in reviewers} if reviewers else None
         self.exclude = {e.lower() for e in exclude}
 
-    def _allowed(self, comment: dict[str, Any]) -> bool:
+    def _allowed(self, comment: Comment) -> bool:
         login, bot, association = _author(comment)
         if not login or bot or login in self.exclude:
             return False
@@ -299,12 +336,11 @@ class Reviews:
 
     def _read(self, questions: Sequence[Question], ref: str) -> dict[str, Answer]:
         comments = sorted(
-            self.github.comments(self.number),
-            key=lambda c: (c.get("created_at", ""), c.get("id", 0)),
+            self.github.comments(self.number), key=lambda c: (c["created_at"], c["id"])
         )
         asked_at: dict[str, str] = {}
         for comment in comments:
-            match = _ASKED.match(comment.get("body") or "")
+            match = _ASKED.match(comment["body"])
             if (
                 match
                 and match["ref"] == ref
@@ -320,13 +356,13 @@ class Reviews:
         for comment in comments:
             if _edited(comment) or not self._allowed(comment):
                 continue
-            for verdict, qid, why in _REPLY.findall(comment.get("body") or ""):
+            for verdict, qid, why in _REPLY.findall(comment["body"]):
                 if qid in asked_at and comment["created_at"] >= asked_at[qid]:
                     answers[qid] = Answer(
                         verdict.lower() == "yes",
                         why.strip(),
-                        tuple(x for x in (comment.get("html_url"),) if x),
-                        by=f"human:@{comment['user']['login']}",
+                        (comment["html_url"],),
+                        by=f"human:@{_author(comment)[0]}",
                     )
         return {q.id: answers[q.id] for q in questions if q.id in answers}
 

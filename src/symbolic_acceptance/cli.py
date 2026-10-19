@@ -96,7 +96,7 @@ def _cmd_template(args: argparse.Namespace) -> int:
 
 
 def _answers(path: str) -> dict[str, Answer]:
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data: object = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise SystemExit(
             "error: answers must be a JSON object of question id to answer"
@@ -104,11 +104,13 @@ def _answers(path: str) -> dict[str, Answer]:
     answers = {}
     for qid, value in data.items():
         if isinstance(value, bool):
-            answers[qid] = Answer(value)
-        elif isinstance(value, dict):
-            answers[qid] = Answer.from_dict(value)
-        else:
+            value = {"is_met": value}
+        if not isinstance(value, dict):
             raise SystemExit(f"error: {qid}: expected true, false or an answer object")
+        try:
+            answers[qid] = Answer(**value)
+        except TypeError as error:
+            raise SystemExit(f"error: {qid}: {error}") from None
     return answers
 
 
@@ -221,7 +223,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
             f"error: {', '.join(remote)} are answered by GitHub check runs; pass "
             "--github and --push so that every attempt reaches CI"
         )
-    oracles = {"ci": ci, "llm": Judge(claude, samples=args.samples), "human": human}
+    oracles: dict[str, Oracle] = {
+        "ci": ci,
+        "llm": Judge(claude, samples=args.samples),
+        "human": human,
+    }
     resume: Result | None = None
     if args.resume:
         resume = record.load(args.resume, checklist)

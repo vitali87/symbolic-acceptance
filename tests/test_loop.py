@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from helpers import PASSING, Scripted, example
+from helpers import EXAMPLE, PASSING, Scripted, example
 
 import symbolic_acceptance as sa
 
@@ -102,9 +102,11 @@ class EvaluateTests(unittest.TestCase):
             (overreach, "not asked"),
             (wrong_type, "expected Answer"),
         ]:
-            with self.subTest(bad=bad.__name__):
-                with self.assertRaisesRegex(sa.OracleError, pattern):
-                    evaluate(self.checklist, dict(script.oracles(), ci=bad))
+            with (
+                self.subTest(bad=bad.__name__),
+                self.assertRaisesRegex(sa.OracleError, pattern),
+            ):
+                evaluate(self.checklist, dict(script.oracles(), ci=bad))
 
     def test_sync_oracles_run_in_a_thread(self):
         def ci(questions, context):
@@ -281,7 +283,7 @@ class RunTests(unittest.TestCase):
         result, agent = run(
             self.checklist, [dict(PASSING, new_test=False), PASSING], max_attempts=1
         )
-        changed = sa.loads(self.checklist.source.replace("Throttle", "Limit"))
+        changed = sa.loads(EXAMPLE.read_text().replace("Throttle", "Limit"))
         with self.assertRaisesRegex(ValueError, "checklist changed"):
             asyncio.run(
                 sa.run(

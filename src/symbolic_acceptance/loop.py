@@ -18,7 +18,7 @@ import inspect
 from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal, ParamSpec
 
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Checklist, Question, render
@@ -72,25 +72,6 @@ class Attempt:
     diff: str = ""
     claims: str = ""
     base: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "ref": self.ref,
-            "number": self.number,
-            "diff": self.diff,
-            "claims": self.claims,
-            "base": self.base,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Attempt:
-        return cls(
-            ref=data["ref"],
-            number=data.get("number", 0),
-            diff=data.get("diff", ""),
-            claims=data.get("claims", ""),
-            base=data.get("base", ""),
-        )
 
 
 @dataclass(frozen=True)
@@ -242,8 +223,10 @@ class Task:
             ]
         lines += [
             "",
-            f"Make attempt {self.number}: change the code and commit. "
-            "The commit is the attempt.",
+            (
+                f"Make attempt {self.number}: change the code and commit. "
+                "The commit is the attempt."
+            ),
         ]
         return "\n".join(lines) + "\n"
 
@@ -279,12 +262,18 @@ DiffSource = Callable[[Attempt], str | Awaitable[str]]
 Listener = Callable[[Result], object]
 
 
-async def _call(function: Callable[..., Any], *args: object) -> object:
+P = ParamSpec("P")
+
+
+async def _call(
+    function: Callable[P, object], *args: P.args, **kwargs: P.kwargs
+) -> object:
     """Await an async callable; run a sync one in a thread."""
     method = type(function).__call__ if not inspect.isroutine(function) else None
     if inspect.iscoroutinefunction(function) or inspect.iscoroutinefunction(method):
-        return await function(*args)
-    result = await asyncio.to_thread(function, *args)
+        result = function(*args, **kwargs)
+    else:
+        result = await asyncio.to_thread(function, *args, **kwargs)
     if inspect.isawaitable(result):
         result = await result
     return result

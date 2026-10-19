@@ -23,9 +23,29 @@ import time
 import tomllib
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 Settings = dict[str, str | list[str]] | None
+# The [project] table of this repository's pyproject.toml.
+Project = TypedDict(
+    "Project",
+    {
+        "name": str,
+        "version": str,
+        "description": str,
+        "readme": str,
+        "requires-python": str,
+        "license": str,
+        "license-files": list[str],
+        "authors": list[dict[str, str]],
+        "keywords": list[str],
+        "classifiers": list[str],
+        "dependencies": list[str],
+        "import-names": list[str],
+        "scripts": dict[str, str],
+        "urls": dict[str, str],
+    },
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "symbolic_acceptance"
@@ -36,9 +56,10 @@ DEFAULT_EPOCH = 1577836800  # 2020-01-01T00:00:00Z
 
 
 @functools.cache
-def _project() -> dict[str, Any]:
+def _project() -> Project:
     with (ROOT / "pyproject.toml").open("rb") as stream:
-        return tomllib.load(stream)["project"]
+        project: Project = tomllib.load(stream)["project"]
+    return project
 
 
 def _normalized(name: str) -> str:
@@ -57,25 +78,18 @@ def _metadata() -> str:
         f"Name: {project['name']}",
         f"Version: {project['version']}",
         f"Summary: {project['description']}",
+        f"Author: {', '.join(author['name'] for author in project['authors'])}",
+        f"License-Expression: {project['license']}",
+        *(f"License-File: {name}" for name in project["license-files"]),
+        f"Requires-Python: {project['requires-python']}",
+        f"Keywords: {','.join(project['keywords'])}",
+        *(f"Classifier: {c}" for c in project["classifiers"]),
+        *(f"Project-URL: {k}, {v}" for k, v in project["urls"].items()),
+        *(f"Import-Name: {name}" for name in project["import-names"]),
+        *(f"Requires-Dist: {requirement}" for requirement in project["dependencies"]),
+        "Description-Content-Type: text/markdown",
     ]
-    authors = [a["name"] for a in project.get("authors", []) if "name" in a]
-    if authors:
-        lines.append(f"Author: {', '.join(authors)}")
-    lines.append(f"License-Expression: {project['license']}")
-    lines += [f"License-File: {name}" for name in project.get("license-files", [])]
-    lines.append(f"Requires-Python: {project['requires-python']}")
-    if project.get("keywords"):
-        lines.append(f"Keywords: {','.join(project['keywords'])}")
-    lines += [f"Classifier: {c}" for c in project.get("classifiers", [])]
-    lines += [f"Project-URL: {k}, {v}" for k, v in project.get("urls", {}).items()]
-    lines += [f"Import-Name: {name}" for name in project.get("import-names", [])]
-    for requirement in project.get("dependencies", []):
-        lines.append(f"Requires-Dist: {requirement}")
-    readme = project.get("readme")
-    body = ""
-    if readme:
-        lines.append("Description-Content-Type: text/markdown")
-        body = (ROOT / readme).read_text(encoding="utf-8")
+    body = (ROOT / project["readme"]).read_text(encoding="utf-8")
     return "\n".join(lines) + "\n\n" + body
 
 
@@ -90,11 +104,8 @@ def _wheel_name() -> str:
 
 
 def _entry_points() -> str:
-    scripts = _project().get("scripts", {})
-    if not scripts:
-        return ""
-    lines = ["[console_scripts]"] + [f"{k} = {v}" for k, v in sorted(scripts.items())]
-    return "\n".join(lines) + "\n"
+    scripts = sorted(_project()["scripts"].items())
+    return "\n".join(["[console_scripts]", *(f"{k} = {v}" for k, v in scripts)]) + "\n"
 
 
 def _package_files() -> list[tuple[str, bytes]]:
@@ -122,9 +133,8 @@ def _write_wheel(directory: str, files: list[tuple[str, bytes]]) -> str:
     entries = list(files)
     entries.append((f"{dist_info}/METADATA", _metadata().encode("utf-8")))
     entries.append((f"{dist_info}/WHEEL", wheel.encode("utf-8")))
-    if entry_points := _entry_points():
-        entries.append((f"{dist_info}/entry_points.txt", entry_points.encode("utf-8")))
-    for name in _project().get("license-files", []):
+    entries.append((f"{dist_info}/entry_points.txt", _entry_points().encode("utf-8")))
+    for name in _project()["license-files"]:
         entries.append((f"{dist_info}/licenses/{name}", (ROOT / name).read_bytes()))
     record_name = f"{dist_info}/RECORD"
     rows = io.StringIO()
@@ -166,8 +176,7 @@ def prepare_metadata_for_build_wheel(
     target = Path(metadata_directory) / _dist_info()
     target.mkdir(parents=True, exist_ok=True)
     (target / "METADATA").write_text(_metadata(), encoding="utf-8")
-    if entry_points := _entry_points():
-        (target / "entry_points.txt").write_text(entry_points, encoding="utf-8")
+    (target / "entry_points.txt").write_text(_entry_points(), encoding="utf-8")
     return target.name
 
 

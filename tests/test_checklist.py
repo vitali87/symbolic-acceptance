@@ -1,8 +1,9 @@
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
-from helpers import example
+from helpers import EXAMPLE, example
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.checklist import AllOf, AnyOf, Not, Ref, render
@@ -40,11 +41,16 @@ class LoadTests(unittest.TestCase):
         )
         self.assertEqual(checklist.requirement("sso").when, Ref("touches_sso"))
 
-    def test_options_are_kept_and_read_only(self):
+    def test_options_are_kept_and_frozen(self):
         question = example().questions["suite_green"]
         self.assertEqual(question.options["check"], "tests")
-        with self.assertRaises(TypeError):
-            question.options["check"] = "other"  # type: ignore[index]
+        paths = ["a/*"]
+        options: dict[str, object] = {"paths": paths}
+        frozen = sa.Question("f", "F?", "ci", options=options)
+        paths.append("b/*")
+        options["check"] = "frozen"
+        self.assertEqual(frozen.strings("paths"), ("a/*",))
+        self.assertNotIn("check", frozen.options)
 
     def test_requirement_id_defaults_to_its_question(self):
         self.assertEqual(sa.loads(MINIMAL).requirements[0].id, "a")
@@ -137,13 +143,11 @@ class DigestTests(unittest.TestCase):
         dated = MINIMAL.replace('by = "ci"', 'by = "ci"\nsince = 2026-10-01')
         self.assertNotEqual(sa.loads(dated).digest, sa.loads(MINIMAL).digest)
 
-    def test_to_dict_matches_the_source_shape(self):
-        data = example().to_dict()
-        self.assertEqual(
-            data["q"]["suite_green"],
-            {"ask": "Does the existing test suite pass?", "by": "ci", "check": "tests"},
-        )
-        self.assertEqual(data["require"][-1]["when"], "touches_sso")
+    def test_to_dict_matches_the_source(self):
+        source = tomllib.loads(EXAMPLE.read_text())
+        for requirement in source["require"]:
+            requirement.setdefault("id", requirement["that"])
+        self.assertEqual(example().to_dict(), source)
 
 
 if __name__ == "__main__":

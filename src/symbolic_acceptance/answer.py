@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import NotRequired, TypedDict
 
-__all__ = ["Answer", "yes_no"]
+__all__ = ["Answer", "AnswerData", "yes_no"]
 
 
 def yes_no(flag: bool) -> str:
     return "YES" if flag else "NO"
+
+
+class AnswerData(TypedDict):
+    """An answer as JSON, as in run records; ``Answer(**data)`` reads one."""
+
+    is_met: bool
+    reasoning: NotRequired[str]
+    evidence: NotRequired[list[str]]
+    by: NotRequired[str]
 
 
 @dataclass(frozen=True)
@@ -23,7 +33,7 @@ class Answer:
 
     is_met: bool
     reasoning: str = ""
-    evidence: tuple[str, ...] = ()
+    evidence: Sequence[str] = ()
     by: str = ""
 
     def __post_init__(self) -> None:
@@ -44,8 +54,8 @@ class Answer:
     def word(self) -> str:
         return yes_no(self.is_met)
 
-    def to_dict(self) -> dict[str, object]:
-        data: dict[str, object] = {"is_met": self.is_met}
+    def to_dict(self) -> AnswerData:
+        data = AnswerData(is_met=self.is_met)
         if self.reasoning:
             data["reasoning"] = self.reasoning
         if self.evidence:
@@ -53,12 +63,3 @@ class Answer:
         if self.by:
             data["by"] = self.by
         return data
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Answer:
-        return cls(
-            is_met=data["is_met"],
-            reasoning=data.get("reasoning", ""),
-            evidence=tuple(data.get("evidence", ())),
-            by=data.get("by", ""),
-        )

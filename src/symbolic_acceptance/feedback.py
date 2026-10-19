@@ -148,8 +148,10 @@ def _lines(reason: Reason, wanted: bool, indent: str) -> list[str]:
     if isinstance(reason, Fact):
         question, answer = reason.question, reason.answer
         lines = [
-            f"{indent}- {question.id}: needs {yes_no(wanted)}, got {answer.word} "
-            f"[{answer.by or question.by}]",
+            (
+                f"{indent}- {question.id}: needs {yes_no(wanted)}, got {answer.word} "
+                f"[{answer.by or question.by}]"
+            ),
             f"{indent}  Q: {question.ask}",
         ]
         if answer.reasoning:

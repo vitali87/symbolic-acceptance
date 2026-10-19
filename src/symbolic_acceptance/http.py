@@ -14,9 +14,11 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import TypeAlias
 
-__all__ = ["HTTPError", "Response", "Transport", "request"]
+__all__ = ["JSON", "HTTPError", "Response", "Transport", "request"]
+
+JSON: TypeAlias = "dict[str, JSON] | list[JSON] | str | int | float | bool | None"
 
 IDEMPOTENT = frozenset({"GET", "HEAD", "OPTIONS", "PUT", "DELETE"})
 RETRY_STATUSES = frozenset({408, 409, 429, 500, 502, 503, 504, 529})
@@ -38,9 +40,6 @@ class Response:
             if key.lower() == wanted:
                 return value
         return None
-
-    def json(self) -> Any:
-        return json.loads(self.body.decode("utf-8"))
 
     def text(self) -> str:
         return self.body.decode("utf-8", errors="replace")
@@ -101,7 +100,7 @@ def request(
     url: str,
     *,
     headers: Mapping[str, str] | None = None,
-    json_body: Any = None,
+    json_body: JSON = None,
     timeout: float = 600.0,
     retries: int = 2,
     transport: Transport | None = None,

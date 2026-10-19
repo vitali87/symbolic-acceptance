@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import PASSING, Scripted, example
+from helpers import EXAMPLE, PASSING, Scripted, example
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
@@ -49,7 +49,7 @@ class RecordTests(unittest.TestCase):
 
     def test_rejects_another_checklist(self):
         text = record.dumps(self.result, self.checklist)
-        other = sa.loads(self.checklist.source.replace("Throttle", "Limit"))
+        other = sa.loads(EXAMPLE.read_text().replace("Throttle", "Limit"))
         with self.assertRaisesRegex(ValueError, "different checklist"):
             record.loads(text, other)
 

@@ -60,6 +60,7 @@ class ParseTests(unittest.TestCase):
     def test_locate(self):
         _, lines = parse(DIFF)
         found = locate("if failures(user) > MAX_FAILURES:\n    lock(user)", lines)
+        assert found is not None
         self.assertEqual([d.where for d in found], ["src/auth.py:12", "src/auth.py:13"])
         self.assertIsNotNone(locate("+        record_failure(user)", lines))
         self.assertIsNone(locate("rate_limit(user)", lines))

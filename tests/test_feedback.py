@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from helpers import PASSING, example
@@ -53,6 +54,7 @@ class ExplainTests(unittest.TestCase):
         reason = sa.explain(
             checklist.requirement("r").that, checklist, answers({"a": True, "b": False})
         )
+        assert isinstance(reason, sa.Group)
         self.assertEqual(reason.fix, "each")
         self.assertEqual([fact.question.id for fact in reason.facts()], ["b"])
 
@@ -62,6 +64,7 @@ class ExplainTests(unittest.TestCase):
         reason = sa.explain(
             checklist.requirement("protected").that, checklist, answers(truth)
         )
+        assert isinstance(reason, sa.Group)
         self.assertEqual(reason.fix, "one")
         self.assertEqual(
             [fact.question.id for fact in reason.facts()], ["can_unlock", "backs_off"]
@@ -82,11 +85,13 @@ class ExplainTests(unittest.TestCase):
 
 class AnswerTests(unittest.TestCase):
     def test_types_are_checked(self):
-        with self.assertRaises(TypeError):
-            sa.Answer("yes")  # type: ignore[arg-type]
+        # Answers come from JSON, models and people, which no type checker sees.
+        data = json.loads('{"is_met": "yes", "evidence": "a quote"}')
+        with self.assertRaisesRegex(TypeError, "is_met must be a bool"):
+            sa.Answer(data["is_met"])
         with self.assertRaisesRegex(TypeError, "not one string"):
-            sa.Answer(True, evidence="a quote")  # type: ignore[arg-type]
-        self.assertEqual(sa.Answer(True, evidence=["a", "b"]).evidence, ("a", "b"))  # type: ignore[arg-type]
+            sa.Answer(True, evidence=data["evidence"])
+        self.assertEqual(sa.Answer(True, evidence=["a", "b"]).evidence, ("a", "b"))
 
 
 class AssessTests(unittest.TestCase):

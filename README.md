@@ -168,23 +168,25 @@ from symbolic_acceptance.judge import Judge
 checklist = sa.load("acceptance/issue-342.toml")
 github = GitHub("owner/repo")
 
-result = asyncio.run(sa.run(
-    checklist,
-    agent=CommandAgent(
-        ["claude", "-p", "--permission-mode", "auto"],
-        cwd="work",               # the agent's checkout
-        push="agent/issue-342",   # so CI runs on every attempt
-    ),
-    oracles={
-        "ci": Checks(repo="work", fallback=GitHubChecks(github, wait=1800)),
-        "llm": Judge(),
-        "human": Reviews(github, number=57, exclude=["agent-account"]),
-    },
-    issue=open("issue-342.md").read(),
-    max_attempts=5,
-    on_progress=lambda run: sa.record.save(run, checklist, "run.json"),
-))
-result.status   # "approved" | "escalated" | "waiting"
+result = asyncio.run(
+    sa.run(
+        checklist,
+        agent=CommandAgent(
+            ["claude", "-p", "--permission-mode", "auto"],
+            cwd="work",  # the agent's checkout
+            push="agent/issue-342",  # so CI runs on every attempt
+        ),
+        oracles={
+            "ci": Checks(repo="work", fallback=GitHubChecks(github, wait=1800)),
+            "llm": Judge(),
+            "human": Reviews(github, number=57, exclude=["agent-account"]),
+        },
+        issue=open("issue-342.md").read(),
+        max_attempts=5,
+        on_progress=lambda run: sa.record.save(run, checklist, "run.json"),
+    )
+)
+result.status  # "approved" | "escalated" | "waiting"
 result.reason
 ```
 

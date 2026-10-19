@@ -12,11 +12,20 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import (
+    Generic,
+    Literal,
+    NotRequired,
+    TypedDict,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 from symbolic_acceptance import http
+from symbolic_acceptance.http import JSON
 
 __all__ = ["DEFAULT_MODEL", "Claude", "ClaudeError", "Refusal", "Reply"]
 
@@ -38,11 +47,51 @@ class Refusal(ClaudeError):
         self.category = category
 
 
+T = TypeVar("T")
+
+
 @dataclass(frozen=True)
-class Reply:
-    data: Any
+class Reply(Generic[T]):
+    data: T
     model: str
-    usage: Mapping[str, Any]
+
+
+class _Block(TypedDict):
+    type: str
+    text: NotRequired[str]
+
+
+class _StopDetails(TypedDict):
+    category: str | None
+
+
+class _Message(TypedDict):
+    model: str
+    content: list[_Block]
+    stop_reason: str | None
+    stop_details: NotRequired[_StopDetails | None]
+
+
+def _schema(shape: object) -> dict[str, JSON]:
+    """The JSON schema for ``shape``, a ``TypedDict`` whose keys are required.
+
+    Values may be strings, booleans, string ``Literal``s and lists of them.
+    """
+    if shape is str:
+        return {"type": "string"}
+    if shape is bool:
+        return {"type": "boolean"}
+    if get_origin(shape) is Literal:
+        return {"type": "string", "enum": [str(value) for value in get_args(shape)]}
+    if get_origin(shape) is list:
+        return {"type": "array", "items": _schema(get_args(shape)[0])}
+    fields = get_type_hints(shape)
+    return {
+        "type": "object",
+        "properties": {name: _schema(kind) for name, kind in fields.items()},
+        "required": list(fields),
+        "additionalProperties": False,
+    }
 
 
 @dataclass(frozen=True)
@@ -82,21 +131,17 @@ class Claude:
         return headers
 
     def json(
-        self,
-        *,
-        system: str | Sequence[Mapping[str, Any]],
-        content: str | Sequence[Mapping[str, Any]],
-        schema: Mapping[str, Any],
-    ) -> Reply:
-        """Ask once and return the JSON reply that matches ``schema``."""
-        body: dict[str, Any] = {
+        self, *, system: str, content: str | list[JSON], shape: type[T]
+    ) -> Reply[T]:
+        """Ask once and return the reply, which has the keys and types of ``shape``."""
+        body: dict[str, JSON] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
             "system": system,
             "messages": [{"role": "user", "content": content}],
             "output_config": {
                 "effort": self.effort,
-                "format": {"type": "json_schema", "schema": schema},
+                "format": {"type": "json_schema", "schema": _schema(shape)},
             },
         }
         if self.fallbacks:
@@ -117,22 +162,18 @@ class Claude:
             # errors are retried, as the official SDKs do.
             repeatable=True,
         )
-        message = response.json()
-        stop = message.get("stop_reason")
-        if stop == "refusal":
-            details = message.get("stop_details") or {}
-            raise Refusal(details.get("category"))
-        if stop == "max_tokens":
+        message: _Message = json.loads(response.body)
+        if message["stop_reason"] == "refusal":
+            details = message.get("stop_details")
+            raise Refusal(details["category"] if details else None)
+        if message["stop_reason"] == "max_tokens":
             raise ClaudeError(
                 f"the reply hit max_tokens ({self.max_tokens}) and is incomplete"
             )
-        text = "".join(
-            block.get("text", "")
-            for block in message.get("content", ())
-            if block.get("type") == "text"
+        # Structured outputs guarantee a reply in the shape the schema gives.
+        data: T = json.loads(
+            "".join(
+                b.get("text", "") for b in message["content"] if b["type"] == "text"
+            )
         )
-        try:
-            data = json.loads(text)
-        except ValueError:
-            raise ClaudeError("the reply was not valid JSON") from None
-        return Reply(data, message.get("model", self.model), message.get("usage", {}))
+        return Reply(data, message["model"])

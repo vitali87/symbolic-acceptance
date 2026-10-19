@@ -12,11 +12,19 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
-from symbolic_acceptance.answer import Answer
+from symbolic_acceptance.answer import Answer, AnswerData
 from symbolic_acceptance.checklist import Checklist
-from symbolic_acceptance.loop import APPROVED, WAITING, Attempt, Evaluation, Result
+from symbolic_acceptance.loop import (
+    APPROVED,
+    WAITING,
+    Attempt,
+    Evaluation,
+    EvaluationStatus,
+    Result,
+    RunStatus,
+)
 
 __all__ = ["dumps", "load", "loads", "save"]
 
@@ -24,9 +32,48 @@ FORMAT = "symbolic-acceptance/run"
 VERSION = 1
 
 
-def _evaluation(evaluation: Evaluation) -> dict[str, Any]:
+class _Attempt(TypedDict):
+    ref: str
+    number: int
+    diff: str
+    claims: str
+    base: str
+
+
+class _Evaluation(TypedDict):
+    attempt: _Attempt
+    status: EvaluationStatus
+    reason: str
+    waiting_on: list[str]
+    rounds: list[list[str]]
+    answers: dict[str, AnswerData]
+
+
+class _Checklist(TypedDict):
+    digest: str
+    source: str | None
+
+
+class _Record(TypedDict):
+    format: str
+    version: int
+    checklist: _Checklist
+    issue: str
+    status: RunStatus
+    reason: str
+    evaluations: list[_Evaluation]
+
+
+def _evaluation(evaluation: Evaluation) -> _Evaluation:
+    attempt = evaluation.attempt
     return {
-        "attempt": evaluation.attempt.to_dict(),
+        "attempt": {
+            "ref": attempt.ref,
+            "number": attempt.number,
+            "diff": attempt.diff,
+            "claims": attempt.claims,
+            "base": attempt.base,
+        },
         "status": evaluation.status,
         "reason": evaluation.reason,
         "waiting_on": list(evaluation.waiting_on),
@@ -39,7 +86,7 @@ def dumps(result: Result, checklist: Checklist) -> str:
     """Serialise a run; ``checklist`` is embedded so the record is self-contained."""
     if result.digest != checklist.digest:
         raise ValueError("this run was made with a different checklist")
-    data = {
+    data: _Record = {
         "format": FORMAT,
         "version": VERSION,
         "checklist": {"digest": checklist.digest, "source": checklist.source},
@@ -53,7 +100,7 @@ def dumps(result: Result, checklist: Checklist) -> str:
 
 def loads(text: str, checklist: Checklist) -> Result:
     """Rebuild a run, re-deciding every evaluation from its answers."""
-    data = json.loads(text)
+    data: _Record = json.loads(text)
     if data.get("format") != FORMAT or data.get("version") != VERSION:
         raise ValueError(f"not a {FORMAT} v{VERSION} record")
     digest = data["checklist"]["digest"]
@@ -64,7 +111,7 @@ def loads(text: str, checklist: Checklist) -> Result:
         )
     evaluations = []
     for item in data["evaluations"]:
-        answers = {qid: Answer.from_dict(body) for qid, body in item["answers"].items()}
+        answers = {qid: Answer(**body) for qid, body in item["answers"].items()}
         unknown = sorted(set(answers) - set(checklist.questions))
         if unknown:
             raise ValueError(f"record answers unknown questions: {unknown}")
@@ -72,12 +119,12 @@ def loads(text: str, checklist: Checklist) -> Result:
         paused = status if status in ("waiting", "escalated") else None
         evaluation = Evaluation.from_answers(
             checklist,
-            Attempt.from_dict(item["attempt"]),
+            Attempt(**item["attempt"]),
             answers,
             [tuple(ids) for ids in item["rounds"]],
             paused,
-            item.get("reason", ""),
-            tuple(item.get("waiting_on", ())),
+            item["reason"],
+            tuple(item["waiting_on"]),
         )
         if evaluation.status != status:
             raise ValueError(
@@ -85,15 +132,13 @@ def loads(text: str, checklist: Checklist) -> Result:
                 f"its answers say {evaluation.status}"
             )
         evaluations.append(evaluation)
-    status = data["status"]
+    recorded = data["status"]
     last = evaluations[-1].status if evaluations else None
-    if status in (APPROVED, WAITING) and status != last:
+    if recorded in (APPROVED, WAITING) and recorded != last:
         raise ValueError(
-            f"the run is recorded as {status} but its last attempt is {last}"
+            f"the run is recorded as {recorded} but its last attempt is {last}"
         )
-    return Result(
-        status, data.get("reason", ""), tuple(evaluations), digest, data["issue"]
-    )
+    return Result(recorded, data["reason"], tuple(evaluations), digest, data["issue"])
 
 
 def save(result: Result, checklist: Checklist, path: str | Path) -> None:

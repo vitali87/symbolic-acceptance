@@ -8,10 +8,10 @@ import subprocess
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
-from typing import Any
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.http import Response
+from symbolic_acceptance.loop import Oracle
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = ROOT / "examples" / "issue-342.toml"
@@ -46,7 +46,7 @@ class Scripted:
         self.silent = set(silent)
         self.asked: list[tuple[str, tuple[str, ...]]] = []
 
-    def oracle(self, name: str) -> Callable[..., Any]:
+    def oracle(self, name: str) -> Oracle:
         async def answer(questions, context):
             self.asked.append((name, tuple(q.id for q in questions)))
             if name in self.silent:
@@ -58,7 +58,9 @@ class Scripted:
 
         return answer
 
-    def oracles(self, names: Iterable[str] = ("ci", "llm", "human")) -> dict:
+    def oracles(
+        self, names: Iterable[str] = ("ci", "llm", "human")
+    ) -> dict[str, Oracle]:
         return {name: self.oracle(name) for name in names}
 
     def asked_ids(self, name: str | None = None) -> list[str]:
@@ -81,10 +83,13 @@ class FakeHTTP:
                 f"unexpected request {request.get_method()} {request.full_url}"
             )
         reply = self.responses.pop(0)
-        return reply(request) if callable(reply) else reply
+        return reply if isinstance(reply, Response) else reply(request)
 
-    def body(self, index: int = -1) -> Any:
-        return json.loads(self.requests[index].data.decode("utf-8"))
+    def body(self, index: int = -1):
+        """The JSON body of a request."""
+        data = self.requests[index].data
+        assert isinstance(data, bytes)
+        return json.loads(data)
 
     def header(self, name: str, index: int = -1) -> str | None:
         request = self.requests[index]
@@ -95,7 +100,7 @@ class FakeHTTP:
 
 
 def json_response(
-    data: Any, status: int = 200, headers: Mapping[str, str] | None = None
+    data: object, status: int = 200, headers: Mapping[str, str] | None = None
 ) -> Response:
     return Response(status, json.dumps(data).encode("utf-8"), dict(headers or {}))
 
@@ -129,7 +134,7 @@ def repo(tmp: str) -> Callable[..., str]:
 
 
 def message(
-    data: Any, stop: str = "end_turn", model: str = "claude-opus-5-5"
+    data: object, stop: str = "end_turn", model: str = "claude-opus-5-5"
 ) -> Response:
     """A Messages API reply carrying ``data`` as its JSON text."""
     return json_response(
@@ -141,7 +146,6 @@ def message(
                 {"type": "thinking", "thinking": ""},
                 {"type": "text", "text": json.dumps(data)},
             ],
-            "usage": {"input_tokens": 10, "output_tokens": 5},
         }
     )
 

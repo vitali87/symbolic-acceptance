@@ -29,16 +29,17 @@ import hashlib
 import hmac
 import secrets
 from collections.abc import Sequence
-from typing import Any
+from typing import Literal, TypedDict
 
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.claude import Claude, Refusal
 from symbolic_acceptance.diffs import DiffLine, locate, parse
+from symbolic_acceptance.http import JSON
 from symbolic_acceptance.logic import wanted
 from symbolic_acceptance.loop import Context, Escalate, OracleError
 
-__all__ = ["SCHEMA", "SYSTEM", "Judge"]
+__all__ = ["SYSTEM", "Judge", "Verdict"]
 
 SYSTEM = """\
 You are an independent reviewer. You judge one yes/no question about a code \
@@ -66,18 +67,15 @@ those lines and saying in "missing" what to undo.
 Some questions say how to answer when they do not apply to the change; \
 follow that guidance."""
 
-SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "reasoning": {"type": "string"},
-        "answer": {"type": "string", "enum": ["YES", "NO"]},
-        "quotes": {"type": "array", "items": {"type": "string"}},
-        "missing": {"type": "string"},
-        "tampering": {"type": "boolean"},
-    },
-    "required": ["reasoning", "answer", "quotes", "missing", "tampering"],
-    "additionalProperties": False,
-}
+
+class Verdict(TypedDict):
+    """The judge's reply to one question."""
+
+    reasoning: str
+    answer: Literal["YES", "NO"]
+    quotes: list[str]
+    missing: str
+    tampering: bool
 
 
 def _about_absence(question: Question) -> bool:
@@ -121,7 +119,7 @@ class Judge:
                 return boundary
             counter += 1
 
-    def _content(self, question: Question, context: Context) -> list[dict[str, Any]]:
+    def _content(self, question: Question, context: Context) -> list[JSON]:
         attempt = context.attempt
         guidance = context.checklist.context or ""
         boundary = self._boundary(attempt.ref, (attempt.diff, context.issue, guidance))
@@ -171,13 +169,12 @@ class Judge:
         absence = _about_absence(question)
         for _ in range(2):
             try:
-                reply = self.claude.json(system=SYSTEM, content=content, schema=SCHEMA)
+                reply = self.claude.json(system=SYSTEM, content=content, shape=Verdict)
             except Refusal as refusal:
                 raise Escalate(
                     f"the judge declined {question.id} ({refusal.category}); "
                     "a person must answer it"
                 ) from None
-            # Structured output guarantees the shape SCHEMA describes.
             data = reply.data
             reasoning = data["reasoning"].strip()
             if data["tampering"]:

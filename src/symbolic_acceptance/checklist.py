@@ -28,7 +28,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
 
 __all__ = [
     "AllOf",
@@ -102,7 +101,7 @@ def refs(expr: Expr) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def _to_data(expr: Expr) -> str | dict[str, Any]:
+def _to_data(expr: Expr) -> str | dict[str, object]:
     if isinstance(expr, Ref):
         return expr.id
     if isinstance(expr, Not):
@@ -172,9 +171,9 @@ class Checklist:
             seen.update(dict.fromkeys(requirement.questions()))
         return tuple(seen)
 
-    def to_dict(self) -> dict[str, Any]:
+    def to_dict(self) -> dict[str, object]:
         """The checklist as plain data, in the shape the TOML was written in."""
-        data: dict[str, Any] = {}
+        data: dict[str, object] = {}
         if self.title is not None:
             data["title"] = self.title
         if self.context is not None:

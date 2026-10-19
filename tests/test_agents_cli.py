@@ -48,6 +48,7 @@ class CommandAgentTests(unittest.TestCase):
                 cwd=tmp,
                 capture_output=True,
                 text=True,
+                check=True,
             ).stdout
             self.assertEqual(log.strip(), "Attempt 1")
             self.assertEqual(local_diff(tmp)(attempt), attempt.diff)
@@ -182,6 +183,9 @@ class CLITests(unittest.TestCase):
             del truth["suite_green"]
             answers.write_text(json.dumps(dict(truth, backs_off=True)))
             self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 2)
+            answers.write_text(json.dumps({"backs_off": {"is_met": "no"}}))
+            with self.assertRaisesRegex(SystemExit, "backs_off: is_met must be a bool"):
+                cli("explain", str(EXAMPLE), str(answers))
 
     def test_run_refuses_setups_that_cannot_work(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -170,8 +170,10 @@ def plan(
     for requirement in checklist.requirements:
         if current[requirement.id] == OPEN:
             when = requirement.when
-            gate_open = when is not None and value(when, facts) is None
-            _deciding(when if gate_open else requirement.that, facts, late)
+            if when is not None and value(when, facts) is None:
+                _deciding(when, facts, late)
+            else:
+                _deciding(requirement.that, facts, late)
     return list(late)
 
 
