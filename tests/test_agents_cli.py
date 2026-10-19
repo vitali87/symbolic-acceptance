@@ -554,31 +554,57 @@ class CLITests(unittest.TestCase):
                 cli(*args)
             self.assertEqual(caught.exception.code, 2)
 
-    def test_run_waits_for_a_person_it_has_no_terminal_to_ask(self):
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            tempfile.TemporaryDirectory() as outside,
-        ):
-            repo(tmp)
-            checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
-            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
-            # A process of its own, so a terminal running the tests is not it.
-            done = subprocess.run(
-                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
-                + ["--cwd", tmp, "--agent", shlex.join(write)],
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                # The same package as this process, wherever that came from.
-                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
-                check=False,
-            )
+    def test_run_asks_a_person_on_the_terminal_if_there_is_one(self):
+        def run(stdin):
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                tempfile.TemporaryDirectory() as outside,
+            ):
+                repo(tmp)
+                checklist = Path(outside, "acceptance.toml")
+                checklist.write_text(
+                    '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                    '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+                )
+                write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+                saved = Path(outside, "run.json")
+                # A process of its own, so a terminal running the tests is not it.
+                done = subprocess.run(
+                    [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                    + ["--cwd", tmp, "--agent", shlex.join(write)]
+                    + ["--record", str(saved)],
+                    stdin=stdin,
+                    capture_output=True,
+                    text=True,
+                    # The same package as this process, wherever that came from.
+                    env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                    check=False,
+                )
+                return done, json.loads(saved.read_text())
+
+        def typed(keys):
+            keyboard, terminal = os.openpty()
+            try:
+                os.write(keyboard, keys)
+                return run(terminal)
+            finally:
+                os.close(keyboard)
+                os.close(terminal)
+
+        done, _ = run(subprocess.DEVNULL)
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("no terminal to ask a person", done.stdout)
+        done, saved = typed(b"maybe\ny, looks fine\n")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.count("ok: Is it ok? [y/n, then why]"), 2)
+        self.assertEqual(
+            saved["evaluations"][-1]["answers"]["ok"],
+            {"is_met": True, "reasoning": "looks fine", "by": "human:terminal"},
+        )
+        # Ending the input (Ctrl-D) leaves the run waiting, to resume later.
+        done, saved = typed(b"\x04")
+        self.assertEqual(done.returncode, 3, done.stderr)
+        self.assertEqual(saved["status"], "waiting")
 
     def test_run_stops_on_a_regression(self):
         with (

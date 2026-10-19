@@ -191,15 +191,20 @@ class TerminalReviewer:
         if not sys.stdin.isatty():
             raise Pending("no terminal to ask a person; pass --pr to ask on GitHub")
         attempt = context.attempt
-        answers = {}
+        answers: dict[str, Answer] = {}
         print(f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):")
         for question in questions:
             if question.context:
                 print(f"  ({' '.join(question.context.split())})")
             while True:
-                reply = input(
-                    f"  {question.id}: {question.ask} [y/n, then why] "
-                ).strip()
+                try:
+                    reply = input(
+                        f"  {question.id}: {question.ask} [y/n, then why] "
+                    ).strip()
+                except EOFError:
+                    raise Pending(
+                        "the person at the terminal stopped answering", answers=answers
+                    ) from None
                 if reply[:1].lower() in ("y", "n"):
                     break
             answers[question.id] = Answer(
