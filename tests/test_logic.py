@@ -126,6 +126,28 @@ class PlanTests(unittest.TestCase):
         asked = plan(checklist, {"a": False}, last=())
         self.assertEqual(asked, ["b"])
 
+    def test_a_requirement_that_holds_asks_nothing_about_its_condition(self):
+        checklist = sa.loads(
+            """
+            [q.tests]
+            ask = "Do the tests pass?"
+            by = "ci"
+            [q.risky]
+            ask = "Is the change risky?"
+            by = "llm"
+            [[require]]
+            that = "tests"
+            fail = "x"
+            [[require]]
+            id = "risky_tested"
+            when = "risky"
+            that = "tests"
+            fail = "y"
+            """
+        )
+        self.assertEqual(plan(checklist, {}, last=()), ["tests", "risky"])
+        self.assertEqual(plan(checklist, {"tests": True}, last=()), [])
+
     def test_people_asked_minimally_once_alone(self):
         checklist = sa.loads(
             """

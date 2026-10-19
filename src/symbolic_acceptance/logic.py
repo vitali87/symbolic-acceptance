@@ -154,6 +154,8 @@ def plan(
     """
     early: dict[str, None] = {}
     for requirement in checklist.requirements:
+        if value(requirement.that, facts) is True:
+            continue  # it holds whether or not it applies
         when = requirement.when
         if when is not None and value(when, facts) is not True:
             _deciding(when, facts, early)  # nothing, once `when` is NO

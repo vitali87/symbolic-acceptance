@@ -350,9 +350,9 @@ async def evaluate(
     # made meanwhile (a person's later reply) counts.
     provisional: dict[str, Answer] = {}
     escalations: list[str] = []
-    # plan() stops once a requirement fails or none is left open; answers in
-    # hand can decide the attempt (a person's NO), and then nobody is waited
-    # for.
+    # Provisional answers count when planning: once one fails a requirement
+    # (a person's NO), people are asked nothing more, so unless an automated
+    # check is still owed the attempt is decided and nobody is waited for.
     while ask := plan(checklist, facts(known | provisional), last=last):
         groups = {
             name: questions
