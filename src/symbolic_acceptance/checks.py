@@ -124,10 +124,11 @@ class Commands:
     every object against its id, so neither anything in the checkout outside
     the commit (ignored files, skip-worktree edits, a filter set up to
     rewrite files on checkout) nor bytes rewritten in its object store can
-    change the result, and one command cannot affect the next. The command
+    change the result, and no command sees another's checkout. The command
     runs the attempt's code, so like the agent it gets ``env`` (by default
     this process's environment) without the runner's GitHub token, and no
-    input; whatever it starts is stopped when it ends. A command that runs
+    input; whatever it starts is stopped when it ends, but for a daemon,
+    which leaves its session. A command that runs
     past ``timeout`` answers NO, whatever ``expect`` says, as does a program
     of the attempt's own (a relative path, like ``./repro.sh``) that is gone
     or cannot run; a program the machine lacks is an :class:`OracleError`,

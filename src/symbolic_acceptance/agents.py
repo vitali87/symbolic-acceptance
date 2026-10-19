@@ -102,9 +102,10 @@ def run_program(
     ``timeout``) and its output, errors mixed in where they came.
 
     It reads ``given`` and nothing else. It runs in a session of its own, so
-    whatever it starts is stopped when it ends, and writes to a file, so a
-    child it leaves running with the output open cannot hold the runner up.
-    A program that cannot start raises :class:`OSError`.
+    whatever it starts is stopped when it ends, but for a daemon, which
+    leaves that session; and it writes to a file, so a child it leaves
+    running with the output open cannot hold the runner up. A program that
+    cannot start raises :class:`OSError`.
     """
     with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as log:
         stdin.write(given.encode("utf-8"))
