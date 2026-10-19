@@ -141,6 +141,14 @@ class DigestTests(unittest.TestCase):
         reordered = MINIMAL.replace('by = "ci"', 'by = "ci"\nrun = "x"\ncheck = "t"')
         self.assertEqual(sa.loads(options).digest, sa.loads(reordered).digest)
 
+    def test_the_digest_stays_the_same_from_one_version_to_the_next(self):
+        # Approved checklists are pinned, and runs recorded, by their digest.
+        text = MINIMAL.replace("Is A done?", "Is Ä done — on time?")
+        self.assertEqual(
+            sa.loads(text).digest,
+            "9a0b967bfb5ec341184cd8d653b1704f134e451c7478907fbaf73247e5628c53",
+        )
+
     def test_meaning_changes_the_digest(self):
         changed = MINIMAL.replace('by = "ci"', 'by = "llm"')
         self.assertNotEqual(sa.loads(MINIMAL).digest, sa.loads(changed).digest)

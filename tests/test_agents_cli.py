@@ -1,7 +1,10 @@
 import asyncio
+import contextlib
+import io
 import json
 import os
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -369,8 +372,12 @@ class CLITests(unittest.TestCase):
     def test_run_refuses_setups_that_cannot_work(self):
         with tempfile.TemporaryDirectory() as tmp:
             # The example's ci questions need GitHub check runs.
-            with self.assertRaisesRegex(SystemExit, "--github and --push"):
-                cli("run", str(EXAMPLE), "--agent", "true", "--cwd", tmp)
+            for only in ((), ("--push", "agent"), ("--github", "octo/repo")):
+                with (
+                    self.subTest(only),
+                    self.assertRaisesRegex(SystemExit, "--github and --push"),
+                ):
+                    cli("run", str(EXAMPLE), "--agent", "true", "--cwd", tmp, *only)
             with self.assertRaisesRegex(SystemExit, "--pr needs --github"):
                 cli("run", str(EXAMPLE), "--agent", "true", "--cwd", tmp, "--pr", "5")
             local = Path(tmp, "local.toml")
@@ -403,6 +410,68 @@ class CLITests(unittest.TestCase):
                     "--record",
                     record,
                 )
+
+    def test_usage_errors_exit_2(self):
+        for args in ((), ("run", str(EXAMPLE))):
+            with (
+                self.subTest(args),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as caught,
+            ):
+                cli(*args)
+            self.assertEqual(caught.exception.code, 2)
+
+    def test_run_waits_for_a_person_it_has_no_terminal_to_ask(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            # A process of its own, so a terminal running the tests is not it.
+            done = subprocess.run(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--cwd", tmp, "--agent", shlex.join(write)],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                # The same package as this process, wherever that came from.
+                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                check=False,
+            )
+        self.assertEqual(done.returncode, 3, done.stderr)
+        self.assertIn("no terminal to ask a person", done.stdout)
+
+    def test_run_stops_on_a_regression(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                "".join(
+                    f'[q.{name}]\nask = "Is there {name}?"\nby = "ci"\nrun = '
+                    + json.dumps([sys.executable, "-c", f"open({name!r})"])
+                    + f'\n[[require]]\nthat = "{name}"\nfail = "no {name}"\n'
+                    for name in ("a", "b")
+                )
+            )
+            # The first attempt adds a; the second swaps it for b.
+            swap = (
+                "import os\n"
+                "if os.path.exists('a'):\n    os.remove('a'); open('b', 'w')\n"
+                "else:\n    open('a', 'w')"
+            )
+            agent = shlex.join([sys.executable, "-c", swap])
+            code, out = cli("run", str(checklist), "--cwd", tmp, "--agent", agent)
+        self.assertEqual(code, 1)
+        self.assertIn("regression: a held in attempt 1 and fails in attempt 2", out)
 
     def test_run_saves_a_run_and_resumes_it(self):
         with (
