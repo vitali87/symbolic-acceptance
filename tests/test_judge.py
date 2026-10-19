@@ -7,6 +7,7 @@ from helpers import DIFF, FakeHTTP, json_response, message
 import symbolic_acceptance as sa
 from symbolic_acceptance import http
 from symbolic_acceptance.claude import Claude, ClaudeError
+from symbolic_acceptance.github import GitHub
 from symbolic_acceptance.judge import Judge, Verdict
 
 
@@ -144,7 +145,7 @@ class RequestTests(unittest.TestCase):
 
     def test_oauth_token(self):
         fake = FakeHTTP(verdict("NO", missing="x"))
-        claude = Claude(auth_token="tok", transport=fake)
+        claude = Claude(api_key=None, auth_token="tok", transport=fake)
         ask(Judge(claude))
         self.assertEqual(fake.header("authorization"), "Bearer tok")
         self.assertEqual(
@@ -274,20 +275,13 @@ class VerdictTests(unittest.TestCase):
         self.assertEqual(fake.requests, [])
 
     def test_no_credentials(self):
-        import os
+        claude = Claude(api_key=None, auth_token=None, transport=FakeHTTP())
+        with self.assertRaisesRegex(ClaudeError, "no credentials"):
+            claude.json(system="s", content="c", shape=Verdict)
 
-        saved = {
-            k: os.environ.pop(k)
-            for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
-            if k in os.environ
-        }
-        try:
-            with self.assertRaisesRegex(ClaudeError, "no credentials"):
-                Claude(transport=FakeHTTP()).json(
-                    system="s", content="c", shape=Verdict
-                )
-        finally:
-            os.environ.update(saved)
+    def test_credentials_are_not_shown(self):
+        self.assertNotIn("sk-secret", repr(Claude(api_key="sk-secret")))
+        self.assertNotIn("t0k", repr(GitHub("octo/repo", token="t0k")))
 
 
 class HTTPTests(unittest.TestCase):

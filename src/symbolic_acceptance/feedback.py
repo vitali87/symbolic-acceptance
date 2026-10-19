@@ -177,7 +177,7 @@ def _because(reason: Reason) -> str:
 def render_failures(failures: Sequence[Failure]) -> str:
     """Plain-text feedback: every failed requirement, its message and causes."""
     if not failures:
-        return "No requirement failed."
+        return "No requirement failed.\n"
     lines: list[str] = []
     for number, failure in enumerate(failures, start=1):
         lines.append(f"{number}. {failure.requirement.id}: {failure.requirement.fail}")

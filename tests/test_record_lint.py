@@ -76,7 +76,7 @@ class RecordTests(unittest.TestCase):
             checklist, sa.Attempt("abc", 1), {"a": sa.Answer(False, sneaky)}, []
         )
         text = markdown(
-            sa.Result("escalated", "", (evaluation,), checklist.digest), checklist
+            sa.Result("escalated", sneaky, (evaluation,), checklist.digest), checklist
         )
         before, fenced, after = text.split("`````")
         # Outside the code block the text is escaped; inside, GitHub shows it
@@ -157,10 +157,25 @@ class LintTests(unittest.TestCase):
             '[q.a]\nask = "A?"\nby = "ci"\ncheck = "frozen"\n'
             '[q.b]\nask = "B?"\nby = "ci"\nrun = 3\n'
             '[q.c]\nask = "C?"\nby = "llm"\nkind = "maybe"\n'
-            '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c"] }\nfail = "x"\n'
+            '[q.d]\nask = "D?"\nby = "ci"\nrun = "pytest -k \'x"\n'
+            '[q.e]\nask = "E?"\nby = "ci"\nrun = []\nexpect = "maybe"\n'
+            '[q.f]\nask = "F?"\nby = "ci"\ncheck = 3\n'
+            '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", "f"] }\n'
+            'fail = "x"\n'
         )
         issues = [i for i in sa.lint(c) if i.code == "bad-option"]
-        self.assertEqual([i.where for i in issues], ["a", "b", "c"])
+        self.assertEqual(
+            [(i.where, i.message) for i in issues],
+            [
+                ("a", 'check = "frozen" needs paths = [<frozen globs>]'),
+                ("b", "q.b.run must be a string or a list of strings"),
+                ("c", 'kind must be "presence" or "absence"'),
+                ("d", "q.d.run: No closing quotation"),
+                ("e", "q.e.run is empty"),
+                ("e", 'expect must be "pass" or "fail"'),
+                ("f", "check must be a string"),
+            ],
+        )
         self.assertTrue(all(i.level == "error" for i in issues))
 
     def test_check_runs_need_frozen_workflows(self):

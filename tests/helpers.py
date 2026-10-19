@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import urllib.request
 from collections.abc import Callable, Iterable, Mapping
@@ -105,14 +104,6 @@ def json_response(
     return Response(status, json.dumps(data).encode("utf-8"), dict(headers or {}))
 
 
-GIT_ENV = {
-    "GIT_AUTHOR_NAME": "Test",
-    "GIT_AUTHOR_EMAIL": "test@example.com",
-    "GIT_COMMITTER_NAME": "Test",
-    "GIT_COMMITTER_EMAIL": "test@example.com",
-}
-
-
 def repo(tmp: str) -> Callable[..., str]:
     """A git repository in ``tmp`` with one commit of ``app.py``."""
 
@@ -123,10 +114,12 @@ def repo(tmp: str) -> Callable[..., str]:
             check=True,
             capture_output=True,
             text=True,
-            env={**os.environ, **GIT_ENV},
         ).stdout
 
     git("init", "-q")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.com")
+    git("config", "commit.gpgSign", "false")
     Path(tmp, "app.py").write_text("print('v1')\n")
     git("add", ".")
     git("commit", "-q", "-m", "base")

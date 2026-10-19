@@ -33,9 +33,9 @@ def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
         lines += ["", f"> {_cell(evaluation.reason)}"]
     lines += ["", "| Requirement | Status | If it fails |", "|---|---|---|"]
     for requirement in checklist.requirements:
-        state = evaluation.requirements.get(requirement.id, "open")
+        state = evaluation.requirements[requirement.id]
         lines.append(
-            f"| `{requirement.id}` | {_ICONS.get(state, '')} {state} | "
+            f"| `{requirement.id}` | {_ICONS[state]} {state} | "
             f"{_cell(requirement.fail)} |"
         )
     if evaluation.answers:
@@ -66,7 +66,7 @@ def markdown(result: Result, checklist: Checklist) -> str:
     lines = [
         f"## {title}",
         "",
-        f"**{result.status}**" + (f": {result.reason}" if result.reason else ""),
+        f"**{result.status}**" + (f": {_cell(result.reason)}" if result.reason else ""),
         "",
         f"Checklist `{checklist.digest[:12]}` · {len(result.evaluations)} attempt(s)",
     ]

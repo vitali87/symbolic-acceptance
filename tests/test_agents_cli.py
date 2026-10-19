@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import EXAMPLE, GIT_ENV, FakeHTTP, example, message, repo
+from helpers import EXAMPLE, FakeHTTP, example, message, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import AgentError, CommandAgent, local_diff
@@ -19,17 +19,6 @@ from symbolic_acceptance.draft import DraftError, draft
 
 
 class CommandAgentTests(unittest.TestCase):
-    def setUp(self):
-        self.saved = {k: os.environ.get(k) for k in GIT_ENV}
-        os.environ.update(GIT_ENV)
-
-    def tearDown(self):
-        for key, value in self.saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
     def task(self, number=1):
         return sa.Task(issue="make it v2", checklist=example(), number=number)
 
@@ -91,6 +80,22 @@ class CommandAgentTests(unittest.TestCase):
                 check=True,
             ).stdout.strip()
         self.assertEqual(pushed, attempt.ref)
+
+    def test_the_agent_never_gets_the_runners_github_token(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            script = (
+                "import os; open('app.py', 'w').write('v2');"
+                "print(sorted(k for k in os.environ if k.endswith('TOKEN')))"
+            )
+            env = {"PATH": os.environ["PATH"], "GITHUB_TOKEN": "t", "GH_TOKEN": "t"}
+            agent = CommandAgent(
+                [sys.executable, "-c", script],
+                cwd=tmp,
+                env={**env, "ANTHROPIC_AUTH_TOKEN": "its own"},
+            )
+            attempt = asyncio.run(agent(self.task()))
+        self.assertEqual(attempt.claims, "['ANTHROPIC_AUTH_TOKEN']")
 
     def test_no_change_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:

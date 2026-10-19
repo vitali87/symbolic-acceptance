@@ -8,7 +8,7 @@ from typing import Literal
 
 __all__ = ["DiffLine", "FileChange", "locate", "parse"]
 
-_GIT_HEADER = re.compile(r'^diff --git (?P<old>"(?:[^"\\]|\\.)*"|\S+) (?P<new>.+)$')
+_QUOTED = re.compile(r'"(?:[^"\\]|\\.)*"(?= )')
 _HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 _ESCAPES = {
     "a": "\a",
@@ -91,6 +91,23 @@ def _strip_prefix(path: str) -> str | None:
     return path
 
 
+def _header(paths: str) -> tuple[str | None, str | None]:
+    """The two paths of a ``diff --git`` header.
+
+    Git leaves a path with spaces unquoted, so the header is split where its
+    two halves name the same file, which they do unless the file was renamed;
+    a rename has ``rename from`` and ``rename to`` lines that give both paths.
+    """
+    half = len(paths) // 2
+    if quoted := _QUOTED.match(paths):
+        old, new = quoted[0], paths[quoted.end() + 1 :]
+    elif paths[half : half + 1] == " " and paths[2:half] == paths[half + 3 :]:
+        old, new = paths[:half], paths[half + 1 :]
+    else:
+        old, _, new = paths.partition(" ")
+    return _strip_prefix(old), _strip_prefix(new)
+
+
 @dataclass
 class _File:
     old: str | None = None
@@ -121,9 +138,7 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
             files.append(_File())
         current = files[-1]
         if row.startswith("diff --git "):
-            if match := _GIT_HEADER.match(row):
-                current.old = _strip_prefix(match["old"])
-                current.new = _strip_prefix(match["new"])
+            current.old, current.new = _header(row[len("diff --git ") :])
         elif row.startswith("new file mode"):
             current.status = "added"
         elif row.startswith("deleted file mode"):

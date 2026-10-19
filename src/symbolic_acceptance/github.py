@@ -18,7 +18,7 @@ import re
 import time
 import urllib.parse
 from collections.abc import Callable, Collection, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TypedDict
 
 from symbolic_acceptance import http
@@ -98,10 +98,16 @@ class _CheckRuns(TypedDict):
 
 @dataclass(frozen=True)
 class GitHub:
-    """A repository, ``owner/name``; the token defaults to ``GITHUB_TOKEN``."""
+    """A repository, ``owner/name``; the token defaults to ``GITHUB_TOKEN``
+    (or ``GH_TOKEN``)."""
 
     repo: str
-    token: str | None = None
+    token: str | None = field(
+        default_factory=lambda: (
+            os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        ),
+        repr=False,
+    )
     api: str = "https://api.github.com"
     transport: http.Transport | None = None
 
@@ -111,11 +117,8 @@ class GitHub:
             "x-github-api-version": API_VERSION,
             "user-agent": "symbolic-acceptance",
         }
-        token = (
-            self.token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-        )
-        if token:
-            headers["authorization"] = f"Bearer {token}"
+        if self.token:
+            headers["authorization"] = f"Bearer {self.token}"
         return headers
 
     def _url(self, path: str) -> str:

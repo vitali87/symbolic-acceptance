@@ -9,21 +9,24 @@ uncommitted, they are committed for it, so every attempt is one commit; the
 diff is computed here with git, from where the run started to that commit,
 and the agent's own output is kept only as its claims.
 
-The agent can write to the checkout's git configuration and attributes, so
-every git command here overrides what they could change: hooks, replace
-refs, filters, textconv and external diff drivers, path prefixes, quoting.
+The agent runs without the runner's GitHub token, which would let it report
+a check run or comment as the runner. It can write to the checkout's git
+configuration and attributes, so every git command here overrides what they
+could change: hooks, replace refs, filters, textconv and external diff
+drivers, path prefixes, quoting.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from symbolic_acceptance.loop import Attempt, Task
 
-__all__ = ["AgentError", "CommandAgent", "diff", "git", "local_diff"]
+__all__ = ["RUNNER_SECRETS", "AgentError", "CommandAgent", "diff", "git", "local_diff"]
 
 # Git's empty tree: reading attributes from it means none apply, so no
 # smudge filter or diff attribute in the checkout can alter what git shows.
@@ -38,6 +41,8 @@ _OVERRIDES = (
     "-c",
     "core.quotePath=true",
 )
+# The variables the runner reads its GitHub token from (see github.GitHub).
+RUNNER_SECRETS = frozenset({"GITHUB_TOKEN", "GH_TOKEN"})
 _DIFF = (
     "diff",
     "--no-color",
@@ -92,7 +97,8 @@ class CommandAgent:
     ``base`` is the commit attempts are compared with; it defaults to the
     checkout's HEAD when the first attempt starts, so pass the recorded base
     when resuming a run. With ``push``, each attempt is pushed to that branch
-    of ``remote``, so CI runs on it.
+    of ``remote``, so CI runs on it. The agent gets ``env`` (by default this
+    process's environment) without :data:`RUNNER_SECRETS`.
     """
 
     def __init__(
@@ -105,6 +111,7 @@ class CommandAgent:
         base: str | None = None,
         push: str | None = None,
         remote: str = "origin",
+        env: Mapping[str, str] = os.environ,
     ) -> None:
         if not argv:
             raise ValueError("argv must name the agent's command")
@@ -115,6 +122,7 @@ class CommandAgent:
         self.base = base
         self.push = push
         self.remote = remote
+        self.env = env
 
     def _head(self) -> str:
         return git(self.cwd, "rev-parse", "HEAD").strip()
@@ -128,6 +136,7 @@ class CommandAgent:
                 self.argv,
                 cwd=self.cwd,
                 input=task.prompt(),
+                env={k: v for k, v in self.env.items() if k not in RUNNER_SECRETS},
                 capture_output=True,
                 encoding="utf-8",
                 errors="replace",

@@ -31,13 +31,28 @@ from symbolic_acceptance.checklist import Question
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Context, Oracle, OracleError, Pending, _call
 
-__all__ = ["Checks", "Commands", "Handler", "frozen_files"]
+__all__ = ["Checks", "Commands", "Handler", "command", "frozen_files"]
 
 Handler = Callable[[Question, Context], Answer | Awaitable[Answer]]
 
 
 def _matches(path: str | None, patterns: Sequence[str]) -> bool:
     return path is not None and any(fnmatch.fnmatchcase(path, p) for p in patterns)
+
+
+def command(question: Question) -> list[str]:
+    """The arguments of the question's ``run`` command, a string or a list."""
+    run = question.options.get("run")
+    if isinstance(run, str):
+        try:
+            argv = shlex.split(run)
+        except ValueError as error:  # an unclosed quote
+            raise OracleError(f"q.{question.id}.run: {error}") from None
+    else:
+        argv = list(question.strings("run"))
+    if not argv:
+        raise OracleError(f"q.{question.id}.run is empty")
+    return argv
 
 
 def frozen_files(question: Question, context: Context) -> Answer:
@@ -89,15 +104,7 @@ class Commands:
         self.tail = tail
 
     def __call__(self, question: Question, context: Context) -> Answer:
-        command = question.options.get("run")
-        if isinstance(command, str):
-            argv = shlex.split(command)
-        elif isinstance(command, tuple) and all(isinstance(a, str) for a in command):
-            argv = list(command)
-        else:
-            raise OracleError(f"q.{question.id}.run must be a command string or list")
-        if not argv:
-            raise OracleError(f"q.{question.id}.run is empty")
+        argv = command(question)
         expect = question.options.get("expect", "pass")
         if expect not in ("pass", "fail"):
             raise OracleError(f'q.{question.id}.expect must be "pass" or "fail"')

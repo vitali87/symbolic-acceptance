@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Generic,
     Literal,
@@ -98,8 +98,9 @@ def _schema(shape: object) -> dict[str, JSON]:
 class Claude:
     """Settings for calling the Messages API.
 
-    Credentials come from ``ANTHROPIC_API_KEY``, or ``ANTHROPIC_AUTH_TOKEN``
-    for an OAuth token, unless passed in.
+    Unless passed in, credentials come from ``ANTHROPIC_API_KEY``, or
+    ``ANTHROPIC_AUTH_TOKEN`` for an OAuth token, and the endpoint from
+    ``ANTHROPIC_BASE_URL``.
     """
 
     model: str = DEFAULT_MODEL
@@ -107,20 +108,26 @@ class Claude:
     max_tokens: int = 16000
     fallbacks: bool = True
     timeout: float = 600.0
-    api_key: str | None = None
-    auth_token: str | None = None
-    base_url: str | None = None
+    api_key: str | None = field(
+        default_factory=lambda: os.environ.get("ANTHROPIC_API_KEY"), repr=False
+    )
+    auth_token: str | None = field(
+        default_factory=lambda: os.environ.get("ANTHROPIC_AUTH_TOKEN"), repr=False
+    )
+    base_url: str = field(
+        default_factory=lambda: (
+            os.environ.get("ANTHROPIC_BASE_URL") or "https://api.anthropic.com"
+        )
+    )
     transport: http.Transport | None = None
 
     def _headers(self) -> dict[str, str]:
         betas = [FALLBACK_BETA] if self.fallbacks else []
         headers = {"anthropic-version": API_VERSION}
-        api_key = self.api_key or os.environ.get("ANTHROPIC_API_KEY")
-        token = self.auth_token or os.environ.get("ANTHROPIC_AUTH_TOKEN")
-        if api_key:
-            headers["x-api-key"] = api_key
-        elif token:
-            headers["authorization"] = f"Bearer {token}"
+        if self.api_key:
+            headers["x-api-key"] = self.api_key
+        elif self.auth_token:
+            headers["authorization"] = f"Bearer {self.auth_token}"
             betas.append(OAUTH_BETA)
         else:
             raise ClaudeError(
@@ -146,14 +153,9 @@ class Claude:
         }
         if self.fallbacks:
             body["fallbacks"] = "default"
-        base = (
-            self.base_url
-            or os.environ.get("ANTHROPIC_BASE_URL")
-            or "https://api.anthropic.com"
-        )
         response = http.request(
             "POST",
-            base.rstrip("/") + "/v1/messages",
+            self.base_url.rstrip("/") + "/v1/messages",
             headers=self._headers(),
             json_body=body,
             timeout=self.timeout,

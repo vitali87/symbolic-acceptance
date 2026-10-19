@@ -130,6 +130,11 @@ off (`stop_on_regression=False`).
   the run record, with the issue text, is kept outside the checkout.
 - Edited comments never count as answers, and lint warns when CI check runs
   answer questions but `.github/workflows` is not frozen.
+- The agent runs without the runner's GitHub token, so it cannot report a
+  check run or comment as the runner. Runner and agent still share a user
+  and a checkout: that stops an agent gaming the checks, not one attacking
+  the runner. Against that, run the agent in a sandbox that holds none of
+  the runner's credentials, with a checkout that has none persisted.
 - An oracle may only answer the questions it was asked.
 - The checklist's digest is recorded; resuming with a changed checklist
   fails.

@@ -7,6 +7,7 @@ from pathlib import Path
 from helpers import DIFF, repo
 
 import symbolic_acceptance as sa
+from symbolic_acceptance.agents import diff
 from symbolic_acceptance.checks import Checks, Commands, frozen_files
 from symbolic_acceptance.diffs import locate, parse
 
@@ -56,6 +57,26 @@ class ParseTests(unittest.TestCase):
         )
         q = sa.Question("frozen", "Frozen?", "ci", options={"paths": ["docs/*"]})
         self.assertFalse(frozen_files(q, context(diff)).is_met)
+
+    def test_header_only_changes_from_real_git(self):
+        # A mode change or an empty file has no ---/+++ lines, so its path
+        # comes from the header alone, where git leaves spaces unquoted.
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            Path(tmp, "tests").mkdir()
+            Path(tmp, "tests", "my test.py").write_text("x = 1\n")
+            Path(tmp, "tests", "empty one.py").write_text("")
+            git("add", ".")
+            git("commit", "-qm", "tests")
+            Path(tmp, "tests", "my test.py").chmod(0o755)
+            git("rm", "-q", "tests/empty one.py")
+            git("commit", "-qam", "change")
+            changed = diff(tmp, "HEAD~1", "HEAD")
+        q = sa.Question("frozen", "Frozen?", "ci", options={"paths": ["tests/*"]})
+        self.assertEqual(
+            frozen_files(q, context(changed)).evidence,
+            ("tests/empty one.py (deleted)", "tests/my test.py (modified)"),
+        )
 
     def test_locate(self):
         _, lines = parse(DIFF)

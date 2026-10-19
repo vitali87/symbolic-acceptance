@@ -2,13 +2,12 @@
 
 import asyncio
 import json
-import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from helpers import GIT_ENV, repo
+from helpers import repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import CommandAgent
@@ -65,17 +64,6 @@ fail = "The change touches more than app.py"
 
 
 class EndToEndTests(unittest.TestCase):
-    def setUp(self):
-        self.saved = {k: os.environ.get(k) for k in GIT_ENV}
-        os.environ.update(GIT_ENV)
-
-    def tearDown(self):
-        for key, value in self.saved.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
     def test_failed_attempt_is_fixed_from_feedback(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)

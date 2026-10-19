@@ -131,7 +131,7 @@ class AssessTests(unittest.TestCase):
         self.assertIn("Why: needs security review", text)
 
     def test_render_without_failures(self):
-        self.assertEqual(sa.render_failures([]), "No requirement failed.")
+        self.assertEqual(sa.render_failures([]), "No requirement failed.\n")
 
 
 if __name__ == "__main__":

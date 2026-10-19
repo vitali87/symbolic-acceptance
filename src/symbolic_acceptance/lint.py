@@ -23,7 +23,9 @@ from symbolic_acceptance.checklist import (
     refs,
     render,
 )
+from symbolic_acceptance.checks import command
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
+from symbolic_acceptance.loop import OracleError
 
 __all__ = ["MAX_EXHAUSTIVE", "Issue", "lint"]
 
@@ -124,9 +126,14 @@ def _option_issues(question: Question) -> list[Issue]:
         if options.get("check") == "frozen" and not question.strings("paths"):
             problems.append('check = "frozen" needs paths = [<frozen globs>]')
         question.strings("allow_new")
-        question.strings("run")
-    except ValueError as error:
+        if "run" in options:
+            command(question)
+    except (ValueError, OracleError) as error:
         problems.append(str(error))
+    if not isinstance(options.get("check", ""), str):
+        problems.append("check must be a string")
+    if options.get("expect", "pass") not in ("pass", "fail"):
+        problems.append('expect must be "pass" or "fail"')
     if options.get("kind", "presence") not in ("presence", "absence"):
         problems.append('kind must be "presence" or "absence"')
     return [Issue("error", "bad-option", problem, question.id) for problem in problems]
