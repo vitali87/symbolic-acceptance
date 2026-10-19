@@ -340,7 +340,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="symbolic-acceptance",
         description="Acceptance checklists for coding agents.",
         epilog="Exit status: 0 approved (or clean), 1 changes, escalated or "
-        "errors, 2 bad usage, 3 waiting (or undecided).",
+        "errors (options it refuses included), 2 malformed arguments, 3 waiting "
+        "(or undecided).",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)

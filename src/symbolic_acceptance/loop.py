@@ -247,7 +247,8 @@ def _globs(question: Question, key: str) -> str:
 class Result:
     """``approved``, ``escalated`` (a person must decide) or ``waiting``.
 
-    ``running`` is only seen by an ``on_progress`` listener mid-run.
+    ``running`` is only seen mid-run: by an ``on_progress`` listener, or in a
+    record it saved.
     """
 
     status: RunStatus

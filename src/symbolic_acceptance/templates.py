@@ -13,7 +13,9 @@ __all__ = ["BUG", "FEATURE", "FORMAT_GUIDE", "ORACLES", "TEMPLATES"]
 ORACLES = ("ci", "llm", "human")
 
 FORMAT_GUIDE = """\
-An acceptance checklist is TOML with two parts.
+An acceptance checklist is TOML. At the top, title = "<short title>" names
+it and context = "<text>" is guidance the judge gets with every question,
+such as which issue to judge against. Then come two parts.
 
 [q.<id>] declares one yes/no question:
   ask     = the question, phrased so YES is the good answer      (required)
@@ -21,12 +23,13 @@ An acceptance checklist is TOML with two parts.
   context = how to answer it, including when it does not apply   (optional)
   any other key is an option for that oracle: for "ci", check = "<name>"
   names the CI check that answers it, run = "<command>" runs a command whose
-  success is YES (with expect = "fail", whose failure is), and frozen =
-  [<globs>] is YES when no file matching them changes, except new files
-  matching allow_new = [<globs>], where * stays within a directory. For
-  "llm", kind = "absence" marks a question whose YES means the change avoids
-  something ("Does it leave the public API unchanged?"): there is nothing to
-  quote for that YES, so the judge quotes what breaks it for a NO instead.
+  success is YES (with expect = "fail", whose failure is; a timeout is NO
+  either way), and frozen = [<globs>] is YES when no file matching them
+  changes, except new files matching allow_new = [<globs>], where * stays
+  within a directory. For "llm", kind = "absence" marks a question whose YES
+  means the change avoids something ("Does it leave the public API
+  unchanged?"): there is nothing to quote for that YES, so the judge quotes
+  what breaks it for a NO instead.
 
 [[require]] declares one requirement. Every requirement must hold for the
 attempt to be approved; each one that fails is reported to the coding agent
@@ -34,7 +37,7 @@ with its own message.
   that = an expression that must be YES                          (required)
   fail = what the agent is told when it is NO                    (required)
   when = an expression; the requirement applies only when YES    (optional)
-  id   = a name; defaults to `that` when it is one question id   (optional)
+  id   = a name; needed unless `that` is one question id, its default
 
 An expression is a question id, or a table with one key:
   { all = [expr, ...] }   every item YES
@@ -51,7 +54,8 @@ Rules:
   question of its own that gates the SSO requirement. When the condition is
   about files, decide it with frozen = [<their paths>], under `not`, rather
   than asking the judge.
-- Ids are letters, digits and underscores.
+- Ids are letters, digits and underscores, and start with a letter or an
+  underscore.
 """
 
 BUG = """\

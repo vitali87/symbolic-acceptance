@@ -79,13 +79,15 @@ the dangerous error is a false YES, which re-sampling NOs does nothing about.
 The judge instead:
 
 - returns structured JSON (`output_config.format`);
-- must back the answer that helps the attempt pass wherever it can: a YES
-  quotes lines of one file of the diff, consecutive within a hunk, and among
-  them more than a trivial line the change adds or removes; the quotes are
-  checked. An unbacked helpful answer gives way to the other one. Which
+- must back the answer that helps the attempt pass wherever it can: each
+  quote of a YES names a file of the diff and gives whole lines,
+  consecutive within a hunk, and together the quotes hold more than a
+  trivial line the change adds or removes; they are checked. An unbacked
+  helpful answer is asked for again, then gives way to the other one, or
+  goes to a person when the checklist reads the question both ways. Which
   answer helps follows from where the question sits (YES in `that`, NO in
-  `when`, flipped by `not`), and the judge is told it, so that when unsure
-  it gives the other; "an unsupported YES counts as NO" alone would have let
+  `when`, flipped by `not`), and the judge is told it when there is one
+  such answer, so that when unsure it gives the other; "an unsupported YES counts as NO" alone would have let
   a misquoted YES on a `when` gate skip a person's review. A question about
   absence (`kind = "absence"`) has nothing to quote for its YES, so its NO
   quotes what breaks it;
@@ -144,13 +146,14 @@ off (`stop_on_regression=False`).
   it is asked again on resume, so a person's correction made meanwhile
   counts.
 - The runner never pushes an attempt that changes `.github/`, since pushing
-  runs its workflows at once; workflows that run the attempt's code get a
-  read-only token, so that code cannot report checks or comment.
-- The runner's git overrides what the agent's checkout configuration and
-  attributes could change (hooks, replace refs, textconv, binary files,
-  diff format); `run` commands execute in a fresh clone of the commit that
-  reads none of the checkout's git configuration or attributes, nor the
-  user's; and the run record, with the issue text, is kept outside the
+  runs its workflows at once; give the workflows that run the attempt's
+  code a read-only token (`permissions: contents: read`), so that code
+  cannot report checks or comment.
+- The runner's diff ignores what the agent's checkout configuration and
+  attributes could change in it (hooks, replace refs, textconv, binary
+  files, diff format); `run` commands execute in a fresh copy of the commit
+  that reads none of the checkout's git configuration or attributes, nor
+  the user's; and the run record, with the issue text, is kept outside the
   checkout.
 - Edited comments never count as answers, and lint warns when CI check runs
   answer questions but `.github/workflows` is not frozen. Only check runs

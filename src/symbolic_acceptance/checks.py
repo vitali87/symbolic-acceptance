@@ -9,8 +9,8 @@
   in, a pattern matches only paths as deep as itself, so ``*`` stays within
   a directory.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
-  attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts it.
-  Commands run without a shell.
+  attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts its
+  exit status. Commands run without a shell.
 
 Anything else goes to ``fallback``, such as
 :class:`symbolic_acceptance.github.GitHubChecks`.
@@ -115,9 +115,10 @@ class Commands:
     runs the attempt's code, so like the agent it gets ``env`` (by default
     this process's environment) without the runner's GitHub token, and no
     input; whatever it starts is stopped when it ends. A command that runs
-    past ``timeout`` counts as failing, as does a program of the attempt's
-    own (a path, like ``./repro.sh``) that is gone or cannot run; a program
-    the machine lacks is an :class:`OracleError`, for a person to fix.
+    past ``timeout`` answers NO, whatever ``expect`` says, as does a program
+    of the attempt's own (a relative path, like ``./repro.sh``) that is gone
+    or cannot run; a program the machine lacks is an :class:`OracleError`,
+    for a person to fix.
     """
 
     def __init__(

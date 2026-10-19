@@ -44,6 +44,12 @@ frozen = ["src/auth/sso/*"]
 ask = "Is this change to single sign-on acceptable without a security review?"
 by = "human"
 
+[q.frozen_untouched]
+ask = "Does the change leave the checklist, CI configuration and tests alone?"
+by = "ci"
+frozen = ["acceptance/*", ".github/*", "tests/*"]
+allow_new = ["tests/test_*.py"]
+
 [[require]]
 that = "repro_fixed"
 fail = "The reproduction from the issue is still not throttled"
@@ -58,6 +64,10 @@ id = "sso"
 when = { not = "sso_untouched" }
 that = "sso_exempt"
 fail = "Single sign-on changed without approval"
+
+[[require]]
+that = "frozen_untouched"
+fail = "The change touches files it may not change"
 ```
 
 `[q.<id>]` declares a yes/no question and the oracle that answers it (`by`).
@@ -91,7 +101,7 @@ template bug` and `template feature` print starting points.
         - all(locks_account, can_unlock): needs YES; fix each of:
           - can_unlock: needs YES, got NO [llm:claude-opus-5-5]
             Q: Can a locked account be unlocked by its owner or an administrator?
-            Why: lock() has no inverse; add unlock() in src/auth.py
+            Why: add unlock() in src/auth.py (lock() has no inverse)
         - backs_off: needs YES, got NO [llm:claude-opus-5-5]
           Q: Does the change add an increasing delay between failed login attempts?
    ```
@@ -108,7 +118,7 @@ for example from the next GitHub event, rather than holding a process open.
 |---|---|---|
 | `ci` | `Checks`, `GitHubChecks` | `run = "<command>"` in a checkout, `frozen = [<globs>]`, or the GitHub check run named by `check` |
 | `llm` | `Judge` | Claude, reading the diff |
-| `human` | `Reviews`, terminal | `/yes <id> <why>` replies on the pull request |
+| `human` | `Reviews`, terminal | `/yes <id> <why>` or `/no <id> <why>` on the pull request, or y/n on the terminal |
 
 An oracle is any function `(questions, context) -> {id: Answer}`, sync or
 async. It raises `Pending` when it has asked and must wait, and `Escalate` to
@@ -116,18 +126,22 @@ hand the attempt to a person.
 
 **The agent is treated as adversarial.** It writes what the oracles read, so:
 
-- The judge gets the diff, computed by the runner with git, inside
-  a block with a boundary the agent cannot predict. The agent's own account
-  of its change is never shown to it. The runner's git overrides whatever the
-  checkout's configuration could change (hooks, replace refs, textconv and
-  diff drivers, path prefixes), since the agent can write that configuration.
+- The judge gets the diff, computed by the runner with git, inside a block
+  with a boundary the agent cannot predict. The agent's own account of its
+  change is never shown to it. The diff ignores whatever the checkout's
+  configuration, which the agent can write, could change in it (hooks,
+  replace refs, textconv and diff drivers, path prefixes, submodules); the
+  runner's own commit and push still read that configuration (see
+  [`docs/design.md`](docs/design.md)).
 - An answer from the judge that helps the attempt pass must be backed by the
-  diff wherever it can be: a YES quotes the lines of a file that show it,
-  whole and consecutive, and among them more than a trivial line the change
-  adds or removes; the quotes are checked. An unbacked helpful answer gives
-  way to the other one. Which answer helps follows from the checklist: YES
-  inside `that`, NO inside a `when` condition, and each question tells the
-  judge which, so that when unsure it gives the other. A question marked
+  diff wherever it can be: each quote of a YES names a file and gives whole
+  lines of it, consecutive in the diff, and together they hold more than a
+  trivial line the change adds or removes; the quotes are checked. An
+  unbacked helpful answer is asked for again, then gives way to the other
+  one, or goes to a person when the checklist reads the question both ways.
+  Which answer helps follows from the checklist: YES inside `that`, NO
+  inside a `when` condition, flipped by `not`; a question read one way tells
+  the judge which, so that when unsure it gives the other. A question marked
   `kind = "absence"` ("does it leave the API unchanged?") has nothing to
   quote for its YES, so its NO quotes what breaks it. With `samples > 1`,
   every sample must give the helpful answer.
@@ -135,9 +149,12 @@ hand the attempt to a person.
   reads none of the checkout's git configuration or attributes, so nothing
   in the checkout outside the commit can change their result.
 - Text in the change addressed to a reviewer escalates instead of being
-  answered, and so does a diff too large to judge whole.
-- `frozen = [<globs>]` fails any change to the checklist, CI configuration
-  or existing tests; a new regression test can be allowed with `allow_new`.
+  answered, and so do a diff too large to judge whole, a question the judge
+  declines, and a reply cut off before it ends.
+- A `frozen = [<globs>]` check over the checklist, CI configuration and
+  existing tests, as in the templates, fails any change to them (there `*`
+  matches across directories); a new regression test can be let in with
+  `allow_new`, whose patterns match only paths as deep as themselves.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
   answer, never bots or the accounts in `exclude` (put the agent's there if
   it has one), and never in an edited comment (anyone with write access can
@@ -171,8 +188,11 @@ hand the attempt to a person.
 The judge calls the Claude Messages API over HTTPS with `urllib`. It uses
 `claude-opus-5-5` at `high` effort, structured outputs for the verdict, and
 server-side refusal fallback (`fallbacks: "default"`), so a classifier false
-positive is retried on another model instead of failing the check. It sends no
-sampling parameters, which current models reject. Set `ANTHROPIC_API_KEY`.
+positive is retried on another model instead of failing the check; if every
+model declines, a person answers it. It sends no sampling parameters, which
+current models reject. Set `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
+and for `--pr` a token in `GITHUB_TOKEN` or `GH_TOKEN`; `run` checks them
+before the agent starts.
 
 ## Use it
 

@@ -1,9 +1,11 @@
 """Save and load runs as JSON, to audit them or to resume a waiting one.
 
-The record keeps answers, not conclusions: statuses and failures are worked
-out again from the answers on load, so a record cannot claim an outcome its
-answers don't support. The checklist's digest is stored and checked, and
-loading against a different checklist fails.
+The record keeps answers, not conclusions: approval, the requirements' states
+and the failures are worked out again from the answers on load, so a record
+cannot claim an approval its answers don't support; a pause or an escalation
+is kept as recorded, and the run's status must fit its attempts. The
+checklist's digest is stored and checked, and loading against a different
+checklist fails.
 """
 
 from __future__ import annotations
