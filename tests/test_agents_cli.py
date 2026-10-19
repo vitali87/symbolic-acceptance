@@ -536,6 +536,16 @@ class CLITests(unittest.TestCase):
                     *("--agent", "true", "--cwd", str(Path(work, "src"))),
                     *("--record", inside),
                 )
+            # A link there to a file outside, which saving would replace.
+            link = Path(work, "linked.json")
+            link.symlink_to(Path(tmp, "elsewhere.json"))
+            with self.assertRaisesRegex(SystemExit, "outside the agent's checkout"):
+                cli(
+                    "run",
+                    str(local),
+                    *("--agent", "true", "--cwd", str(work), "--record", str(link)),
+                )
+            link.unlink()
             missing = "no-such-agent-xyz"
             with self.assertRaisesRegex(SystemExit, f"^error: .*{missing}"):
                 cli("run", str(local), "--agent", missing, "--cwd", str(work))

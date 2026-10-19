@@ -275,15 +275,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
             f"error: {args.record} holds a run; pass --resume {args.record} to "
             "continue it"
         )
-    if record_path and not Path(record_path).resolve().parent.is_dir():
-        raise SystemExit(f"error: no folder to save {record_path} in")
-    top = git(args.cwd, "rev-parse", "--show-toplevel").strip()
-    if record_path and Path(record_path).resolve().is_relative_to(Path(top).resolve()):
-        raise SystemExit(
-            "error: keep the run record outside the agent's checkout (--cwd); "
-            "inside it, the record would be committed with the attempt and the "
-            "agent could rewrite it"
-        )
+    if record_path:
+        # Saving replaces the file named in this folder, even a link.
+        folder = Path(record_path).parent.resolve()
+        if not folder.is_dir():
+            raise SystemExit(f"error: no folder to save {record_path} in")
+        top = git(args.cwd, "rev-parse", "--show-toplevel").strip()
+        if folder.is_relative_to(Path(top).resolve()):
+            raise SystemExit(
+                "error: keep the run record outside the agent's checkout (--cwd); "
+                "inside it, the record would be committed with the attempt and "
+                "the agent could rewrite it"
+            )
     # What a commit could hold, whatever the checkout's settings would hide.
     status = ("status", "--porcelain", "--untracked-files=all")
     if resume is None and git(args.cwd, *status, "--ignore-submodules=dirty"):
