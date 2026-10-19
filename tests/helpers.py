@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import http.server
 import io
 import json
+import threading
 import urllib.request
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from pathlib import Path
 
 import symbolic_acceptance as sa
@@ -201,3 +203,59 @@ index 4444444..0000000
 @@ -1 +0,0 @@
 -def test_old(): pass
 """
+
+
+Comment = dict[str, object]
+
+
+@contextlib.contextmanager
+def github_api() -> Iterator[tuple[str, list[Comment], list[tuple[str, str]]]]:
+    """A stand-in for GitHub's API for issue comments, on this machine: its
+    URL, the comments it holds and each request's method and token."""
+    comments: list[Comment] = []
+    requests: list[tuple[str, str]] = []
+
+    class API(http.server.BaseHTTPRequestHandler):
+        def reply(self, data: object) -> None:
+            requests.append((self.command, self.headers["authorization"]))
+            body = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def sent(self) -> str:
+            length = int(self.headers["content-length"])
+            return str(json.loads(self.rfile.read(length))["body"])
+
+        def do_GET(self) -> None:
+            self.reply(comments)
+
+        def do_POST(self) -> None:
+            at = f"2026-10-19T10:00:{len(comments):02d}Z"
+            comment: Comment = {
+                "id": len(comments) + 1,
+                "body": self.sent(),
+                "user": {"login": "runner[bot]", "type": "Bot"},
+                "author_association": "NONE",
+                "created_at": at,
+                "updated_at": at,
+                "html_url": f"https://example.test/{len(comments) + 1}",
+            }
+            comments.append(comment)
+            self.reply(comment)
+
+        def do_PATCH(self) -> None:
+            comment = comments[int(self.path.rsplit("/", 1)[1]) - 1]
+            comment |= {"body": self.sent(), "updated_at": "2026-10-19T11:00:00Z"}
+            self.reply(comment)
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), API) as server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            yield f"http://127.0.0.1:{server.server_port}", comments, requests
+        finally:
+            server.shutdown()
