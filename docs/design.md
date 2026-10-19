@@ -90,7 +90,8 @@ The judge instead:
   absence (`kind = "absence"`) has nothing to quote for its YES, so its NO
   quotes what breaks it;
 - with `samples > 1`, needs every sample to give the answer that helps;
-- escalates on text addressed to the reviewer, on a refusal, and on a diff
+- escalates on text addressed to the reviewer, on a refusal, on a reply cut
+  off before it ends (thinking counts toward `max_tokens`), and on a diff
   too large to read whole (it never truncates);
 - reads a diff the runner computed, never one the agent supplied, and never
   sees the agent's own description of its change.

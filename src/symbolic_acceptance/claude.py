@@ -27,7 +27,7 @@ from typing import (
 from symbolic_acceptance import http
 from symbolic_acceptance.http import JSON
 
-__all__ = ["DEFAULT_MODEL", "Claude", "ClaudeError", "Refusal", "Reply"]
+__all__ = ["DEFAULT_MODEL", "Claude", "ClaudeError", "Refusal", "Reply", "Truncated"]
 
 DEFAULT_MODEL = "claude-opus-5-5"
 API_VERSION = "2023-06-01"
@@ -45,6 +45,10 @@ class Refusal(ClaudeError):
     def __init__(self, category: str | None) -> None:
         super().__init__(f"the model declined the request (category: {category})")
         self.category = category
+
+
+class Truncated(ClaudeError):
+    """The reply stopped before it was complete."""
 
 
 T = TypeVar("T")
@@ -171,9 +175,10 @@ class Claude:
             details = message["stop_details"]
             raise Refusal(details["category"] if details else None)
         # With no tools and no stop sequences, any other stop cuts the reply
-        # short: max_tokens, or model_context_window_exceeded.
+        # short: max_tokens, which thinking counts toward, or
+        # model_context_window_exceeded.
         if stop != "end_turn":
-            raise ClaudeError(
+            raise Truncated(
                 f"the reply stopped early ({stop}; max_tokens is {self.max_tokens})"
             )
         # Structured outputs guarantee a reply in the shape the schema gives.

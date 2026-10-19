@@ -16,7 +16,8 @@ as adversarial:
   it. Each question tells the judge which answer helps, so that when unsure
   it gives the other.
 * Text in the change that addresses the reviewer escalates the attempt to a
-  person instead of being answered.
+  person instead of being answered, as does a question the judge declines
+  or cannot finish answering.
 * With ``samples > 1`` every sample must give the helpful answer; any other
   decides.
 
@@ -36,7 +37,7 @@ from typing import Literal, TypedDict
 
 from symbolic_acceptance.answer import Answer, yes_no
 from symbolic_acceptance.checklist import Question
-from symbolic_acceptance.claude import Claude, Refusal
+from symbolic_acceptance.claude import Claude, Refusal, Truncated
 from symbolic_acceptance.diffs import MIN_QUOTE, DiffLine, locate, parse
 from symbolic_acceptance.http import JSON
 from symbolic_acceptance.logic import wanted
@@ -170,6 +171,11 @@ class Judge:
         except Refusal as refusal:
             raise Escalate(
                 f"the judge declined {question.id} ({refusal.category}); "
+                "a person must answer it"
+            ) from None
+        except Truncated as cut:
+            raise Escalate(
+                f"the judge's reply to {question.id} was cut off ({cut}); "
                 "a person must answer it"
             ) from None
         data = reply.data

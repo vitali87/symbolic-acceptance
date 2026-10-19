@@ -386,10 +386,12 @@ class VerdictTests(unittest.TestCase):
         with self.assertRaisesRegex(sa.Escalate, "declined"):
             ask(j)
 
-    def test_truncated_reply_is_an_error(self):
+    def test_a_reply_cut_off_goes_to_a_person(self):
         for stop in ("max_tokens", "model_context_window_exceeded"):
             j, _ = judge(message({}, stop=stop))
-            with self.assertRaisesRegex(ClaudeError, f"stopped early \\({stop}"):
+            with self.assertRaisesRegex(
+                sa.Escalate, f"cut off .*stopped early \\({stop}"
+            ):
                 ask(j)
 
     def test_samples_must_agree_on_yes(self):
