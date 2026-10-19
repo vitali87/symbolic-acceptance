@@ -112,14 +112,16 @@ def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
         cwd=cwd,
         env=env | _ISOLATED if isolated else env,
         capture_output=True,
-        encoding="utf-8",
-        errors="replace",  # binary and non-UTF-8 files in a diff
         timeout=300,
         check=False,
     )
     if done.returncode != 0:
-        raise GitError(f"git {' '.join(args)} failed: {done.stderr.strip()}")
-    return done.stdout
+        error = done.stderr.decode(errors="replace").strip()
+        raise GitError(f"git {' '.join(args)} failed: {error}")
+    # Decoded here rather than in text mode, which would take a carriage
+    # return inside a line for a line break: file content could then forge
+    # lines of a diff. "replace" covers binary and non-UTF-8 files.
+    return done.stdout.decode(errors="replace")
 
 
 def diff(cwd: str | Path, base: str, head: str) -> str:

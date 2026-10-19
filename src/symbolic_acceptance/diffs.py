@@ -205,7 +205,7 @@ def locate(quote: str, lines: list[DiffLine]) -> list[DiffLine] | None:
     removes one of them is preferred. Quotes shorter than a few characters
     prove nothing and are rejected.
     """
-    parts = [part.strip() for part in quote.splitlines() if part.strip()]
+    parts = [part.strip() for part in quote.split("\n") if part.strip()]
     if sum(len(part) for part in parts) < MIN_QUOTE:
         return None
     unchanged = None

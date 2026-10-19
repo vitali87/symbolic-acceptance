@@ -122,6 +122,27 @@ class ParseTests(unittest.TestCase):
             ("tests/empty one.py (deleted)", "tests/my test.py (modified)"),
         )
 
+    def test_a_carriage_return_does_not_end_a_line(self):
+        # In Go a // comment runs to the newline, so this is one commented line;
+        # read as two, it would show code the change does not add.
+        with tempfile.TemporaryDirectory() as tmp:
+            git = repo(tmp)
+            Path(tmp, "app.py").write_bytes(b"x = 1\n// TODO\r+lock(user)\ny = 2\n")
+            git("commit", "-qam", "change")
+            changed = diff(tmp, "HEAD~1", "HEAD")
+        _, lines = parse(changed)
+        self.assertEqual(
+            [(d.side, d.text) for d in lines],
+            [
+                ("-", "print('v1')"),
+                ("+", "x = 1"),
+                ("+", "// TODO\r+lock(user)"),
+                ("+", "y = 2"),
+            ],
+        )
+        self.assertIsNone(locate("lock(user)", lines))
+        self.assertIsNotNone(locate("// TODO\r+lock(user)", lines), "the line itself")
+
     def test_locate(self):
         _, lines = parse(DIFF)
         found = locate("if failures(user) > MAX_FAILURES:\n    lock(user)", lines)
