@@ -13,6 +13,7 @@ from symbolic_acceptance.logic import (
     status,
     statuses,
     value,
+    wanted,
 )
 
 T, F, U = True, False, None
@@ -20,6 +21,10 @@ T, F, U = True, False, None
 
 def facts(**values):
     return {k: v for k, v in values.items() if v is not None}
+
+
+def people_last(question):
+    return question.by == "human"
 
 
 class ValueTests(unittest.TestCase):
@@ -142,6 +147,99 @@ class PlanTests(unittest.TestCase):
         )
         self.assertEqual(plan(checklist, {}, last=lambda q: True), ["h1", "h2"])
         self.assertEqual(plan(checklist, {"h1": True}, last=lambda q: True), [])
+
+    def test_not_is_planned_through(self):
+        checklist = sa.loads(
+            """
+            [q.breaks]
+            ask = "Does it break the API?"
+            by = "llm"
+            [q.docs]
+            ask = "Are the docs updated?"
+            by = "llm"
+            [q.internal]
+            ask = "Is the change internal only?"
+            by = "llm"
+            [[require]]
+            id = "api"
+            that = { not = "breaks" }
+            fail = "x"
+            [[require]]
+            id = "documented"
+            when = { not = "internal" }
+            that = "docs"
+            fail = "y"
+            """
+        )
+        self.assertEqual(
+            plan(checklist, {}, last=lambda q: False), ["breaks", "internal"]
+        )
+        self.assertEqual(
+            plan(checklist, {"breaks": False, "internal": False}, last=lambda q: False),
+            ["docs"],
+        )
+
+    def test_a_check_gated_by_a_person_waits_for_the_gate(self):
+        checklist = sa.loads(
+            """
+            [q.risky]
+            ask = "Is the change risky?"
+            by = "human"
+            [q.load_test]
+            ask = "Does the load test pass?"
+            by = "ci"
+            [[require]]
+            when = "risky"
+            that = "load_test"
+            fail = "x"
+            """
+        )
+        self.assertEqual(plan(checklist, {}, last=people_last), ["risky"])
+        self.assertEqual(
+            plan(checklist, {"risky": True}, last=people_last), ["load_test"]
+        )
+        self.assertEqual(plan(checklist, {"risky": False}, last=people_last), [])
+
+
+class WantedTests(unittest.TestCase):
+    def test_the_helpful_answer_follows_where_a_question_sits(self):
+        checklist = sa.loads(
+            """
+            [q.a]
+            ask = "A?"
+            by = "llm"
+            [q.b]
+            ask = "B?"
+            by = "llm"
+            [q.c]
+            ask = "C?"
+            by = "llm"
+            [q.d]
+            ask = "D?"
+            by = "llm"
+            [q.e]
+            ask = "E?"
+            by = "llm"
+            [[require]]
+            id = "r"
+            when = { all = ["d", { not = "e" }] }
+            that = { any = [{ all = ["a", "b"] }, { not = "c" }] }
+            fail = "x"
+            [[require]]
+            that = "d"
+            fail = "y"
+            """
+        )
+        self.assertEqual(
+            wanted(checklist),
+            {
+                "a": {True},
+                "b": {True},
+                "c": {False},
+                "d": {False, True},
+                "e": {True},
+            },
+        )
 
 
 if __name__ == "__main__":

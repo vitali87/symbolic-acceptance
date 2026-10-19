@@ -143,9 +143,12 @@ hand the attempt to a person.
   could add a workflow that reports a check of the same name. Lint warns.
 - Keep the run record outside the agent's checkout; inside it, the record
   would be committed with the attempt. The command line refuses to.
-- Run the agent without credentials that can comment as a reviewer. A reply
-  posted with your token reads as yours; nothing in a comment can tell the
-  agent apart from you.
+- `CommandAgent` runs the agent without the runner's GitHub token, with which
+  it could report a check run or comment as the runner. Give it no other
+  credentials that can comment as a reviewer either: a reply posted with
+  your token reads as yours. For an agent that might attack the runner
+  itself, not just game the checks, see the limits in
+  [`docs/design.md`](docs/design.md).
 
 The judge calls the Claude Messages API over HTTPS with `urllib`. It uses
 `claude-opus-5-5` at `high` effort, structured outputs for the verdict, and
@@ -159,6 +162,8 @@ From Python:
 
 ```python
 import asyncio
+from pathlib import Path
+
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import CommandAgent
 from symbolic_acceptance.checks import Checks
@@ -181,7 +186,7 @@ result = asyncio.run(
             "llm": Judge(),
             "human": Reviews(github, number=57, exclude=["agent-account"]),
         },
-        issue=open("issue-342.md").read(),
+        issue=Path("issue-342.md").read_text(encoding="utf-8"),
         max_attempts=5,
         on_progress=lambda run: sa.record.save(run, checklist, "run.json"),
     )

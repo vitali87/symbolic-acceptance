@@ -33,6 +33,29 @@ class ParseTests(unittest.TestCase):
         removed = [d for d in lines if d.side == "-"]
         self.assertEqual(removed[0].where, "src/auth.py:-11")
 
+    def test_no_newline_markers_and_escaped_paths(self):
+        diff = (
+            'diff --git "a/tab\\there.txt" "b/tab\\there.txt"\n'
+            "index 1111111..2222222 100644\n"
+            '--- "a/tab\\there.txt"\n'
+            '+++ "b/tab\\there.txt"\n'
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "\\ No newline at end of file\n"
+            "+new\n"
+            "\\ No newline at end of file\n"
+            "diff --git a/next.py b/next.py\n"
+            "new file mode 100644\n"
+        )
+        files, lines = parse(diff)
+        self.assertEqual(
+            [(f.path, f.status) for f in files],
+            [("tab\there.txt", "modified"), ("next.py", "added")],
+        )
+        self.assertEqual(
+            [(d.side, d.text) for d in lines], [("-", "old"), ("+", "new")]
+        )
+
     def test_bad_hunk_counts_do_not_swallow_the_next_file(self):
         broken = DIFF.replace("@@ -10,3 +10,6 @@", "@@ -10,9 +10,9 @@")
         files, _ = parse(broken)

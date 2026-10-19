@@ -130,6 +130,30 @@ class AssessTests(unittest.TestCase):
         self.assertIn("Applies because touches_sso is YES.", text)
         self.assertIn("Why: needs security review", text)
 
+    def test_render_names_each_part_of_a_compound_gate(self):
+        checklist = sa.loads(
+            """
+            [q.a]
+            ask = "A?"
+            by = "ci"
+            [q.b]
+            ask = "B?"
+            by = "ci"
+            [q.c]
+            ask = "C?"
+            by = "ci"
+            [[require]]
+            when = { all = ["a", { not = "b" }] }
+            that = "c"
+            fail = "x"
+            """
+        )
+        failures = sa.assess(checklist, answers({"a": True, "b": False, "c": False}))
+        self.assertIn(
+            "Applies because all(a, not(b)) is YES (a is YES, b is NO).",
+            sa.render_failures(failures.failures),
+        )
+
     def test_render_without_failures(self):
         self.assertEqual(sa.render_failures([]), "No requirement failed.\n")
 

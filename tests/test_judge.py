@@ -227,6 +227,16 @@ class VerdictTests(unittest.TestCase):
         with self.assertRaisesRegex(sa.Escalate, "reads it both ways"):
             ask(j, question=both, checklist_text=BOTH_WAYS)
 
+    def test_samples_that_disagree_on_a_question_read_both_ways_escalate(self):
+        j, _ = judge(
+            verdict("YES", ["if failures(user) > MAX_FAILURES:"]),
+            verdict("NO", missing="unsure"),
+            samples=2,
+        )
+        both = sa.Question("a", "A?", "llm")
+        with self.assertRaisesRegex(sa.Escalate, "samples disagree on a"):
+            ask(j, question=both, checklist_text=BOTH_WAYS)
+
     def test_no_says_what_is_missing(self):
         j, _ = judge(
             verdict(

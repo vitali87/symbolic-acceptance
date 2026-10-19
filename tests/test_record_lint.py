@@ -8,6 +8,7 @@ from helpers import EXAMPLE, PASSING, Scripted, example
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
+from symbolic_acceptance.lint import MAX_EXHAUSTIVE
 from symbolic_acceptance.report import markdown
 
 
@@ -46,6 +47,14 @@ class RecordTests(unittest.TestCase):
             record.save(self.result, self.checklist, path)
             self.assertEqual(record.load(path, self.checklist).status, sa.APPROVED)
             self.assertEqual([p.name for p in Path(tmp).iterdir()], ["run.json"])
+
+    def test_rejects_what_is_not_a_record_of_this_checklist(self):
+        with self.assertRaisesRegex(ValueError, "not a symbolic-acceptance/run v1"):
+            record.loads('{"format": "something else"}', self.checklist)
+        data = json.loads(record.dumps(self.result, self.checklist))
+        data["evaluations"][0]["answers"]["planted"] = {"is_met": True}
+        with self.assertRaisesRegex(ValueError, r"unknown questions: \['planted'\]"):
+            record.loads(json.dumps(data), self.checklist)
 
     def test_rejects_another_checklist(self):
         text = record.dumps(self.result, self.checklist)
@@ -185,6 +194,15 @@ class LintTests(unittest.TestCase):
         )
         self.assertEqual(self.codes(unfrozen), ["unfrozen-workflows"])
         self.assertNotIn("unfrozen-workflows", self.codes(example()))
+
+    def test_large_checklists_skip_exhaustive_checks(self):
+        ids = [f"q{n}" for n in range(MAX_EXHAUSTIVE + 1)]
+        text = "".join(f'[q.{q}]\nask = "{q}?"\nby = "ci"\n' for q in ids)
+        text += (
+            f'[[require]]\nid = "r"\nthat = {{ any = {json.dumps(ids)} }}\nfail = "x"\n'
+        )
+        issues = [(i.code, i.where) for i in sa.lint(sa.loads(text))]
+        self.assertEqual(issues, [("not-exhaustive", "r"), ("not-exhaustive", None)])
 
     def test_duplicate_question(self):
         c = sa.loads(
