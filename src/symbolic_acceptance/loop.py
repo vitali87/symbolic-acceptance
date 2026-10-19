@@ -376,7 +376,9 @@ async def evaluate(
             return Evaluation.from_answers(
                 checklist, attempt, known, done, ESCALATED, "; ".join(escalations)
             )
-        if waiting:
+        # Answers in hand can decide the attempt (a person's NO), and then
+        # nobody is waited for.
+        if waiting and plan(checklist, facts(known), last=lambda q: q.by in deferred):
             return Evaluation.from_answers(
                 checklist,
                 attempt,
@@ -434,22 +436,24 @@ async def run(
 ) -> Result:
     """Run the agent until approval or escalation.
 
-    The agent is ``(task) -> Attempt | ref``. ``diff`` computes an attempt's
-    diff from its ref, so the judge never reads a diff the agent supplied.
-    ``on_progress`` gets the run so far after each evaluation, e.g. to save
-    it with :func:`symbolic_acceptance.record.save`. Pass a saved ``Result``
-    as ``resume`` to continue it; its issue text carries over.
+    The agent is ``(task) -> Attempt | ref``, and raises :class:`Escalate`
+    when it cannot make an attempt. ``diff`` computes an attempt's diff from
+    its ref, so the judge never reads a diff the agent supplied.
+    ``on_progress`` gets the run after each evaluation, ``running`` or as it
+    ended, e.g. to save it with :func:`symbolic_acceptance.record.save`.
+    Pass a saved ``Result`` as ``resume`` to continue it; its issue text
+    carries over.
     """
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")
     _check_oracles(checklist, oracles)
     evaluations: list[Evaluation] = []
 
-    async def finished(evaluation: Evaluation) -> None:
-        evaluations.append(evaluation)
+    async def report(status: RunStatus, reason: str = "") -> Result:
+        result = Result(status, reason, tuple(evaluations), checklist.digest, issue)
         if on_progress is not None:
-            progress = Result(RUNNING, "", tuple(evaluations), checklist.digest, issue)
-            await _call(on_progress, progress)
+            await _call(on_progress, result)
+        return result
 
     if resume is not None:
         if resume.digest != checklist.digest:
@@ -462,7 +466,7 @@ async def run(
         evaluations = list(resume.evaluations)
         if evaluations and evaluations[-1].status == WAITING:
             waiting = evaluations.pop()
-            await finished(
+            evaluations.append(
                 await evaluate(
                     checklist,
                     waiting.attempt,
@@ -478,9 +482,8 @@ async def run(
         if evaluations:
             verdict = _verdict(evaluations, max_attempts, stop_on_regression)
             if verdict is not None:
-                return Result(
-                    verdict[0], verdict[1], tuple(evaluations), checklist.digest, issue
-                )
+                return await report(*verdict)
+            await report(RUNNING)
         previous = evaluations[-1] if evaluations else None
         task = Task(
             issue=issue,
@@ -489,7 +492,10 @@ async def run(
             feedback=previous.failures if previous else (),
             previous=previous.attempt if previous else None,
         )
-        produced = await _call(agent, task)
+        try:
+            produced = await _call(agent, task)
+        except Escalate as stop:
+            return await report(ESCALATED, f"agent: {stop}")
         if isinstance(produced, Attempt):
             attempt = replace(produced, number=task.number)
         elif isinstance(produced, str) and produced:
@@ -501,6 +507,6 @@ async def run(
             if not isinstance(computed, str):
                 raise TypeError("the diff source must return the diff as a string")
             attempt = replace(attempt, diff=computed)
-        await finished(
+        evaluations.append(
             await evaluate(checklist, attempt, oracles, last=last, issue=issue)
         )

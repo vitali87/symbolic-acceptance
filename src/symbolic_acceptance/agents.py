@@ -24,7 +24,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
-from symbolic_acceptance.loop import Attempt, Task
+from symbolic_acceptance.loop import Attempt, Escalate, Task
 
 __all__ = [
     "RUNNER_SECRETS",
@@ -76,7 +76,7 @@ _DIFF = (
 
 
 class AgentError(RuntimeError):
-    """The agent failed, or finished without changing anything."""
+    """A git command the runner ran failed."""
 
 
 def git(cwd: str | Path, *args: str, isolated: bool = False) -> str:
@@ -120,9 +120,15 @@ class CommandAgent:
 
     ``base`` is the commit attempts are compared with; it defaults to the
     checkout's HEAD when the first attempt starts, so pass the recorded base
-    when resuming a run. With ``push``, each attempt is pushed to that branch
-    of ``origin``, so CI runs on it. The agent gets ``env`` (by default this
-    process's environment) without :data:`RUNNER_SECRETS`.
+    when resuming a run. Each later attempt starts from the previous one,
+    which the checkout must have checked out. With ``push``, each attempt is
+    pushed to that branch of ``origin``, so CI runs on it; the agent may
+    rewrite its earlier attempts, and the branch follows as long as nobody
+    else has pushed to it. The agent gets ``env`` (by default this process's
+    environment) without :data:`RUNNER_SECRETS`.
+
+    An agent that fails, runs past ``timeout`` or changes nothing hands the
+    run to a person (:class:`Escalate`).
     """
 
     def __init__(
@@ -151,6 +157,12 @@ class CommandAgent:
         if self.base is None:
             self.base = self._head()
         before = self._head()
+        if task.previous is not None and before != task.previous.ref:
+            raise Escalate(
+                f"the checkout is at {before[:12]}, not at attempt "
+                f"{task.number - 1} ({task.previous.ref[:12]}); check that out "
+                "to continue"
+            )
         try:
             done = subprocess.run(
                 self.argv,
@@ -164,24 +176,26 @@ class CommandAgent:
                 check=False,
             )
         except subprocess.TimeoutExpired:
-            raise AgentError(f"the agent ran past {self.timeout:.0f}s") from None
+            raise Escalate(f"the agent ran past {self.timeout:.0f}s") from None
         if done.returncode != 0:
             tail = (done.stderr or done.stdout).strip()[-2000:]
-            raise AgentError(f"the agent exited with {done.returncode}: {tail}")
+            raise Escalate(f"the agent exited with {done.returncode}: {tail}")
         if git(self.cwd, "status", "--porcelain").strip():
             git(self.cwd, "add", "--all")
             git(self.cwd, "commit", "--quiet", "-m", f"Attempt {task.number}")
         after = self._head()
         if after == before:
-            raise AgentError(f"attempt {task.number} changed nothing")
+            raise Escalate(f"attempt {task.number} changed nothing")
         if self.push is not None:
-            git(
-                self.cwd,
-                "push",
-                "--quiet",
-                "origin",
-                f"{after}:refs/heads/{self.push}",
+            branch = f"refs/heads/{self.push}"
+            # The branch holds the previous attempt, which the agent may have
+            # rewritten; anything else on it is someone else's and stays.
+            lease = (
+                [f"--force-with-lease={branch}:{task.previous.ref}"]
+                if task.previous
+                else []
             )
+            git(self.cwd, "push", "--quiet", *lease, "origin", f"{after}:{branch}")
         return Attempt(
             ref=after,
             diff=diff(self.cwd, self.base, after),

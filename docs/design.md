@@ -101,7 +101,10 @@ fallback (`fallbacks: "default"`).
 hours later, or a GitHub Action with a time limit. An oracle raises
 `Pending` once it has asked; the run returns `waiting` and is saved
 (`record.save`), and the next event resumes it. Records keep answers, not
-conclusions: statuses are re-derived on load and must match.
+conclusions: statuses are re-derived on load and must match. A resume
+needs the checkout at the last attempt, and one run must not be resumed
+twice at once. Every outcome is saved, including an agent that fails or
+changes nothing, which escalates rather than crashing the run.
 
 ### 6. Stop conditions on requirements, not raw answers
 

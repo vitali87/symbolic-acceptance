@@ -11,14 +11,16 @@ from helpers import EXAMPLE, FakeHTTP, cli, example, finished_run, message, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
-from symbolic_acceptance.agents import AgentError, CommandAgent, local_diff
+from symbolic_acceptance.agents import CommandAgent, local_diff
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.draft import DraftError, draft
 
 
 class CommandAgentTests(unittest.TestCase):
-    def task(self, number=1):
-        return sa.Task(issue="make it v2", checklist=example(), number=number)
+    def task(self, number=1, previous=None):
+        return sa.Task(
+            issue="make it v2", checklist=example(), number=number, previous=previous
+        )
 
     def test_uncommitted_changes_become_the_attempt(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -68,7 +70,7 @@ class CommandAgentTests(unittest.TestCase):
         self.assertIn("+assert False or True", attempt.diff)
         self.assertIn("new file mode 160000", attempt.diff, "the gitlink shows")
 
-    def test_attempts_are_pushed(self):
+    def test_attempts_are_pushed_even_when_the_agent_rewrites_them(self):
         with (
             tempfile.TemporaryDirectory() as remote,
             tempfile.TemporaryDirectory() as tmp,
@@ -78,7 +80,15 @@ class CommandAgentTests(unittest.TestCase):
             git("remote", "add", "origin", remote)
             script = "open('app.py', 'w').write(\"print('v2')\\n\")"
             agent = CommandAgent([sys.executable, "-c", script], cwd=tmp, push="agent")
-            attempt = asyncio.run(agent(self.task()))
+            first = asyncio.run(agent(self.task()))
+            amend = (
+                "import subprocess; open('app.py', 'w').write('v3\\n');"
+                "subprocess.run(['git', 'commit', '-qa', '--amend', '-m', 'v3'])"
+            )
+            rewriter = CommandAgent(
+                [sys.executable, "-c", amend], cwd=tmp, push="agent", base=first.base
+            )
+            second = asyncio.run(rewriter(self.task(2, previous=first)))
             pushed = subprocess.run(
                 ["git", "rev-parse", "refs/heads/agent"],
                 cwd=remote,
@@ -86,7 +96,15 @@ class CommandAgentTests(unittest.TestCase):
                 text=True,
                 check=True,
             ).stdout.strip()
-        self.assertEqual(pushed, attempt.ref)
+        self.assertEqual(pushed, second.ref)
+
+    def test_a_later_attempt_starts_from_the_previous_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            agent = CommandAgent([sys.executable, "-c", "pass"], cwd=tmp)
+            elsewhere = sa.Attempt("0" * 40, 1)
+            with self.assertRaisesRegex(sa.Escalate, "not at attempt 1"):
+                asyncio.run(agent(self.task(2, previous=elsewhere)))
 
     def test_the_agent_never_gets_the_runners_github_token(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -109,14 +127,14 @@ class CommandAgentTests(unittest.TestCase):
             repo(tmp)
             sleeper = [sys.executable, "-c", "import time; time.sleep(5)"]
             agent = CommandAgent(sleeper, cwd=tmp, timeout=0.5)
-            with self.assertRaisesRegex(AgentError, "ran past"):
+            with self.assertRaisesRegex(sa.Escalate, "ran past"):
                 asyncio.run(agent(self.task()))
 
     def test_no_change_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
             agent = CommandAgent([sys.executable, "-c", "pass"], cwd=tmp)
-            with self.assertRaisesRegex(AgentError, "changed nothing"):
+            with self.assertRaisesRegex(sa.Escalate, "changed nothing"):
                 asyncio.run(agent(self.task()))
 
     def test_failing_agent_is_an_error(self):
@@ -125,7 +143,7 @@ class CommandAgentTests(unittest.TestCase):
             agent = CommandAgent(
                 [sys.executable, "-c", "raise SystemExit('boom')"], cwd=tmp
             )
-            with self.assertRaisesRegex(AgentError, "exited with 1: boom"):
+            with self.assertRaisesRegex(sa.Escalate, "exited with 1: boom"):
                 asyncio.run(agent(self.task()))
 
 
@@ -212,6 +230,19 @@ class CLITests(unittest.TestCase):
                 '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
                 '[[require]]\nthat = "a"\nfail = "x"\n'
             )
+            with self.assertRaisesRegex(SystemExit, "no folder to save"):
+                cli(
+                    "run",
+                    str(local),
+                    "--agent",
+                    "true",
+                    "--record",
+                    str(Path(tmp, "runs", "run.json")),
+                )
+            kept = Path(tmp, "kept.json")
+            kept.write_text("{}")
+            with self.assertRaisesRegex(SystemExit, "pass --resume"):
+                cli("run", str(local), "--agent", "true", "--record", str(kept))
             record = str(Path(tmp, "run.json"))
             with self.assertRaisesRegex(SystemExit, "outside the agent's checkout"):
                 cli(

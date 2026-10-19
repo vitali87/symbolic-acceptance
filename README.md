@@ -207,13 +207,19 @@ From the command line:
 symbolic-acceptance template bug > acceptance.toml   # or: draft issue.md (Claude drafts it)
 symbolic-acceptance lint acceptance.toml             # before a person approves it
 symbolic-acceptance digest acceptance.toml           # pin the approved version
-symbolic-acceptance run acceptance.toml --issue issue.md --agent "claude -p" \
-    --cwd work --push agent/issue-342 --record run.json \
-    --github owner/repo --pr 57
-symbolic-acceptance run acceptance.toml --agent "claude -p" --cwd work \
-    --push agent/issue-342 --github owner/repo --pr 57 --resume run.json
+symbolic-acceptance run acceptance.toml --issue issue.md \
+    --agent "claude -p --permission-mode auto" --cwd work \
+    --push agent/issue-342 --record run.json --github owner/repo --pr 57
+symbolic-acceptance run acceptance.toml --resume run.json \
+    --agent "claude -p --permission-mode auto" --cwd work \
+    --push agent/issue-342 --github owner/repo --pr 57
 symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 ```
+
+A resumed run needs the agent's checkout at its last attempt, and one run
+must not be resumed twice at once: the resumes would share the checkout
+and the record. An agent that fails, times out or changes nothing
+escalates the run, which is saved like any other outcome.
 
 `explain acceptance.toml answers.json` decides a checklist from answers you
 supply, which is handy for checking a checklist by hand.

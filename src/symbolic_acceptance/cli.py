@@ -230,6 +230,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.resume:
         resume = record.load(args.resume, checklist)
     record_path = args.record or args.resume
+    if args.record and args.record != args.resume and Path(args.record).exists():
+        raise SystemExit(
+            f"error: {args.record} holds a run; pass --resume {args.record} to "
+            "continue it"
+        )
+    if record_path and not Path(record_path).resolve().parent.is_dir():
+        raise SystemExit(f"error: no folder to save {record_path} in")
     if record_path and Path(record_path).resolve().is_relative_to(
         Path(args.cwd).resolve()
     ):
@@ -261,7 +268,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
             stop_on_regression=not args.keep_going_on_regression,
         )
     )
-    progress(result)
     print(f"{result.status}: {result.reason}")
     if result.last and result.last.failures:
         sys.stdout.write(result.last.feedback)

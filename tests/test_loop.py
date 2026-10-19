@@ -59,6 +59,20 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(resumed.status, sa.APPROVED)
         self.assertEqual(script.asked_ids("ci").count("repro_fixed"), 1)
 
+    def test_a_persons_no_decides_without_waiting_for_the_rest(self):
+        checklist = sa.loads(
+            '[q.ux]\nask = "UX ok?"\nby = "human"\n'
+            '[q.docs]\nask = "Docs ok?"\nby = "human"\n'
+            '[[require]]\nid = "r"\nthat = { all = ["ux", "docs"] }\nfail = "x"\n'
+        )
+
+        async def human(questions, context):
+            raise sa.Pending("asked", answers={"ux": sa.Answer(False, "confusing")})
+
+        result = evaluate(checklist, {"human": human})
+        self.assertEqual(result.status, sa.CHANGES)
+        self.assertEqual(result.failing, {"r"})
+
     def test_failure_does_not_wait_for_people(self):
         script = Scripted(
             dict(PASSING, touches_sso=True, new_test=False), silent={"human"}
@@ -313,7 +327,7 @@ class RunTests(unittest.TestCase):
     def test_progress_and_diff_source(self):
         seen = []
         script = Scripted(PASSING)
-        agent = Agent(script, [PASSING])
+        agent = Agent(script, [dict(PASSING, new_test=False), PASSING])
 
         def diff(attempt):
             return f"diff of {attempt.ref}"
@@ -322,7 +336,7 @@ class RunTests(unittest.TestCase):
 
         async def llm(questions, context):
             diffs.append(context.attempt.diff)
-            return {q.id: sa.Answer(PASSING[q.id]) for q in questions}
+            return {q.id: sa.Answer(script.truth[q.id]) for q in questions}
 
         result = asyncio.run(
             sa.run(
@@ -334,8 +348,26 @@ class RunTests(unittest.TestCase):
             )
         )
         self.assertEqual(result.status, sa.APPROVED)
-        self.assertEqual(seen, [(sa.RUNNING, 1)])
-        self.assertEqual(diffs, ["diff of commit1"])
+        self.assertEqual(seen, [(sa.RUNNING, 1), (sa.APPROVED, 2)])
+        self.assertEqual(diffs, ["diff of commit1", "diff of commit2"])
+
+    def test_an_agent_that_cannot_go_on_escalates(self):
+        seen = []
+
+        async def agent(task):
+            raise sa.Escalate("attempt 1 changed nothing")
+
+        result = asyncio.run(
+            sa.run(
+                self.checklist,
+                agent=agent,
+                oracles=Scripted(PASSING).oracles(),
+                on_progress=seen.append,
+            )
+        )
+        self.assertEqual(result.status, sa.ESCALATED)
+        self.assertEqual(result.reason, "agent: attempt 1 changed nothing")
+        self.assertEqual(seen, [result], "the outcome is reported, so it is saved")
 
     def test_agent_must_return_a_ref(self):
         async def agent(task):

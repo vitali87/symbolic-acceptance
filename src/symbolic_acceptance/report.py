@@ -10,11 +10,19 @@ from symbolic_acceptance.loop import Evaluation, Result
 __all__ = ["markdown"]
 
 _ICONS = {"pass": "✅", "fail": "❌", "n/a": "➖", "open": "⏳"}
+# The most of a table cell, and of the feedback, that a report shows; the
+# run record keeps all of it.
+CELL = 500
+FEEDBACK = 10_000
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def _cell(text: str) -> str:
     """One table cell: a single line, with nothing that could become markup."""
-    return " ".join(text.split()).replace("<", "&lt;").replace("|", "\\|")
+    return _cut(" ".join(text.split()), CELL).replace("<", "&lt;").replace("|", "\\|")
 
 
 def _fenced(text: str) -> list[str]:
@@ -24,7 +32,9 @@ def _fenced(text: str) -> list[str]:
     return [f"{fence}text", text, fence]
 
 
-def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
+def _evaluation(
+    evaluation: Evaluation, checklist: Checklist, detailed: bool
+) -> list[str]:
     attempt = evaluation.attempt
     lines = [
         f"### Attempt {attempt.number} · `{attempt.ref[:12]}` · {evaluation.status}"
@@ -38,7 +48,7 @@ def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
             f"| `{requirement.id}` | {_ICONS[state]} {state} | "
             f"{_cell(requirement.fail)} |"
         )
-    if evaluation.answers:
+    if detailed and evaluation.answers:
         lines += [
             "",
             "<details><summary>Answers</summary>",
@@ -54,14 +64,16 @@ def _evaluation(evaluation: Evaluation, checklist: Checklist) -> list[str]:
                 f"| `{qid}` | {answer.word} | {_cell(answer.by)} | {_cell(why)} |"
             )
         lines += ["", "</details>"]
-    if evaluation.failures:
+    if detailed and evaluation.failures:
         lines += ["", "<details><summary>Feedback sent to the agent</summary>", ""]
-        lines += [*_fenced(evaluation.feedback.rstrip()), "", "</details>"]
+        feedback = _cut(evaluation.feedback.rstrip(), FEEDBACK)
+        lines += [*_fenced(feedback), "", "</details>"]
     return lines
 
 
 def markdown(result: Result, checklist: Checklist) -> str:
-    """The whole run: outcome first, then each attempt with its answers."""
+    """The run: its outcome, then each attempt, newest first; only the newest
+    shows its answers and feedback."""
     title = checklist.title or "Acceptance run"
     lines = [
         f"## {title}",
@@ -70,6 +82,7 @@ def markdown(result: Result, checklist: Checklist) -> str:
         "",
         f"Checklist `{checklist.digest[:12]}` · {len(result.evaluations)} attempt(s)",
     ]
-    for evaluation in result.evaluations:
-        lines += ["", *_evaluation(evaluation, checklist)]
+    newest = result.last
+    for evaluation in reversed(result.evaluations):
+        lines += ["", *_evaluation(evaluation, checklist, evaluation is newest)]
     return "\n".join(lines) + "\n"

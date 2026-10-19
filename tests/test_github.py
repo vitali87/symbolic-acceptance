@@ -101,6 +101,13 @@ class ClientTests(unittest.TestCase):
         post_report(github, 5, "report", exclude=["Agent"])
         self.assertEqual(fake.requests[1].get_method(), "POST")
 
+    def test_a_report_too_long_for_a_comment_is_cut(self):
+        github, fake = gh(json_response([]), json_response({"id": 3}))
+        post_report(github, 5, "x" * 100_000)
+        posted = fake.body(1)["body"]
+        self.assertLessEqual(len(posted), 60_000)
+        self.assertTrue(posted.endswith("the run record has the rest)"))
+
     def test_report_is_updated_in_place(self):
         github, fake = gh(
             json_response(

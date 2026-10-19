@@ -85,7 +85,25 @@ class RecordTests(unittest.TestCase):
         self.assertIn("## Throttle brute-force logins (#342)", text)
         self.assertIn("**approved**", text)
         self.assertIn("| `new_test` | ❌ fail |", text)
-        self.assertIn("Feedback sent to the agent", text)
+        self.assertLess(text.index("### Attempt 2"), text.index("### Attempt 1"))
+        # Only the newest attempt shows its answers; the record has the rest.
+        self.assertEqual(text.count("<summary>Answers</summary>"), 1)
+        self.assertNotIn("Feedback sent to the agent", text)
+        sent_back = sa.Result(
+            sa.ESCALATED, "", self.result.evaluations[:1], self.result.digest
+        )
+        self.assertIn("Feedback sent to the agent", markdown(sent_back, self.checklist))
+
+    def test_long_evidence_is_cut_in_the_report(self):
+        evaluation = sa.Evaluation.from_answers(
+            self.checklist,
+            sa.Attempt("abc", 1),
+            {"repro_fixed": sa.Answer(False, "x" * 100_000)},
+            [],
+            "waiting",
+        )
+        result = sa.Result("waiting", "", (evaluation,), self.checklist.digest)
+        self.assertLess(len(markdown(result, self.checklist)), 12_000)
 
 
 def checklist(requirements, questions=("a", "b")):

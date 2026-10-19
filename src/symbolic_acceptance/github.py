@@ -54,6 +54,9 @@ _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 # Seconds between reads of check runs still going.
 POLL = 15.0
 REPORT_MARKER = "<!-- symbolic-acceptance:report -->"
+# GitHub refuses a comment over 65,536 characters; this leaves room for
+# however it counts them.
+MAX_COMMENT = 60_000
 
 
 class User(TypedDict):
@@ -207,9 +210,13 @@ def post_report(
     """Create or update the single report comment on an issue or pull request.
 
     ``exclude`` lists accounts (the agent's) whose comments are never taken
-    for the report, whatever they contain.
+    for the report, whatever they contain. A report too long for a comment
+    is cut to fit.
     """
     body = f"{REPORT_MARKER}\n{markdown}"
+    if len(body) > MAX_COMMENT:
+        cut = "\n\n…(cut to fit a comment; the run record has the rest)"
+        body = body[: MAX_COMMENT - len(cut)] + cut
     excluded = {login.lower() for login in exclude}
     for existing in github.comments(number):
         if existing["body"].startswith(REPORT_MARKER) and _by_runner(
