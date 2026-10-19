@@ -137,7 +137,7 @@ hand the attempt to a person.
 - An answer from the judge that helps the attempt pass must be backed by the
   diff wherever it can be: each quote of a YES names a file and gives whole
   lines of it, consecutive in the diff, and together they hold more than a
-  trivial line the change adds or removes, not merely reindents or moves;
+  trivial line the change adds or removes, not merely reindents or reorders;
   the quotes are checked. An
   unbacked helpful answer is asked for again, then gives way to the other
   one, or goes to a person when the checklist reads the question both ways.

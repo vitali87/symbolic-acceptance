@@ -191,7 +191,7 @@ class ParseTests(unittest.TestCase):
             "blank lines don't count",
         )
         self.assertIsNone(where("x = 1\ny = 2"), "the lines are far apart")
-        self.assertIsNone(where("+z = 3"), "too short to prove anything")
+        self.assertEqual(where("+z = 3"), ["src/auth.py:84"], "short, but a line")
         self.assertEqual(where("lock(user)"), ["src/auth.py:83"])
         self.assertIsNone(
             where("user.locked = True", "docs/notes.txt"),
@@ -213,8 +213,8 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([d.where for d in found], ["src/auth.py:2"])
 
     def test_a_line_that_starts_with_a_plus_is_found_whole(self):
-        # "+retries" also reads as "retries" with the diff's "+", which is
-        # too short to prove anything; the line itself is long enough.
+        # "+retries" also reads as "retries", an unchanged line, with the
+        # diff's "+"; the line the change adds is the one found.
         _, lines = parse(
             "diff --git a/fix.patch b/fix.patch\n"
             "--- a/fix.patch\n"

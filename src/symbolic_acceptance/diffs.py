@@ -22,7 +22,6 @@ _ESCAPES = {
     "\\": "\\",
 }
 _OCTAL = re.compile(r"[0-7]{3}")
-MIN_QUOTE = 8
 
 
 Change = Literal["added", "deleted", "modified", "renamed"]
@@ -208,8 +207,7 @@ def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | Non
     The quote's non-blank lines must be whole non-blank lines of one hunk,
     one after another; surrounding whitespace and a leading ``+`` or ``-``
     copied from the diff don't count. A place where the change adds or
-    removes one of them is preferred. Quotes shorter than a few characters
-    prove nothing and are rejected.
+    removes one of them is preferred.
     """
     parts = [part.strip() for part in quote.split("\n") if part.strip()]
     # The path as the diff names it, with or without the a/ or b/ before it;
@@ -222,10 +220,8 @@ def locate(quote: str, path: str, lines: list[DiffLine]) -> list[DiffLine] | Non
     unchanged = None
     for start in range(len(candidates) - len(parts) + 1):
         window = candidates[start : start + len(parts)]
-        if (
-            len({line.hunk for line in window}) > 1
-            or not all(map(_same, parts, window))
-            or sum(len(line.text.strip()) for line in window) < MIN_QUOTE
+        if len({line.hunk for line in window}) > 1 or not all(
+            map(_same, parts, window)
         ):
             continue
         if any(line.side != " " for line in window):

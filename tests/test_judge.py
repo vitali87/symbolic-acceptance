@@ -9,9 +9,8 @@ from helpers import DIFF, FakeHTTP, json_response, message
 import symbolic_acceptance as sa
 from symbolic_acceptance import http
 from symbolic_acceptance.claude import Claude, ClaudeError
-from symbolic_acceptance.diffs import MIN_QUOTE
 from symbolic_acceptance.github import GitHub
-from symbolic_acceptance.judge import Judge, Verdict
+from symbolic_acceptance.judge import MIN_QUOTE, Judge, Verdict
 
 
 def verdict(answer, quotes=(), missing="", tampering=False, reasoning="looked"):
@@ -318,6 +317,24 @@ class VerdictTests(unittest.TestCase):
         self.assertIn("too little of what the change adds", answer.reasoning)
         j, _ = judge(*[verdict("YES", [quote + "    }"] * MIN_QUOTE)] * 2)
         self.assertFalse(ask(j, diff=head + "+    }\n").is_met, "a line counts once")
+        # A short line counts with the other changed lines quoted with it.
+        stops = (
+            head
+            + "+    break\n"
+            + (
+                "diff --git a/tests/test_auth.py b/tests/test_auth.py\n"
+                "new file mode 100644\n--- /dev/null\n+++ b/tests/test_auth.py\n"
+                "@@ -0,0 +1 @@\n+def test_stops(): pass\n"
+            )
+        )
+        alone = verdict("YES", ["    break"])
+        j, _ = judge(alone, alone)
+        self.assertIn(
+            "too little of what the change adds", ask(j, diff=stops).reasoning
+        )
+        test = ("tests/test_auth.py", "def test_stops(): pass")
+        j, _ = judge(verdict("YES", ["    break", test]))
+        self.assertTrue(ask(j, diff=stops).is_met)
 
     def test_evidence_names_what_the_change_did_to_each_quoted_line(self):
         quote = "if not check(user, password):\n-        return False\n+record_failure(user)"
