@@ -168,6 +168,17 @@ class ChecksTests(unittest.TestCase):
         self.assertIn("in_progress", str(caught.exception))
         self.assertEqual(list(caught.exception.answers), ["suite_green"])
 
+    def test_runs_in_progress_are_read_again_while_waiting(self):
+        going = run("tests", status="in_progress", conclusion=None)
+        github, fake = gh(
+            json_response({"check_runs": [going]}),
+            json_response({"check_runs": [run("tests")]}),
+        )
+        checks = GitHubChecks(github, wait=60, poll=0)
+        answers = asyncio.run(checks([TESTS], context()))
+        self.assertTrue(answers["suite_green"].is_met)
+        self.assertEqual(len(fake.requests), 2)
+
     def test_only_runs_from_the_trusted_app_count(self):
         github, _ = gh(
             json_response({"check_runs": [run("tests", app="other-ci", run_id=9)]})

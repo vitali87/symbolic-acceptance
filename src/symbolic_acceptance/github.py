@@ -56,8 +56,6 @@ _ASKED = re.compile(
 # no backtick after it, and only spaces and tabs may follow a closing one.
 _FENCE = re.compile(r" {0,3}(`{3,}(?!.*`)|~{3,})(.*)$")
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
-# Seconds between reads of check runs still going.
-POLL = 15.0
 REPORT_MARKER = f"{_MARKER}report -->"
 # GitHub refuses a comment over 65,536 characters; this leaves room for
 # however it counts them.
@@ -255,8 +253,9 @@ class GitHubChecks:
     A completed run named by the question's ``check`` option answers it:
     ``success`` is YES; ``failure``, ``timed_out``, ``cancelled`` and the like
     are NO, and so are ``skipped`` and ``neutral``, because a check that did
-    not run proves nothing. Runs still going, or not started, are waited for
-    up to ``wait`` seconds and then reported as :class:`Pending`.
+    not run proves nothing. Runs still going, or not started, are read again
+    every ``poll`` seconds for up to ``wait`` seconds, and then reported as
+    :class:`Pending`.
 
     Only runs reported by ``app`` count, GitHub Actions by default: another
     CI app installed on the repository could run a configuration the attempt
@@ -264,10 +263,16 @@ class GitHubChecks:
     """
 
     def __init__(
-        self, github: GitHub, *, wait: float = 0.0, app: str = "github-actions"
+        self,
+        github: GitHub,
+        *,
+        wait: float = 0.0,
+        poll: float = 15.0,
+        app: str = "github-actions",
     ) -> None:
         self.github = github
         self.wait = wait
+        self.poll = poll
         self.app = app
 
     def _read(
@@ -315,7 +320,7 @@ class GitHubChecks:
                 return answers
             if time.monotonic() >= deadline:
                 raise Pending("CI: " + "; ".join(waiting), answers=answers)
-            await asyncio.sleep(POLL)
+            await asyncio.sleep(self.poll)
 
 
 class Reviews:
