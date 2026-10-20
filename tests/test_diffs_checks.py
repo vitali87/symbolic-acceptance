@@ -470,19 +470,27 @@ class CommandsTests(unittest.TestCase):
 
     def test_the_users_git_configuration_cannot_reach_the_checkout(self):
         # The agent can write the user's configuration as well: a template
-        # that sets up a filter in every new repository, a filter for every
-        # repository, and a rewrite that sends the fetch elsewhere.
+        # that sets up a filter, and sends the fetch elsewhere, in every new
+        # repository; and, for every repository, a filter, the same rewrite,
+        # and symlinks checked out as files holding their target's name.
+        Path(self.tmp.name, "v1.py").write_text("print('v1')\n")
+        Path(self.tmp.name, "app.py").unlink()
+        Path(self.tmp.name, "app.py").symlink_to("v1.py")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "Link")
+        self.head = self.git("rev-parse", "HEAD").strip()
         with tempfile.TemporaryDirectory() as user:
             template = Path(user, "template")
             Path(template, "info").mkdir(parents=True)
             Path(template, "info", "attributes").write_text("*.py filter=f\n")
             smudge = '[filter "f"]\n\tsmudge = sed s/v1/v2/\n'
-            Path(template, "config").write_text(smudge)
+            rewrite = '[url "file:///nowhere/"]\n\tinsteadOf = file:///\n'
+            Path(template, "config").write_text(smudge + rewrite)
             Path(user, "attributes").write_text("*.py filter=f\n")
             Path(user, "gitconfig").write_text(
                 f"[init]\n\ttemplateDir = {template}\n"
                 f"[core]\n\tattributesFile = {Path(user, 'attributes')}\n"
-                f'{smudge}[url "file:///nowhere/"]\n\tinsteadOf = file:///\n'
+                f"\tsymlinks = false\n{smudge}{rewrite}"
             )
             done = self.sees_app_py(Path(user, "gitconfig"))
         self.assertEqual(
