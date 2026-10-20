@@ -35,6 +35,7 @@ import hashlib
 import hmac
 import secrets
 from collections.abc import Sequence
+from functools import partial
 from typing import Literal, TypedDict
 
 from symbolic_acceptance.answer import Answer, yes_no
@@ -167,7 +168,7 @@ class Judge:
         )
         return "\n".join(parts)
 
-    def _verdict(
+    async def _verdict(
         self, question: Question, content: list[JSON], lines: list[DiffLine]
     ) -> tuple[Answer, str | None]:
         """One reply, and what is wrong with its quotes when it needed some.
@@ -175,8 +176,11 @@ class Judge:
         A presence question's YES and an absence question's NO can quote the
         diff, so they need quotes; the other answers have nothing to quote.
         """
+        ask = partial(self.claude.json, system=SYSTEM, content=content, shape=Verdict)
         try:
-            reply = self.claude.json(system=SYSTEM, content=content, shape=Verdict)
+            # In a thread of its own, so that cancelling the evaluation (an
+            # escalation, Ctrl-C) sends no request after this one.
+            reply = await asyncio.to_thread(ask)
         except Refusal as refusal:
             raise Escalate(
                 f"the judge declined {question.id} ({refusal.category}); "
@@ -215,7 +219,7 @@ class Judge:
             return answer, "quoted too little of what the change adds or removes"
         return answer, None
 
-    def _ask(
+    async def _ask(
         self,
         question: Question,
         change: str,
@@ -241,9 +245,9 @@ class Judge:
             {"type": "text", "text": change, "cache_control": {"type": "ephemeral"}},
             {"type": "text", "text": "\n".join(ask)},
         ]
-        answer, problem = self._verdict(question, content, lines)
+        answer, problem = await self._verdict(question, content, lines)
         if problem and answer.is_met in helps:
-            answer, problem = self._verdict(question, content, lines)
+            answer, problem = await self._verdict(question, content, lines)
         if not problem or answer.is_met not in helps:
             return answer
         if (not answer.is_met) in helps:
@@ -259,7 +263,7 @@ class Judge:
             answer.by,
         )
 
-    def _answer(
+    async def _answer(
         self,
         question: Question,
         change: str,
@@ -269,7 +273,7 @@ class Judge:
         """Every sample must give the answer that helps; any other decides."""
         verdicts: list[Answer] = []
         for _ in range(self.samples):
-            verdicts.append(self._ask(question, change, lines, helps))
+            verdicts.append(await self._ask(question, change, lines, helps))
             if verdicts[-1].is_met not in helps:
                 break
         decisive = verdicts[-1]
@@ -307,13 +311,12 @@ class Judge:
 
         async def one(question: Question) -> tuple[str, Answer]:
             async with gate:
-                answer = await asyncio.to_thread(
-                    self._answer, question, change, lines, helps[question.id]
-                )
+                answer = await self._answer(question, change, lines, helps[question.id])
                 return question.id, answer
 
         # The first request writes the cached change; the rest then read it.
-        # Once one escalates, the questions still waiting their turn are dropped.
+        # Once one escalates, the questions still waiting their turn are dropped
+        # and those being judged send no further request.
         first, *rest = questions
         answers = [await one(first)]
         answers += await together(one(q) for q in rest)

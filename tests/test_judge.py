@@ -214,6 +214,33 @@ class RequestTests(unittest.TestCase):
         # in before its escalation was seen; q6 and q7, waiting, never.
         self.assertIn(len(fake.requests), (5, 6))
 
+    def test_once_a_question_escalates_the_others_ask_no_more(self):
+        def reply(request):
+            asked = json.loads(request.data)["messages"][0]["content"][1]["text"]
+            if asked.startswith("Question (q1)"):
+                return message({}, stop="refusal")
+            time.sleep(0.2)
+            return verdict("YES", ["lock(user)"])
+
+        # q0's three samples alone, then q1, which is declined, while q2 takes
+        # its first of three; then nothing.
+        j, fake = judge(*[reply] * 5, samples=3)
+        checklist = sa.loads(
+            "".join(f'[q.{q}]\nask = "?"\nby = "llm"\n' for q in ("q0", "q1", "q2"))
+            + '[[require]]\nid = "r"\nthat = { all = ["q0", "q1", "q2"] }\n'
+            'fail = "x"\n'
+        )
+        questions = list(checklist.questions.values())
+        context = sa.Context(checklist, sa.Attempt("abc", 1, diff=DIFF), {})
+
+        async def main():
+            with self.assertRaisesRegex(sa.Escalate, "declined q1"):
+                await j(questions, context)
+            await asyncio.sleep(0.5)  # longer than q2's other samples would take
+
+        asyncio.run(main())
+        self.assertEqual(len(fake.requests), 5)
+
     def test_boundary_is_stable_per_attempt_and_unpredictable(self):
         j, fake = judge(verdict("NO", missing="x"), verdict("NO", missing="x"))
         ask(j)
