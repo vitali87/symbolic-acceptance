@@ -417,7 +417,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if github and args.pr:
             post_report(github, args.pr, markdown(result, checklist), exclude=exclude)
 
-    async def stopping_on_an_error() -> Result:
+    async def stoppable() -> Result:
         _stop_on_signals()
         try:
             return await run(
@@ -437,7 +437,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             stop_programs()
             raise
 
-    result = asyncio.run(stopping_on_an_error())
+    result = asyncio.run(stoppable())
     print(f"{result.status}: {result.reason}")
     if result.status == WAITING and record_path:
         print(f"Run it again with --resume {record_path} to go on.")
