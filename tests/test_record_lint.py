@@ -293,9 +293,19 @@ class LintTests(unittest.TestCase):
             '[q.o]\nask = "O?"\nby = "ci"\nrun = ["tr", "|", ","]\n'
             '[q.p]\nask = "P?"\nby = "ci"\nrun = "grep -q \'<b>x</b>\' f"\n'
             '[q.q]\nask = "Q?"\nby = "ci"\nrun = "python3 v.py \'>=3.11\'"\n'
+            # Options that mean something only beside another.
+            '[q.r]\nask = "R?"\nby = "ci"\ncheck = "old-test"\nexpect = "fail"\n'
+            '[q.s]\nask = "S?"\nby = "ci"\nrun = "true"\nallow_new = ["x"]\n'
+            # Shell syntax after a #, which is no comment there, and none
+            # quoted mid-word or escaped.
+            '[q.t]\nask = "T?"\nby = "ci"\nrun = "repro --issue #342 | grep -q x"\n'
+            '[q.u]\nask = "U?"\nby = "ci"\nrun = "grep -E --regexp=\'a|b\' f"\n'
+            '[q.v]\nask = "V?"\nby = "ci"\nrun = \'find . -exec rm {} \\;\'\n'
+            # An oracle of one's own reads its own options.
+            '[q.w]\nask = "W?"\nby = "security"\nkind = "sast"\nexpect = "clean"\n'
             '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", '
-            '"f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q"] }\n'
-            'fail = "x"\n'
+            '"f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", '
+            '"s", "t", "u", "v", "w"] }\nfail = "x"\n'
         )
         findings = [f for f in sa.lint(c) if f.code == "bad-option"]
         shell = (
@@ -317,6 +327,9 @@ class LintTests(unittest.TestCase):
                 ("j", 'q.j.kind works only with by = "llm"'),
                 ("l", "q.l.run has |" + shell),
                 ("m", "q.m.run has >& >" + shell),
+                ("r", "q.r.expect works only with run"),
+                ("s", "q.s.allow_new works only with frozen"),
+                ("t", "q.t.run has |" + shell),
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))

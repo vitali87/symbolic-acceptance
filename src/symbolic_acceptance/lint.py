@@ -23,7 +23,6 @@ from __future__ import annotations
 import difflib
 import itertools
 import re
-import shlex
 from collections.abc import Callable, Collection, Iterator
 from dataclasses import dataclass
 from typing import Literal
@@ -59,7 +58,7 @@ _READERS = {
 # A question's other keys, which a typo in an option may have meant.
 _KEYS = (*_READERS, "ask", "by", "context")
 # What a shell's pipes, command lists and redirections are made of.
-_SHELL = frozenset("|&;<>")
+_SHELL = "|&;<>"
 # The blanks the templates and the format guide leave to fill in: one of
 # more than a word anywhere, numbered as it may be once copied ("<acceptance
 # criterion 2, ...>"), and one of a word as a whole value (run = "<command>"),
@@ -163,6 +162,27 @@ def _requirement_findings(requirement: Requirement) -> list[Finding]:
     return findings
 
 
+def _shell_syntax(run: str) -> list[str]:
+    """The pipes, command lists and redirections a shell would read in
+    ``run``: its characters for them outside quotes and not escaped, as POSIX,
+    and so the command's own splitting, reads them."""
+    plain, quote, escaped = [], "", False
+    for char in run:
+        if escaped:
+            escaped = False
+        elif char == "\\" and quote != "'":
+            escaped = True
+        elif quote:
+            quote = "" if char == quote else quote
+        elif char in "'\"":
+            quote = char
+        else:
+            plain.append(char)
+            continue
+        plain.append(" ")
+    return re.findall(f"[{re.escape(_SHELL)}]+", "".join(plain))
+
+
 def _run_command(question: Question) -> None:
     """Read the question's ``run`` command. It runs without a shell, so shell
     syntax in a command given as one string would reach the program as
@@ -171,10 +191,7 @@ def _run_command(question: Question) -> None:
     run = question.options["run"]
     if not isinstance(run, str):
         return
-    # Outside quotes, which this lexer keeps, shell syntax is a token of its own.
-    lexer = shlex.shlex(run, punctuation_chars=True)
-    syntax = [token for token in lexer if set(token) <= _SHELL]
-    if syntax:
+    if syntax := _shell_syntax(run):
         raise ValueError(
             f"q.{question.id}.run has {' '.join(syntax)} but runs without a shell;"
             ' for one, write run = ["sh", "-c", "<script>"]'
@@ -205,9 +222,14 @@ def _option_findings(question: Question) -> list[Finding]:
     if "frozen" in options and "run" in options:
         problems.append(f"q.{question.id} has both frozen and run; split it in two")
     problems += [
+        f"q.{question.id}.{key} works only with {partner}"
+        for key, partner in (("expect", "run"), ("allow_new", "frozen"))
+        if key in options and partner not in options
+    ]
+    problems += [
         f'q.{question.id}.{key} works only with by = "{reader}"'
         for key, reader in _READERS.items()
-        if key in options and question.by in ORACLES and question.by != reader
+        if key in options and question.by != reader
     ]
     return [
         Finding("error", "bad-option", problem, question.id) for problem in problems
@@ -298,8 +320,8 @@ def lint(
     used = set(checklist.used())
 
     for question in checklist.questions.values():
-        findings.extend(_option_findings(question))
         if question.by in ORACLES:
+            findings.extend(_option_findings(question))
             findings.extend(_unread_option_findings(question))
         if question.id not in used:
             findings.append(
