@@ -517,7 +517,7 @@ class CommandsTests(unittest.TestCase):
         self.assertIn("timed out after 0.5s", answer.reasoning)
 
     def test_what_a_command_leaves_running_neither_holds_it_up_nor_outlives_it(self):
-        marker = Path(self.tmp.name).parent / f"{Path(self.tmp.name).name}-late"
+        marker = Path(self.tmp.name, "late")
         late = f"import time; time.sleep(0.5); open({str(marker)!r}, 'w')"
         script = f"import subprocess, sys; subprocess.Popen([sys.executable, '-c', {late!r}])"
         started = time.monotonic()
