@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import sys
 import threading
@@ -25,7 +26,7 @@ from symbolic_acceptance.checklist import (
     load,
     render,
 )
-from symbolic_acceptance.checks import Checks, Commands
+from symbolic_acceptance.checks import Checks, Commands, command
 from symbolic_acceptance.claude import DEFAULT_MODEL, Claude, ClaudeError
 from symbolic_acceptance.draft import DraftError, draft
 from symbolic_acceptance.feedback import assess, render_failures
@@ -277,6 +278,12 @@ def _stoppable() -> Generator[None]:
             signal.signal(stop, handler)
 
 
+def _on_path(program: str, what: str) -> None:
+    """Refuse a program named without a folder that is not on PATH."""
+    if "/" not in program and shutil.which(program) is None:
+        raise SystemExit(f"error: {what}: {program} is not a program on PATH")
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     checklist = _load(args.file)
     errors = [i for i in lint(checklist, oracles=ORACLES) if i.level == "error"]
@@ -290,7 +297,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(f"error: --agent: {error}") from None
     if not argv:
         raise SystemExit("error: --agent names no command")
+    # What would fail only once the agent has worked is checked now.
+    _on_path(argv[0], "--agent")
+    for qid in checklist.used():
+        if "run" in checklist.questions[qid].options:
+            _on_path(command(checklist.questions[qid])[0], f"q.{qid}.run")
     issue = _read(args.issue) if args.issue else ""
+    if args.github and not re.fullmatch(r"[^/\s]+/[^/\s]+", args.github):
+        raise SystemExit("error: --github takes a repository as owner/name")
     if args.pr and not args.github:
         raise SystemExit("error: --pr needs --github")
     github = GitHub(args.github) if args.github else None
@@ -360,7 +374,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
             "error: the checkout (--cwd) has changes no commit holds; commit or "
             "stash them, so that the attempts hold only what the agent does"
         )
-    # Checked now, before the agent runs, rather than when first needed.
+    # Checked now, before the agent runs, rather than when first needed: a
+    # name to commit the agent's leftovers in, and where to push them.
+    git(args.cwd, "var", "GIT_COMMITTER_IDENT")
+    if args.push:
+        git(args.cwd, "remote", "get-url", "origin")
     if github and args.pr and not github.token:
         raise SystemExit("error: --pr needs a token in GITHUB_TOKEN or GH_TOKEN")
     judged = any(checklist.questions[q].by == "llm" for q in checklist.used())

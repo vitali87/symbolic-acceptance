@@ -682,9 +682,18 @@ class CLITests(unittest.TestCase):
                     *("--agent", "true", "--cwd", str(work), "--record", str(link)),
                 )
             link.unlink()
-            missing = "no-such-agent-xyz"
-            with self.assertRaisesRegex(SystemExit, f"^error: .*{missing}"):
-                cli("run", str(local), "--agent", missing, "--cwd", str(work))
+            # What would fail only once the agent has worked fails first.
+            missing = "no-such-program-xyz"
+            linted = Path(tmp, "linted.toml")
+            linted.write_text(local.read_text().replace("true", f"{missing} --check"))
+            for setup, refusal in (
+                ((str(local), "--agent", missing), f"--agent: {missing} is not"),
+                ((str(linted), "--agent", "true"), f"q.a.run: {missing} is not"),
+                ((str(local), "--agent", "true", "--github", "octo"), "owner/name"),
+                ((str(local), "--agent", "true", "--push", "a"), "remote 'origin'"),
+            ):
+                with self.subTest(refusal), self.assertRaisesRegex(SystemExit, refusal):
+                    cli("run", *setup, "--cwd", str(work))
             for agent, message in (("", "names no command"), ("x 'y", "--agent: ")):
                 with self.assertRaisesRegex(SystemExit, message):
                     cli("run", str(local), "--agent", agent, "--cwd", str(work))
@@ -717,6 +726,16 @@ class CLITests(unittest.TestCase):
             self.assertIn("the judge needs ANTHROPIC_API_KEY", done.stderr)
             done = run(str(local), "--github", "octo/repo", "--pr", "5")
             self.assertIn("--pr needs a token in GITHUB_TOKEN", done.stderr)
+            # No name to commit in: the agent's leftovers could not be kept.
+            nameless = Path(tmp, "nameless")
+            nameless.mkdir()
+            repo(str(nameless))
+            for key in ("user.name", "user.email"):
+                git(nameless, "config", "--unset", key)
+            git(nameless, "config", "user.useConfigOnly", "true")
+            isolated = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+            done = run(str(local), "--cwd", str(nameless), **isolated)
+            self.assertIn("identity unknown", done.stderr)
             self.assertEqual(git(work, "log", "--format=%s").split(), ["base"])
             # Either credential will do; with one, the agent runs.
             done = run(str(judged), ANTHROPIC_AUTH_TOKEN="t")
@@ -954,7 +973,7 @@ class CLITests(unittest.TestCase):
                 (("report", checklist, broken), "broken.json: Expecting"),
                 (("report", checklist, other), "not a symbolic-acceptance/run v1"),
                 (("explain", checklist, broken), "broken.json: Expecting"),
-                (("run", checklist, "--agent", "x", "--issue", binary), "not UTF-8"),
+                (("run", checklist, "--agent", "true", "--issue", binary), "not UTF-8"),
             ):
                 with (
                     self.subTest(args),
