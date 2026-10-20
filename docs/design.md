@@ -166,8 +166,9 @@ off (`stop_on_regression=False`).
   attributes could change in it (hooks, replace refs, textconv, binary
   files, diff format); `run` commands execute in a fresh copy of the commit
   that reads none of the checkout's git configuration or attributes, nor
-  the user's; and the run record, with the issue text, is kept outside the
-  checkout.
+  the user's, and holds each file as the commit does, whatever the commit's
+  own `.gitattributes` would make of it; and the run record, with the issue
+  text, is kept outside the checkout.
 - Edited comments never count as answers, and lint warns when CI check runs
   answer questions but `.github/workflows` is not frozen. Only check runs
   from GitHub Actions count by default, since another installed CI app
@@ -189,7 +190,13 @@ off (`stop_on_regression=False`).
   that must hold against an agent set on gaming them belong in CI, behind
   frozen workflows; against one attacking the runner itself, run the agent
   in a sandbox that holds none of the runner's credentials, with a checkout
-  that has none persisted.
+  that has none persisted. Wherever they run, though, tests run the
+  attempt's code in their own process, where it can patch the test
+  framework, and a command runs whatever of the commit it executes that is
+  not frozen: a script, or a module the attempt adds that shadows the one
+  it names (`python -m` looks in the checkout first; `python -P` does not).
+  Frozen tests and scripts, `tests_intact`, and a person reading the diff
+  are what stand in the way.
   The runner's own git (status, add, commit, push) reads the checkout's
   `.git`, whose configuration can name programs git runs (filters, a
   signing program, credential helpers) and where a push goes; only the
@@ -199,7 +206,8 @@ off (`stop_on_regression=False`).
 - An `llm` question in a `when` condition helps the attempt with a NO,
   which has nothing to quote, so the judge's NO there stands unbacked.
   Where the condition is about files ("does it touch SSO?"), a frozen
-  check over those paths decides it exactly instead.
+  check over those paths decides exactly whether they changed instead,
+  though not whether code elsewhere changes what they do.
 - An oracle may only answer the questions it was asked.
 - The checklist's digest is recorded; resuming with a changed checklist
   fails.

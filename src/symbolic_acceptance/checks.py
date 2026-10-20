@@ -9,8 +9,9 @@
   lets files in, a pattern matches only paths as deep as itself, so ``*``
   stays within a directory.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
-  attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts its
-  exit status. Commands run without a shell.
+  attempt's commit (see :class:`Commands`). ``expect = <status>`` asks for
+  that exit status instead, and ``expect = "fail"`` for any but 0. Commands
+  run without a shell.
 
 Anything else goes to ``fallback``, such as
 :class:`symbolic_acceptance.github.GitHubChecks`.
@@ -37,9 +38,11 @@ __all__ = [
     "Commands",
     "admits",
     "command",
+    "expected",
     "frozen_files",
     "frozen_paths",
     "matches",
+    "patterns",
 ]
 
 # Lines of a command's output kept as evidence.
@@ -76,9 +79,36 @@ def command(question: Question) -> list[str]:
     return argv
 
 
+def patterns(question: Question, key: str) -> tuple[str, ...]:
+    """The glob patterns of the question's option ``key``, which name files
+    from the top of the repository: ``tests/*``, where ``./tests/*``,
+    ``/tests/*`` and ``tests/`` would match nothing."""
+    globs = question.strings(key)
+    for glob in globs:
+        if glob.startswith(("/", "./")) or glob.endswith("/"):
+            raise ValueError(
+                f"q.{question.id}.{key} has {glob!r}, which matches no file: "
+                "patterns name files from the top of the repository, as tests/*"
+            )
+    return globs
+
+
+def expected(question: Question) -> Callable[[int], bool]:
+    """Whether an exit status is what the question's ``expect`` asks for: 0
+    (``"pass"``, the default), any other (``"fail"``), or that very status."""
+    expect = question.options.get("expect", "pass")
+    if isinstance(expect, int) and not isinstance(expect, bool):
+        return lambda status: status == expect
+    if expect == "pass":
+        return lambda status: status == 0
+    if expect == "fail":
+        return lambda status: status != 0
+    raise ValueError(f'q.{question.id}.expect must be "pass", "fail" or an exit status')
+
+
 def frozen_paths(question: Question) -> tuple[str, ...]:
     """The glob patterns of the question's ``frozen`` option."""
-    paths = question.strings("frozen")
+    paths = patterns(question, "frozen")
     if not paths:
         raise ValueError(f"q.{question.id}.frozen lists no paths")
     return paths
@@ -87,7 +117,7 @@ def frozen_paths(question: Question) -> tuple[str, ...]:
 def frozen_files(question: Question, context: Context) -> Answer:
     """YES when no frozen path is added, changed, renamed or deleted."""
     frozen = frozen_paths(question)
-    allow_new = question.strings("allow_new")
+    allow_new = patterns(question, "allow_new")
     diff = context.attempt.diff
     if diff is None:
         raise OracleError(f"q.{question.id} reads the attempt's diff, and it has none")
@@ -155,12 +185,20 @@ class Commands:
 
     def __call__(self, question: Question, context: Context) -> Answer:
         argv = command(question)
-        expect = question.choice("expect", "pass", "fail")
+        expect = expected(question)
         top = git(self.repo, "rev-parse", "--show-toplevel").strip()
         with tempfile.TemporaryDirectory(prefix="symbolic-acceptance-") as scratch:
             tree = str(Path(scratch, "tree"))
             source = Path(top).as_uri()
             git(scratch, "init", "--quiet", tree, isolated=True)
+            # Every file as the commit holds it, whatever the commit's own
+            # .gitattributes would make of it on checkout: line endings, an
+            # encoding, $Id$. These attributes outrank the commit's.
+            info = Path(tree, ".git", "info")
+            info.mkdir(exist_ok=True)
+            Path(info, "attributes").write_text(
+                "* -text -ident -working-tree-encoding -filter\n"
+            )
             # Git found the checkout trusted just above: the user's, or named
             # by their safe.directory, which the git that reads it for this
             # fetch does not see, so it is told.
@@ -168,9 +206,9 @@ class Commands:
             fetch = ("fetch", "--quiet", "--depth=1", "--no-tags", upload, source)
             git(tree, *fetch, context.attempt.ref, isolated=True)
             git(tree, "checkout", "--quiet", "--detach", "FETCH_HEAD", isolated=True)
-            return self._run(argv, tree, expect == "pass")
+            return self._run(argv, tree, expect)
 
-    def _run(self, argv: list[str], tree: str, wanted: bool) -> Answer:
+    def _run(self, argv: list[str], tree: str, expect: Callable[[int], bool]) -> Answer:
         shown = shlex.join(argv)
         env = for_agent(self.env) | {"PWD": tree}
         try:
@@ -186,7 +224,7 @@ class Commands:
             reason = f"`{shown}` timed out after {self.timeout:g}s"
             return Answer(False, reason, output, by="ci:run")
         verb = "passed" if status == 0 else f"failed (exit {status})"
-        return Answer((status == 0) == wanted, f"`{shown}` {verb}", output, by="ci:run")
+        return Answer(expect(status), f"`{shown}` {verb}", output, by="ci:run")
 
 
 class Checks:

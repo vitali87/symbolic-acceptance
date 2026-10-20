@@ -15,7 +15,8 @@ looks for checklists that load but cannot mean what their author intended:
   options no built-in oracle reads, as a typo is (``unknown-option``), CI
   check runs an attempt could fake (``unfrozen-workflows``), commands and
   check runs whose NO helps the attempt pass, which one that never ran gives
-  too (``no-helps``), and blanks a template left to fill in
+  too (``no-helps``), commands any failure passes, a crash too
+  (``any-failure``), and blanks a template left to fill in
   (``placeholder``);
 * info: checklists too large for the exhaustive checks (``not-exhaustive``).
 """
@@ -37,7 +38,14 @@ from symbolic_acceptance.checklist import (
     refs,
     render,
 )
-from symbolic_acceptance.checks import admits, command, frozen_paths, matches
+from symbolic_acceptance.checks import (
+    admits,
+    command,
+    expected,
+    frozen_paths,
+    matches,
+    patterns,
+)
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value, wanted
 from symbolic_acceptance.templates import FORMAT_GUIDE, ORACLES, TEMPLATES
 
@@ -204,8 +212,8 @@ def _option_findings(question: Question) -> list[Finding]:
     """Options the built-in oracles read, checked before any run needs them."""
     options = question.options
     reads: list[Callable[[], object]] = [
-        lambda: question.strings("allow_new"),
-        lambda: question.choice("expect", "pass", "fail"),
+        lambda: patterns(question, "allow_new"),
+        lambda: expected(question),
         lambda: question.choice("kind", "presence", "absence"),
     ]
     if "frozen" in options:
@@ -256,7 +264,7 @@ def _freezes(question: Question, path: str) -> bool:
     if question.by != "ci" or "frozen" not in question.options:
         return False
     try:
-        frozen, allowed = frozen_paths(question), question.strings("allow_new")
+        frozen, allowed = frozen_paths(question), patterns(question, "allow_new")
     except ValueError:
         return False  # reported as a bad option
     return matches(path, frozen) and not admits(path, allowed)
@@ -308,11 +316,27 @@ def _no_helps_findings(checklist: Checklist) -> list[Finding]:
                 "no-helps",
                 f"a NO helps the attempt pass (under not, or in when), but {unrun} "
                 "answers NO too; ask it the other way round, so that a YES helps "
-                '(with expect = "fail" for a command that must fail)',
+                "(with expect = <the status it exits with> for a command that "
+                "must fail)",
                 qid,
             )
         )
     return findings
+
+
+def _any_failure_findings(checklist: Checklist) -> list[Finding]:
+    """``expect = "fail"`` takes any failure, which an attempt need not earn."""
+    return [
+        Finding(
+            "warning",
+            "any-failure",
+            'expect = "fail" takes any failure, a crash or a missing script\'s too; '
+            "name the status the command must exit with (expect = 1, say)",
+            question.id,
+        )
+        for question in checklist.questions.values()
+        if question.by == "ci" and question.options.get("expect") == "fail"
+    ]
 
 
 def _texts(value: object, path: str) -> Iterator[tuple[str, str]]:
@@ -413,6 +437,7 @@ def lint(
 
     findings.extend(_check_runs_findings(checklist))
     findings.extend(_no_helps_findings(checklist))
+    findings.extend(_any_failure_findings(checklist))
     findings.extend(_placeholder_findings(checklist))
 
     ordered = checklist.used()

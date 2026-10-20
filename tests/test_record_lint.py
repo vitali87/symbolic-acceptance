@@ -320,7 +320,7 @@ class LintTests(unittest.TestCase):
                 ("b", "q.b.run must be a string or a list of strings"),
                 ("c", 'q.c.kind must be "presence" or "absence"'),
                 ("d", "q.d.run: No closing quotation"),
-                ("e", 'q.e.expect must be "pass" or "fail"'),
+                ("e", 'q.e.expect must be "pass", "fail" or an exit status'),
                 ("e", "q.e.run is empty"),
                 ("f", "q.f.check must name a check run"),
                 ("g", "q.g.check must name a check run"),
@@ -445,7 +445,7 @@ class LintTests(unittest.TestCase):
                     self.assertEqual(self.codes(read_as_no), ["no-helps"])
         # Asked the other way round, a YES helps, which only a run can give.
         failing = sa.loads(
-            '[q.t]\nask = "T?"\nby = "ci"\nrun = "pytest"\nexpect = "fail"\n'
+            '[q.t]\nask = "T?"\nby = "ci"\nrun = "pytest"\nexpect = 1\n'
             f"{frozen}"
             '[[require]]\nid = "r"\nthat = { all = ["f", "t"] }\nfail = "x"\n'
         )
@@ -455,6 +455,39 @@ class LintTests(unittest.TestCase):
             f'{frozen}[[require]]\nid = "r"\nthat = {{ not = "f" }}\nfail = "x"\n'
         )
         self.assertNotIn("no-helps", self.codes(changed))
+
+    def test_any_failure_is_no_proof(self):
+        def lint(expect):
+            return self.codes(
+                sa.loads(
+                    f'[q.t]\nask = "T?"\nby = "ci"\nrun = "pytest"\nexpect = {expect}\n'
+                    '[[require]]\nthat = "t"\nfail = "x"\n'
+                )
+            )
+
+        self.assertEqual(lint('"fail"'), ["any-failure"])
+        self.assertEqual(lint("1"), [])
+        self.assertEqual(lint('"pass"'), [])
+        self.assertEqual(lint("true"), ["bad-option"])
+
+    def test_patterns_that_match_no_file_are_errors(self):
+        for key, glob in (
+            ("frozen", "/tests/*"),
+            ("frozen", "./tests/*"),
+            ("frozen", "tests/"),
+            ("allow_new", "./tests/test_*.py"),
+        ):
+            with self.subTest(glob, key=key):
+                frozen = glob if key == "frozen" else "src/*"
+                allow = f'allow_new = ["{glob}"]\n' if key == "allow_new" else ""
+                findings = sa.lint(
+                    sa.loads(
+                        f'[q.f]\nask = "Frozen?"\nby = "ci"\nfrozen = ["{frozen}"]\n'
+                        f'{allow}[[require]]\nthat = "f"\nfail = "x"\n'
+                    )
+                )
+                self.assertEqual([f.code for f in findings], ["bad-option"])
+                self.assertIn(f"{glob!r}, which matches no file", findings[0].message)
 
     def test_large_checklists_skip_exhaustive_checks(self):
         ids = [f"q{n}" for n in range(MAX_EXHAUSTIVE + 1)]

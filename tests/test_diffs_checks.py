@@ -423,6 +423,10 @@ class CommandsTests(unittest.TestCase):
         self.assertIn("exit 3", bad.reasoning)
         inverted = run_question("inv", "raise SystemExit(1)", expect="fail")
         self.assertTrue(self.check(inverted).is_met)
+        for status, met in ((2, True), (1, False), (0, False)):
+            with self.subTest(status=status):
+                exact = run_question("ex", f"raise SystemExit({status})", expect=2)
+                self.assertIs(self.check(exact).is_met, met)
 
     def test_commands_see_only_the_commit(self):
         # Files outside the commit, such as ignored ones, are not there.
@@ -453,6 +457,16 @@ class CommandsTests(unittest.TestCase):
         self.git("config", "filter.f.smudge", "sed s/v1/v2/")
         sees = run_question("sees", "print(open('app.py').read().strip())")
         self.assertEqual(self.check(sees).evidence, ("print('v1')",))
+
+    def test_the_commits_attributes_cannot_rewrite_its_files(self):
+        # Checked out with CRLF line endings, a frozen fixture could match
+        # what the attempt's code writes; the command sees the commit's bytes.
+        Path(self.tmp.name, ".gitattributes").write_text("app.py text eol=crlf\n")
+        self.git("add", ".gitattributes")
+        self.git("commit", "-qm", "Attributes")
+        self.head = self.git("rev-parse", "HEAD").strip()
+        sees = run_question("sees", "print(open('app.py', 'rb').read().hex())")
+        self.assertEqual(self.check(sees).evidence, (b"print('v1')\n".hex(),))
 
     def test_the_users_git_configuration_cannot_reach_the_checkout(self):
         # The agent can write the user's configuration as well: a template
@@ -525,7 +539,7 @@ class CommandsTests(unittest.TestCase):
         )
 
     def test_a_program_of_the_attempt_that_cannot_run_fails_the_check(self):
-        for expect in ("pass", "fail"):
+        for expect in ("pass", "fail", 127):
             with self.subTest(expect=expect):
                 gone = sa.Question(
                     "g", "G?", "ci", options={"run": "./repro.sh", "expect": expect}

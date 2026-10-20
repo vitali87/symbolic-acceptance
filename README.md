@@ -187,8 +187,10 @@ hand the attempt to a person.
   read-only token (`permissions: contents: read`); a token that can write
   checks or comments would let that code report a check run or post a
   comment as `github-actions[bot]`.
-- Keep the run record outside the agent's checkout; inside it, the record
-  would be committed with the attempt. The command line refuses to.
+- Keep the run record outside the agent's checkout and out of its reach:
+  inside the checkout it would be committed with the attempt (the command
+  line refuses to), and an agent that can write it can write a person's YES
+  into it before a resume.
 - The agent, and the `run` commands that execute its code, get no GitHub
   token from the runner, with which they could report a check run or
   comment as the runner, though one set on it can still take it from the
