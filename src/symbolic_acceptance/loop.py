@@ -15,10 +15,17 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
+from collections.abc import (
+    Awaitable,
+    Callable,
+    Collection,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Literal, ParamSpec
+from typing import Literal, ParamSpec, TypeVar
 
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import Checklist, Question, render
@@ -264,6 +271,7 @@ Listener = Callable[[Result], object]
 
 
 P = ParamSpec("P")
+T = TypeVar("T")
 
 
 async def _call(
@@ -273,6 +281,18 @@ async def _call(
     await what it returns when that is awaitable (an async one's coroutine)."""
     result = await asyncio.to_thread(function, *args, **kwargs)
     return await result if inspect.isawaitable(result) else result
+
+
+async def together(awaitables: Iterable[Awaitable[T]]) -> list[T]:
+    """Await them all at once. Once one fails the rest are cancelled, as
+    nobody would wait for them; one running in a thread can only be left to
+    finish there."""
+    tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
+    try:
+        return await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            task.cancel()
 
 
 async def _put(
@@ -368,17 +388,9 @@ async def evaluate(
             checklist, attempt, MappingProxyType(known | provisional), issue
         )
         names = list(groups)
-        tasks = [
-            asyncio.ensure_future(_put(oracles[name], tuple(groups[name]), context))
-            for name in names
-        ]
-        try:
-            results = await asyncio.gather(*tasks)
-        finally:
-            # One oracle's error stops those asked with it, which nobody would
-            # wait for; a sync one, in a thread, can only be left to finish.
-            for task in tasks:
-                task.cancel()
+        results = await together(
+            _put(oracles[name], tuple(groups[name]), context) for name in names
+        )
         got: dict[str, Answer] = {}
         for name, result in zip(names, results, strict=True):
             asked = [q.id for q in groups[name]]

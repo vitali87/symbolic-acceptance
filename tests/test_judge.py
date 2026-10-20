@@ -186,6 +186,34 @@ class RequestTests(unittest.TestCase):
         asyncio.run(j(questions, context))
         self.assertEqual([kind for kind, _ in events[:2]], ["start", "end"])
 
+    def test_once_a_question_escalates_no_more_are_asked(self):
+        def reply(request):
+            asked = json.loads(request.data)["messages"][0]["content"][1]["text"]
+            if asked.startswith("Question (q1)"):
+                return message({}, stop="refusal")
+            time.sleep(0.2)
+            return verdict("NO", missing="x")
+
+        ids = [f"q{n}" for n in range(8)]
+        j, fake = judge(*[reply] * len(ids))
+        checklist = sa.loads(
+            "".join(f'[q.{q}]\nask = "?"\nby = "llm"\n' for q in ids)
+            + f'[[require]]\nid = "r"\nthat = {{ all = {json.dumps(ids)} }}\n'
+            'fail = "x"\n'
+        )
+        questions = [checklist.questions[q] for q in ids]
+        context = sa.Context(checklist, sa.Attempt("abc", 1, diff=DIFF), {})
+
+        async def main():
+            with self.assertRaisesRegex(sa.Escalate, "declined q1"):
+                await j(questions, context)
+            await asyncio.sleep(0.5)  # longer than the rest would take
+
+        asyncio.run(main())
+        # q0 alone, then q1 to q4 at once, and q5 if q1's turn ending let it
+        # in before its escalation was seen; q6 and q7, waiting, never.
+        self.assertIn(len(fake.requests), (5, 6))
+
     def test_boundary_is_stable_per_attempt_and_unpredictable(self):
         j, fake = judge(verdict("NO", missing="x"), verdict("NO", missing="x"))
         ask(j)

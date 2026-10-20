@@ -43,7 +43,7 @@ from symbolic_acceptance.claude import Claude, Refusal, Truncated
 from symbolic_acceptance.diffs import DiffLine, locate, parse
 from symbolic_acceptance.http import JSON
 from symbolic_acceptance.logic import wanted
-from symbolic_acceptance.loop import Context, Escalate, OracleError
+from symbolic_acceptance.loop import Context, Escalate, OracleError, together
 
 __all__ = ["MIN_QUOTE", "SYSTEM", "Judge", "Quote", "Verdict"]
 
@@ -313,7 +313,8 @@ class Judge:
                 return question.id, answer
 
         # The first request writes the cached change; the rest then read it.
+        # Once one escalates, the questions still waiting their turn are dropped.
         first, *rest = questions
         answers = [await one(first)]
-        answers += await asyncio.gather(*(one(q) for q in rest))
+        answers += await together(one(q) for q in rest)
         return dict(answers)
