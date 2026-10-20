@@ -1219,6 +1219,8 @@ class CLITests(unittest.TestCase):
                         NO_PROXY="127.0.0.1",
                         no_proxy="127.0.0.1",
                         PYTHONPATH=SRC,
+                        # Nothing is left open, not even the refusal.
+                        PYTHONWARNINGS="error::ResourceWarning",
                     ),
                     capture_output=True,
                     text=True,

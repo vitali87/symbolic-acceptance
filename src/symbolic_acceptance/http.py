@@ -60,7 +60,8 @@ def urlopen(request: urllib.request.Request, timeout: float) -> Response:
         with urllib.request.urlopen(request, timeout=timeout) as reply:
             return Response(reply.status, reply.read(), dict(reply.headers.items()))
     except urllib.error.HTTPError as error:
-        return Response(error.code, error.read(), dict(error.headers.items()))
+        with error:
+            return Response(error.code, error.read(), dict(error.headers.items()))
 
 
 def _used_up(response: Response) -> bool:
