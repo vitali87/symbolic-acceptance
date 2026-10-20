@@ -24,7 +24,8 @@ such as which issue to judge against. Then come two parts.
   any other key is an option for that oracle: for "ci", check = "<name>"
   names the CI check that answers it, run = "<command>" runs a command whose
   success is YES (with expect = <status>, its exiting with that status is;
-  a timeout is NO either way) without a shell, so no pipes, && or
+  a timeout, or a program of the commit's that cannot start, is NO
+  whatever expect says) without a shell, so no pipes, && or
   redirections: write run = ["sh", "-c", "<script>"] for those, and
   frozen = [<globs>] is YES when no file matching them changes, except new
   files matching allow_new = [<globs>], where * stays within a directory.
@@ -58,8 +59,9 @@ Rules:
   about files, decide it with frozen = [<their paths>], under `not`, rather
   than asking the judge.
 - A command or check run that never ran answers NO, so ask it so that YES
-  helps the attempt pass, never under `not` or in `when`: expect = <status>
-  asks for a command that must fail, with the status it must exit with.
+  helps the attempt pass: in `that` and not under `not`, or in `when` under
+  `not`. expect = <status> asks for a command that must fail, with the
+  status it must exit with.
 - Ids are letters, digits and underscores, and start with a letter or an
   underscore.
 """

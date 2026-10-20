@@ -152,7 +152,8 @@ def frozen_files(question: Question, context: Context) -> Answer:
 
 
 class Commands:
-    """Run a question's ``run`` command on the attempt's commit; exit 0 is YES.
+    """Run a question's ``run`` command on the attempt's commit; exit 0 is YES,
+    or the status ``expect`` names.
 
     Each command runs in a fresh checkout of exactly that commit, fetched
     from the repository at ``repo`` with none of its configuration or

@@ -171,7 +171,8 @@ def _run(
 ) -> int | None:
     """Run ``argv`` to its end, known to :func:`stop_programs` meanwhile, and
     return its exit status, or ``None`` past ``timeout``. Then what is left
-    of it is killed: with a ``session`` of its own, whatever it started too."""
+    of it is killed: with a ``session`` of its own, whatever it started;
+    without, the program itself if it ran past ``timeout``."""
     _starting.add(threading.get_ident())
     try:
         if _stopped:
@@ -194,13 +195,17 @@ def _run(
     except subprocess.TimeoutExpired:
         return None
     finally:
-        # What is left of it, unless stop_programs is giving it time; then it
-        # stays known until stop_programs is done with it, for a second stop
-        # to kill at once.
+        # Unless stop_programs is giving it time: then a session stays known
+        # until stop_programs is done with it, for a second stop to kill at
+        # once. A program without one is signalled only before it is reaped,
+        # when its process id could already be another's.
         if not _stopped:
-            _signal(target, signal.SIGKILL)
+            if session or process.returncode is None:
+                _signal(target, signal.SIGKILL)
             _running.discard(target)
         process.wait()
+        if not session:
+            _running.discard(target)
 
 
 def run_program(

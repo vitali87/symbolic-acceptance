@@ -222,8 +222,8 @@ package cannot build on it, so the three-valued evaluation it would have
 provided is reimplemented here in about a hundred lines. The rest follows the
 same rule: HTTP through `urllib`, an in-repository PEP 517/660 build backend
 (`build-system.requires = []`), reproducible archives, and a CI workflow with
-no third-party actions, whose one download is the linters, pinned by hash in
-`uv.lock`.
+no third-party actions, whose one download is the linters: uv, checked against
+its release's hash, then ruff and ty, pinned by hash in `uv.lock`.
 
 ## Concepts
 

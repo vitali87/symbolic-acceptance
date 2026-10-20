@@ -259,9 +259,10 @@ _STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 def _stop(signum: int, stops: Collection[int]) -> None:
-    """End the agent or check running now and stop as soon as the rest has,
-    the record kept as last saved; a second signal, for a request still
-    waiting on the network, quits at once."""
+    """End the agent, check or git running now, start and send nothing more,
+    and stop as soon as the rest has, the record kept as last saved; a
+    second signal, for a request still waiting on the network, quits at
+    once."""
     for stop in stops:
         signal.signal(stop, _quit)
     name = signal.Signals(signum).name

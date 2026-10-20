@@ -12,8 +12,9 @@ in.
 **No dependencies.** The package and its build use only the Python standard
 library (3.11+). There is nothing to download at install time or at build time
 (the build backend is in this repository), and CI uses no third-party actions:
-its one download is the linters, at the versions and hashes `uv.lock` pins.
-Builds are reproducible byte for byte.
+its one download is the linters, uv checked against its release's hash, then
+ruff and ty at the versions and hashes `uv.lock` pins. Builds are reproducible
+byte for byte.
 
 ## A checklist
 
@@ -175,7 +176,7 @@ hand the attempt to a person.
   whoever posted them: replies are read from the comment as GitHub renders
   it. An agent account needs no write access, and must not have it: it
   could delete a reviewer's NO.
-- Freeze `.github/` when CI check runs answer questions; otherwise an attempt
+- Freeze `.github/*` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.
   Only runs from GitHub Actions count, unless `GitHubChecks(app=...)` names
   another CI app, whose configuration should then be frozen too. The
@@ -290,9 +291,9 @@ for another or asking again what was answered. Ctrl-C, SIGTERM from a
 supervisor or a cancelled CI job, or a hang-up (the terminal closing) stops
 a run the same way: nothing more is started, committed or sent, and what
 is running (the agent or a check, with what that started, or git) is given
-five seconds to clean up; a second Ctrl-C ends it at once. Without `--pr`, people answer on the terminal; with no
-terminal to ask on, or once its input ends (Ctrl-D), the run waits for
-them, to be resumed.
+five seconds to clean up; a second signal ends it at once. Without `--pr`,
+people answer on the terminal; with no terminal to ask on, or once its
+input ends (Ctrl-D), the run waits for them, to be resumed.
 
 `explain acceptance.toml answers.json` decides a checklist from answers you
 supply, which is handy for checking a checklist by hand.
