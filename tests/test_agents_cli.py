@@ -366,6 +366,26 @@ class CommandAgentTests(unittest.TestCase):
                 git(remote, "rev-parse", "refs/heads/agent").strip(), second.ref
             )
 
+    def test_a_push_makes_the_branch_again_if_it_is_gone(self):
+        with (
+            tempfile.TemporaryDirectory() as remote,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            git(remote, "init", "-q", "--bare")
+            local = repo(tmp)
+            local("remote", "add", "origin", remote)
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            base = local("rev-parse", "HEAD").strip()
+            first = CommandAgent(write, cwd=tmp, push="agent")(self.task())
+            # Deleted, as when its pull request was closed.
+            local("push", "-q", "origin", ":refs/heads/agent")
+            again = [sys.executable, "-c", "open('app.py', 'w').write('v3\\n')"]
+            agent = CommandAgent(again, cwd=tmp, push="agent", base=base)
+            second = agent(self.task(2, previous=first))
+            self.assertEqual(
+                git(remote, "rev-parse", "refs/heads/agent").strip(), second.ref
+            )
+
     def test_a_push_never_overwrites_someone_elses_commit(self):
         with (
             tempfile.TemporaryDirectory() as remote,

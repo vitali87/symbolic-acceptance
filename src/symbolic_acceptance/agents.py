@@ -363,14 +363,14 @@ class CommandAgent:
                     "pushing would run; a person must review it first"
                 )
             branch = f"refs/heads/{self.push}"
-            # The branch holds the previous attempt, or the commit this one
-            # started from, pushed by a run stopped before it kept it; the agent
-            # may have rewritten either. Anything else is someone else's.
+            # The runner replaces only its own commit on the branch, which the
+            # agent may have rewritten: the previous attempt, or the commit
+            # this one started from, pushed by a run stopped before it kept it.
+            # Anything else, someone else's, it only fast-forwards.
             ls = ("ls-remote", "origin", branch)
-            pushed = git(self.cwd, *ls, secrets=True).split()[:1] == [before]
-            previous = task.previous.ref if task.previous else None
-            expected = before if pushed else previous
-            lease = [f"--force-with-lease={branch}:{expected}"] if expected else []
+            tip = git(self.cwd, *ls, secrets=True).split()[:1]
+            ours = {before, task.previous.ref} if task.previous else {before}
+            lease = [f"--force-with-lease={branch}:{ref}" for ref in tip if ref in ours]
             push = ("push", "--quiet", *lease, "origin", f"{after}:{branch}")
             git(self.cwd, *push, secrets=True)
         return Attempt(
