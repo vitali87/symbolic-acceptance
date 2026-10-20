@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 import time
 import unittest
 from http.client import IncompleteRead
@@ -187,14 +188,20 @@ class RequestTests(unittest.TestCase):
         self.assertEqual([kind for kind, _ in events[:2]], ["start", "end"])
 
     def test_once_a_question_escalates_no_more_are_asked(self):
+        ids = [f"q{n}" for n in range(CONCURRENCY + 4)]
+        # q1 is declined once the others let in with it have asked too.
+        let_in = ids[1 : 1 + CONCURRENCY]
+        all_asked = threading.Barrier(len(let_in))
+
         def reply(request):
             asked = json.loads(request.data)["messages"][0]["content"][1]["text"]
+            if asked.removeprefix("Question (").split(")")[0] in let_in:
+                all_asked.wait(5)
             if asked.startswith("Question (q1)"):
                 return message({}, stop="refusal")
             time.sleep(0.2)
             return verdict("NO", missing="x")
 
-        ids = [f"q{n}" for n in range(CONCURRENCY + 4)]
         j, fake = judge(*[reply] * len(ids))
         checklist = sa.loads(
             "".join(f'[q.{q}]\nask = "?"\nby = "llm"\n' for q in ids)
@@ -215,15 +222,20 @@ class RequestTests(unittest.TestCase):
         self.assertIn(len(fake.requests), (1 + CONCURRENCY, 2 + CONCURRENCY))
 
     def test_once_a_question_escalates_the_others_ask_no_more(self):
+        q2_asked = threading.Event()
+
         def reply(request):
             asked = json.loads(request.data)["messages"][0]["content"][1]["text"]
             if asked.startswith("Question (q1)"):
+                q2_asked.wait(5)
                 return message({}, stop="refusal")
+            if asked.startswith("Question (q2)"):
+                q2_asked.set()
             time.sleep(0.2)
             return verdict("YES", ["lock(user)"])
 
-        # q0's three samples alone, then q1, which is declined, while q2 takes
-        # its first of three; then nothing.
+        # q0's three samples alone, then q1, which is declined once q2 has
+        # taken its first of three; then nothing.
         j, fake = judge(*[reply] * 5, samples=3)
         checklist = sa.loads(
             "".join(f'[q.{q}]\nask = "?"\nby = "llm"\n' for q in ("q0", "q1", "q2"))
