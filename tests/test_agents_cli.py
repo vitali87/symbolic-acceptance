@@ -595,9 +595,16 @@ class CLITests(unittest.TestCase):
             del truth["suite_green"]
             answers.write_text(json.dumps(dict(truth, backs_off=True)))
             self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 3)
-            answers.write_text(json.dumps({"backs_off": {"is_met": "no"}}))
-            with self.assertRaisesRegex(SystemExit, "backs_off: is_met must be a bool"):
-                cli("explain", str(EXAMPLE), str(answers))
+            for data, refusal in (
+                ({"backs_off": {"is_met": "no"}}, "backs_off: is_met must be a bool"),
+                (["backs_off"], "answers must be a JSON object"),
+                ({"backs_off": "yes"}, "backs_off: expected true, false or an answer"),
+                ({"backs_of": True}, "answers for unknown questions: backs_of"),
+            ):
+                with self.subTest(refusal):
+                    answers.write_text(json.dumps(data))
+                    with self.assertRaisesRegex(SystemExit, refusal):
+                        cli("explain", str(EXAMPLE), str(answers))
 
     def test_run_refuses_setups_that_cannot_work(self):
         with tempfile.TemporaryDirectory() as tmp:

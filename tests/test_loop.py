@@ -431,29 +431,39 @@ class RunTests(unittest.TestCase):
         self.assertEqual(second.status, sa.APPROVED)
         self.assertEqual(len(agent.tasks), 1)
 
-    def test_resume_keeps_the_issue(self):
+    def test_resume_keeps_the_issue_and_base(self):
         truth = dict(PASSING, sso_untouched=False)
         script = Scripted(truth, silent={"human"})
         agent = Agent(script, [truth])
         first = asyncio.run(
-            sa.run(self.checklist, agent=agent, oracles=script.oracles(), issue="#342")
+            sa.run(
+                self.checklist,
+                agent=agent,
+                oracles=script.oracles(),
+                issue="#342",
+                base="b0",
+            )
         )
-        self.assertEqual(first.issue, "#342")
+        self.assertEqual((first.issue, first.base), ("#342", "b0"))
         script.silent.clear()
         second = asyncio.run(
             sa.run(self.checklist, agent=agent, oracles=script.oracles(), resume=first)
         )
-        self.assertEqual(second.issue, "#342")
-        with self.assertRaisesRegex(ValueError, "issue text differs"):
-            asyncio.run(
-                sa.run(
-                    self.checklist,
-                    agent=agent,
-                    oracles=script.oracles(),
-                    resume=first,
-                    issue="another issue",
+        self.assertEqual((second.issue, second.base), ("#342", "b0"))
+        for other, refusal in (
+            ({"issue": "another issue"}, "issue text differs"),
+            ({"base": "b1"}, "base differs"),
+        ):
+            with self.subTest(refusal), self.assertRaisesRegex(ValueError, refusal):
+                asyncio.run(
+                    sa.run(
+                        self.checklist,
+                        agent=agent,
+                        oracles=script.oracles(),
+                        resume=first,
+                        **other,
+                    )
                 )
-            )
 
     def test_resume_rejects_a_changed_checklist(self):
         result, agent = run(

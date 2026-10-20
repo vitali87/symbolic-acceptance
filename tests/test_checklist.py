@@ -99,6 +99,17 @@ class RejectTests(unittest.TestCase):
             MINIMAL.replace('that = "a"', 'that = "b"'), "'b' is not a question"
         )
 
+    def test_tables_where_tables_belong(self):
+        require = '[[require]]\nthat = "a"\nfail = "x"\n'
+        for text, pattern in [
+            ("q = 1\n" + require, "q must be a table of questions"),
+            ('q.a = "Done?"\n' + require, "q.a must be a table with ask and by"),
+            ('require = ["a"]\n[q.a]\nask = "x"\nby = "ci"\n', "#1 must be a table"),
+            (MINIMAL.replace('that = "a"', ""), "#1 needs `that`"),
+        ]:
+            with self.subTest(text):
+                self.assertRejected(text, pattern)
+
     def test_requirement_needs_fail(self):
         self.assertRejected(MINIMAL.replace('fail = "A is not done"', ""), "fail")
 
@@ -154,6 +165,22 @@ class DigestTests(unittest.TestCase):
     def test_meaning_changes_the_digest(self):
         changed = MINIMAL.replace('by = "ci"', 'by = "llm"')
         self.assertNotEqual(sa.loads(MINIMAL).digest, sa.loads(changed).digest)
+
+    def test_options_may_be_tables_and_lists_that_stay_as_loaded(self):
+        def written(env):
+            return MINIMAL.replace(
+                'by = "ci"', f'by = "ci"\nlabels = ["x", "y"]\nenv = {env}'
+            )
+
+        checklist = sa.loads(written('{ B = "2", A = "1" }'))
+        reordered = sa.loads(written('{ A = "1", B = "2" }'))
+        self.assertEqual(checklist.digest, reordered.digest)
+        source = checklist.to_dict()["q"]["a"]
+        self.assertEqual(
+            (source["env"], source["labels"]), ({"A": "1", "B": "2"}, ["x", "y"])
+        )
+        with self.assertRaises(TypeError, msg="the digest stays true"):
+            checklist.questions["a"].options["env"]["A"] = "3"
 
     def test_dates_in_options_have_a_digest(self):
         dated = MINIMAL.replace('by = "ci"', 'by = "ci"\nsince = 2026-10-01')

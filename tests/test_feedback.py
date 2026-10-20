@@ -134,7 +134,7 @@ class AssessTests(unittest.TestCase):
         )
         self.assertIn("Why: needs security review", text)
 
-    def test_render_names_each_part_of_a_compound_gate(self):
+    def test_render_names_what_a_gate_read(self):
         checklist = sa.loads(
             """
             [q.a]
@@ -150,13 +150,19 @@ class AssessTests(unittest.TestCase):
             when = { all = ["a", { not = "b" }] }
             that = "c"
             fail = "x"
+            [[require]]
+            id = "plain"
+            when = "a"
+            that = "c"
+            fail = "y"
             """
         )
         failures = sa.assess(checklist, answers({"a": True, "b": False, "c": False}))
+        text = sa.render_failures(failures.failures)
         self.assertIn(
-            "Applies because all(a, not(b)) is YES (a is YES, b is NO).",
-            sa.render_failures(failures.failures),
+            "Applies because all(a, not(b)) is YES (a is YES, b is NO).", text
         )
+        self.assertIn("2. plain: y\n   Applies because a is YES.\n", text)
 
     def test_render_shows_each_cause_and_who_answered(self):
         truth = {

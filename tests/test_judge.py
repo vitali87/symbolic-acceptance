@@ -521,16 +521,24 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(len(fake.requests), 2)
 
     def test_client_errors_are_not_retried(self):
-        fake = FakeHTTP(json_response({"error": {"message": "bad schema"}}, 400))
-        with self.assertRaisesRegex(http.HTTPError, "HTTP 400: bad schema"):
-            http.request(
-                "POST",
-                "https://example.test/x",
-                transport=fake,
-                json_body={},
-                sleep=lambda s: None,
-            )
-        self.assertEqual(len(fake.requests), 1)
+        # Their detail as the Messages API, GitHub or a proxy gives it.
+        for body, detail in (
+            (b'{"error": {"message": "bad schema"}}', "bad schema"),
+            (b'{"message": "Not Found"}', "Not Found"),
+            (b"<h1>Bad Request</h1>", "<h1>Bad Request</h1>"),
+        ):
+            with self.subTest(detail):
+                fake = FakeHTTP(http.Response(400, body, {}))
+                with self.assertRaises(http.HTTPError) as raised:
+                    http.request(
+                        "POST",
+                        "https://example.test/x",
+                        transport=fake,
+                        json_body={},
+                        sleep=lambda s: None,
+                    )
+                self.assertTrue(str(raised.exception).endswith(f"HTTP 400: {detail}"))
+                self.assertEqual(len(fake.requests), 1)
 
     def test_posts_are_not_retried_when_they_may_have_taken_effect(self):
         fake = FakeHTTP(json_response({}, 502))
@@ -546,16 +554,19 @@ class HTTPTests(unittest.TestCase):
         with self.assertRaisesRegex(http.HTTPError, "connection failed"):
             http.request("POST", "https://example.test/x", transport=timeout)
 
-    def test_retry_after_may_be_a_date(self):
+    def test_retry_after_may_be_a_date_or_unreadable(self):
         slept = []
         past = "Wed, 21 Oct 2015 07:28:00 GMT"
         fake = FakeHTTP(
-            json_response({}, 503, {"retry-after": past}), json_response({})
+            json_response({}, 503, {"retry-after": past}),
+            json_response({}, 503, {"retry-after": "soon"}),
+            json_response({}),
         )
         http.request(
             "GET", "https://example.test/x", transport=fake, sleep=slept.append
         )
-        self.assertEqual(slept, [0.0], "a date already past means now")
+        # A date already past means now; what cannot be read, the backoff.
+        self.assertEqual(slept, [0.0, 2.0])
 
     def test_retry_after_is_capped(self):
         slept = []
