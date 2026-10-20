@@ -167,8 +167,8 @@ class Commands:
     it gets ``env`` (by default this process's environment) without the
     runner's GitHub token, and no input; whatever it starts is stopped when
     it ends, but for what leaves its process group, as a daemon does. A
-    commit that cannot be checked out here as it is (two names that macOS
-    takes for one file, say) answers NO, as does a command that runs past
+    commit with names that the file system here takes for one file, as
+    macOS's does by case, answers NO, as does a command that runs past
     ``timeout``, whatever ``expect`` says, or a program of the attempt's own
     (a relative path, like ``./repro.sh``) that is gone or cannot run; a
     program the machine lacks is an :class:`OracleError`, for a person to
@@ -213,13 +213,18 @@ class Commands:
             git(tree, *checkout, isolated=True, timeout=self.timeout)
             # Names that the file system here takes for one file, as macOS's
             # does when they differ only in case or Unicode form, are checked
-            # out one over the other: a new test over a frozen one, say.
-            if lost := git(tree, "diff", "--name-only", "-z", isolated=True):
+            # out one over the other: a new test over a frozen one, say. The
+            # files are compared with the commit's by their content, from an
+            # index that holds none of the checkout's file times and sizes,
+            # which the file that won could match.
+            git(tree, "read-tree", "FETCH_HEAD", isolated=True)
+            diff = ("diff", "--name-only", "-z")
+            if lost := git(tree, *diff, isolated=True, timeout=self.timeout):
                 names = ", ".join(lost.split("\0")[:-1])
                 reason = (
                     f"`{shlex.join(argv)}` not run: {names} cannot be checked "
-                    "out as committed here, where names that differ only in "
-                    "case or Unicode form are one file"
+                    "out here as committed, as where the file system takes "
+                    "two of its names for one"
                 )
                 return Answer(False, reason, by="ci:run")
             return self._run(argv, tree, expect)

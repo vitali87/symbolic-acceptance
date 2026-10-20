@@ -177,10 +177,10 @@ off (`stop_on_regression=False`).
   about submodules, renames and context, so a gitlink cannot drop out of it
   nor a new file pass for a changed one, and frozen paths match whatever
   their case. A new file whose name differs from a frozen one only in case,
-  or in Unicode form, replaces it when checked out on a file system that
-  takes the two names for one, as macOS's does: a local `run` check answers
-  NO for such a commit rather than run it, and CI belongs on case-sensitive
-  file systems.
+  or in Unicode form, is one file with it on a file system that takes the
+  two names for one, as macOS's does, and the one checked out last wins: a
+  local `run` check answers NO for such a commit rather than run it, and CI
+  belongs on case-sensitive file systems.
 - The agent, and the `run` commands that execute its code, run without the
   runner's GitHub token, so they cannot report a check run or comment as
   the runner by accident. That stops no agent set on it: as the runner's

@@ -305,7 +305,7 @@ def _no_helps_findings(checklist: Checklist) -> list[Finding]:
         if question.by != "ci" or False not in helps[qid]:
             continue
         if "run" in question.options:
-            unrun = "a command that times out or cannot run"
+            unrun = "a command that times out, cannot run or is never run"
         elif "check" in question.options:
             unrun = "a check run that is skipped, cancelled or neutral"
         else:
