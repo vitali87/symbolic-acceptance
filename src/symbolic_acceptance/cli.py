@@ -420,9 +420,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if github and args.pr:
             post_report(github, args.pr, markdown(result, checklist), exclude=exclude)
 
-    with _stoppable():
-        result = asyncio.run(
-            run(
+    async def stopping_on_an_error() -> Result:
+        try:
+            return await run(
                 checklist,
                 agent=agent,
                 oracles=oracles,
@@ -433,7 +433,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 stop_on_regression=not args.keep_going_on_regression,
                 base=agent.base,
             )
-        )
+        except Exception:
+            # As Ctrl-C does, so that the error is not held back until a check
+            # still running in a thread, whose answer nobody reads now, ends.
+            stop_programs()
+            raise
+
+    with _stoppable():
+        result = asyncio.run(stopping_on_an_error())
     print(f"{result.status}: {result.reason}")
     if result.status == WAITING and record_path:
         print(f"Run it again with --resume {record_path} to go on.")

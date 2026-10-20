@@ -6,6 +6,7 @@ import os
 import select
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -1214,6 +1215,46 @@ class CLITests(unittest.TestCase):
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("no terminal to ask a person", done.stdout)
         self.assertEqual(requests, [])
+
+    def test_an_error_stops_the_checks_still_running(self):
+        # The judge cannot reach Claude while a slow check runs beside it.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.slow]\nask = "Slow?"\nby = "ci"\nrun = ["sleep", "60"]\n'
+                '[q.judged]\nask = "Judged?"\nby = "llm"\n'
+                '[[require]]\nthat = { all = ["slow", "judged"] }\nid = "r"\n'
+                'fail = "x"\n'
+            )
+            with socket.socket() as closed:
+                closed.bind(("127.0.0.1", 0))
+                port = closed.getsockname()[1]
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            started = time.monotonic()
+            done = subprocess.run(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--agent", shlex.join(write), "--cwd", tmp],
+                env=NO_GIT_CONFIG
+                | {
+                    "PYTHONPATH": str(Path(sa.__file__).parents[1]),
+                    "ANTHROPIC_API_KEY": "key",
+                    "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
+                    "NO_PROXY": "127.0.0.1",
+                    "no_proxy": "127.0.0.1",
+                },
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=90,
+            )
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("connection failed", done.stderr)
+        self.assertLess(time.monotonic() - started, 30, "the check was stopped")
 
     def test_ctrl_c_sigterm_or_a_hang_up_stops_the_agent_and_keeps_the_run(self):
         # The agent is in its own git commit, held up by a hook that takes a
