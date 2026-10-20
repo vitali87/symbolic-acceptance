@@ -60,18 +60,23 @@ _READERS = {
 _KEYS = (*_READERS, "ask", "by", "context")
 # What a shell's pipes, command lists and redirections are made of.
 _SHELL = frozenset("|&;<>")
-# The blanks of more than a word that the templates and the format guide
-# leave to fill in, such as "<short title>", numbered as they may be once
-# copied ("<acceptance criterion 2, ...>"); other text in angle brackets is
-# text, as "x < lo or x > hi" is, or "<title>" in HTML.
+# The blanks the templates and the format guide leave to fill in: one of
+# more than a word anywhere, numbered as it may be once copied ("<acceptance
+# criterion 2, ...>"), and one of a word as a whole value (run = "<command>"),
+# since in a sentence it may be text, as "<script>" is in HTML. Other text
+# in angle brackets is text, as "x < lo or x > hi" is.
 _BLANKS = {
     blank
     for text in (*TEMPLATES.values(), FORMAT_GUIDE)
     for blank in re.findall(r"<[^<>]+>", text)
-    if " " in blank
 }
 _PLACEHOLDER = re.compile(
-    "|".join(re.sub(r"\d+", r"\\d+", re.escape(blank)) for blank in sorted(_BLANKS))
+    "|".join(
+        re.sub(r"\d+", r"\\d+", re.escape(blank))
+        if " " in blank
+        else rf"\A{re.escape(blank)}\Z"
+        for blank in sorted(_BLANKS)
+    )
 )
 
 
