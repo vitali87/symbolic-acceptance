@@ -25,6 +25,23 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(files, [FileChange("app.py", "modified")])
         self.assertEqual([line.where for line in lines], ["app.py:-1", "app.py:1"])
 
+    def test_a_line_whose_spacing_alone_changes_is_respaced(self):
+        _, lines = parse(
+            "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,3 +1,3 @@\n"
+            "-lock(user)\n-  x = 1\n-run()\n+lock( user )\n+x = 1\n+run_all()\n"
+        )
+        self.assertEqual(
+            [(line.side, line.kind) for line in lines],
+            [
+                ("-", "respaced"),
+                ("-", "respaced"),
+                ("-", "removed"),
+                ("+", "respaced"),
+                ("+", "respaced"),
+                ("+", "added"),
+            ],
+        )
+
     def test_files(self):
         files, _ = parse(DIFF)
         self.assertEqual(

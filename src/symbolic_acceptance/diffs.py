@@ -182,17 +182,21 @@ def parse(diff: str) -> tuple[list[FileChange], list[DiffLine]]:
 
 
 def _respaced(lines: list[DiffLine]) -> list[DiffLine]:
-    """``lines``, each one whose change is only its whitespace marked so."""
+    """``lines``, each one whose change is only its whitespace, at its ends or
+    within it, marked so."""
+
+    def unspaced(line: DiffLine) -> tuple[int, str]:
+        return line.hunk, "".join(line.text.split())
+
     spacings: dict[tuple[int, str], set[tuple[str, str]]] = {}
     for line in lines:
-        key = line.hunk, line.text.strip()
-        spacings.setdefault(key, set()).add((line.side, line.text))
+        spacings.setdefault(unspaced(line), set()).add((line.side, line.text))
     return [
         replace(line, respaced=True)
         if line.side != " "
         and any(
             side not in (line.side, " ") and text != line.text
-            for side, text in spacings[line.hunk, line.text.strip()]
+            for side, text in spacings[unspaced(line)]
         )
         else line
         for line in lines
