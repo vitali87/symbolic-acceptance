@@ -428,11 +428,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
         push=args.push,
     )
 
+    report: int | None = None  # the report comment's id, once known
+
     def progress(result: Result) -> None:
+        nonlocal report
         if record_path:
             record.save(result, checklist, record_path)
         if github and args.pr:
-            post_report(github, args.pr, markdown(result, checklist), exclude=exclude)
+            text = markdown(result, checklist)
+            report = post_report(github, args.pr, text, exclude=exclude, report=report)
 
     async def stoppable() -> Result:
         _stop_on_signals()

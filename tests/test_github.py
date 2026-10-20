@@ -94,7 +94,7 @@ class ClientTests(unittest.TestCase):
         )
         # Comments come with the HTML GitHub renders them as.
         github, fake = gh(json_response([]))
-        github.comments(5)
+        list(github.comments(5))
         self.assertEqual(fake.header("accept"), "application/vnd.github.full+json")
 
     def test_report_ignores_look_alikes(self):
@@ -126,9 +126,20 @@ class ClientTests(unittest.TestCase):
             ),
             json_response({"id": 7}),
         )
-        post_report(github, 5, "new report")
+        report = post_report(github, 5, "new report")
         self.assertEqual(fake.requests[1].get_method(), "PATCH")
         self.assertEqual(fake.body(1), {"body": f"{REPORT_MARKER}\nnew report"})
+        # Once known, it is updated without reading the comments again.
+        github, fake = gh(json_response({"id": 7}))
+        self.assertEqual(post_report(github, 5, "newer", report=report), 7)
+        self.assertEqual([r.get_method() for r in fake.requests], ["PATCH"])
+
+    def test_the_comments_are_read_only_until_the_report(self):
+        report = comment(7, "bot", f"{REPORT_MARKER}\nold", user_type="Bot")
+        first = json_response([report], headers={"link": '<https://x/2>; rel="next"'})
+        github, fake = gh(first, json_response({"id": 7}))
+        self.assertEqual(post_report(github, 5, "new"), 7)
+        self.assertEqual([r.get_method() for r in fake.requests], ["GET", "PATCH"])
 
 
 class ChecksTests(unittest.TestCase):
@@ -486,7 +497,7 @@ class ReviewsTests(unittest.TestCase):
         )
         for exclude in (["claude"], ["claude[bot]"]):
             with self.subTest(exclude):
-                github, _ = gh(json_response([forged, reply]), json_response({}))
+                github, _ = gh(json_response([forged, reply]), json_response({"id": 4}))
                 with self.assertRaises(sa.Pending) as caught:
                     asyncio.run(Reviews(github, 5, exclude=exclude)([SSO], context()))
                 self.assertEqual(caught.exception.answers, {})

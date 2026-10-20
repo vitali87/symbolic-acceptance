@@ -205,8 +205,10 @@ class Commands:
             # fetch does not see, so it is told.
             upload = "--upload-pack=git -c 'safe.directory=*' upload-pack"
             fetch = ("fetch", "--quiet", "--depth=1", "--no-tags", upload, source)
-            git(tree, *fetch, context.attempt.ref, isolated=True)
-            git(tree, "checkout", "--quiet", "--detach", "FETCH_HEAD", isolated=True)
+            # As long as a command may take: a large repository takes long.
+            git(tree, *fetch, context.attempt.ref, isolated=True, timeout=self.timeout)
+            checkout = ("checkout", "--quiet", "--detach", "FETCH_HEAD")
+            git(tree, *checkout, isolated=True, timeout=self.timeout)
             return self._run(argv, tree, expect)
 
     def _run(self, argv: list[str], tree: str, expect: Callable[[int], bool]) -> Answer:

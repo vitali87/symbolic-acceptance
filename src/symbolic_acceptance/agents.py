@@ -40,10 +40,12 @@ from symbolic_acceptance.loop import Attempt, Escalate, Task
 
 __all__ = [
     "GRACE",
+    "MAX_DIFF",
     "OUTPUT",
     "RUNNER_SECRETS",
     "CommandAgent",
     "GitError",
+    "TooLarge",
     "diff",
     "for_agent",
     "git",
@@ -112,6 +114,9 @@ GRACE = 5.0
 # The most of a program's output kept, from its end: what the runner reads
 # of it is its last lines.
 OUTPUT = 1 << 20
+# The most of an attempt's diff the runner reads, records and pushes; a
+# larger attempt goes to a person.
+MAX_DIFF = 10 << 20
 
 
 def stop_programs(grace: float = GRACE) -> None:
@@ -277,8 +282,17 @@ class GitError(RuntimeError):
     runner is stopping (:func:`stop_programs`)."""
 
 
+class TooLarge(GitError):
+    """A git command wrote more than its caller would read."""
+
+
 def git(
-    cwd: str | Path, *args: str, isolated: bool = False, secrets: bool = False
+    cwd: str | Path,
+    *args: str,
+    isolated: bool = False,
+    secrets: bool = False,
+    timeout: float = 300.0,
+    limit: int | None = None,
 ) -> str:
     """Run git on the repository in ``cwd``, overriding its own settings.
 
@@ -287,8 +301,10 @@ def git(
     credential helper), so the runner's GitHub token is withheld unless
     ``secrets``: a push, and the look at the branch before it, may need it
     for a credential helper. Git does not ask for a password itself (ssh
-    may, on the terminal), and gives up after five minutes. A runner told to
-    stop (:func:`stop_programs`) runs no more of it, and stops what runs.
+    may, on the terminal), and gives up after ``timeout`` seconds. Output
+    past ``limit`` bytes is not read: it raises :class:`TooLarge`. A runner
+    told to stop (:func:`stop_programs`) runs no more of it, and stops what
+    runs.
     """
     hidden = _ELSEWHERE if secrets else _ELSEWHERE | RUNNER_SECRETS
     env = {k: v for k, v in os.environ.items() if k not in hidden}
@@ -301,7 +317,7 @@ def git(
                 ["git", *_OVERRIDES, *args],
                 cwd=cwd,
                 env=env | _ISOLATED if isolated else env,
-                timeout=300,
+                timeout=timeout,
                 stdin=None,
                 stdout=out,
                 stderr=err,
@@ -313,7 +329,10 @@ def git(
                 f"git {' '.join(args)} not run: the runner is stopping"
             ) from None
         if status is None:
-            raise GitError(f"git {' '.join(args)} ran past 300s")
+            raise GitError(f"git {' '.join(args)} ran past {timeout:g}s")
+        size = out.seek(0, os.SEEK_END)
+        if status == 0 and limit is not None and size > limit:
+            raise TooLarge(f"git {' '.join(args)} wrote {size:,} bytes")
         out.seek(0)
         err.seek(0)
         stdout, stderr = out.read(), err.read()
@@ -326,15 +345,16 @@ def git(
     return stdout.decode(errors="replace")
 
 
-def diff(cwd: str | Path, base: str, head: str) -> str:
+def diff(cwd: str | Path, base: str, head: str, *, limit: int | None = None) -> str:
     """The unified diff from ``base`` to ``head``, as plain text, with no
     function names in its hunk headers.
 
     Its options override every setting that could shape it, so it may read
     the user's configuration like the runner's other git commands, and their
-    ``safe.directory`` trusts a checkout someone else owns.
+    ``safe.directory`` trusts a checkout someone else owns. A diff over
+    ``limit`` bytes raises :class:`TooLarge`.
     """
-    return _FUNCTION_NAME.sub(r"\1", git(cwd, *_DIFF, base, head))
+    return _FUNCTION_NAME.sub(r"\1", git(cwd, *_DIFF, base, head, limit=limit))
 
 
 class CommandAgent:
@@ -356,7 +376,8 @@ class CommandAgent:
     :data:`RUNNER_SECRETS`.
 
     An agent that fails, runs past ``timeout`` or changes nothing hands the
-    run to a person (:class:`Escalate`).
+    run to a person (:class:`Escalate`), as does an attempt whose diff is
+    over :data:`MAX_DIFF` bytes.
     """
 
     def __init__(
@@ -422,7 +443,13 @@ class CommandAgent:
         # change nothing either.
         if self._tree(after) == self._tree(start):
             raise Escalate(f"attempt {task.number} changed nothing")
-        changed = diff(self.cwd, self.base, after)
+        try:
+            changed = diff(self.cwd, self.base, after, limit=MAX_DIFF)
+        except TooLarge:
+            raise Escalate(
+                f"attempt {task.number}'s diff is over {MAX_DIFF:,} bytes; "
+                "a person must review it"
+            ) from None
         if self.push is not None:
             workflows = sorted(
                 {

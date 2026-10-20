@@ -166,15 +166,19 @@ class GitHub:
         pages: list[_CheckRuns] = [json.loads(page) for page in self._pages(path)]
         return [run for page in pages for run in page["check_runs"]]
 
-    def comments(self, number: int) -> list[Comment]:
+    def comments(self, number: int) -> Iterator[Comment]:
+        """The comments, oldest first, each page read as it is reached."""
         path = f"/issues/{number}/comments"
         # With the HTML GitHub renders each as (body_html) besides its markdown.
-        full = "application/vnd.github.full+json"
-        pages: list[list[Comment]] = [json.loads(p) for p in self._pages(path, full)]
-        return [comment for page in pages for comment in page]
+        for page in self._pages(path, "application/vnd.github.full+json"):
+            comments: list[Comment] = json.loads(page)
+            yield from comments
 
-    def comment(self, number: int, body: str) -> None:
-        self._request("POST", self._url(f"/issues/{number}/comments"), {"body": body})
+    def comment(self, number: int, body: str) -> int:
+        """Post a comment and return its id."""
+        url = self._url(f"/issues/{number}/comments")
+        posted: Comment = json.loads(self._request("POST", url, {"body": body}).body)
+        return posted["id"]
 
     def edit_comment(self, comment_id: int, body: str) -> None:
         self._request(
@@ -270,9 +274,16 @@ def _by_runner(comment: Comment, exclude: Collection[str]) -> bool:
 
 
 def post_report(
-    github: GitHub, number: int, markdown: str, *, exclude: Collection[str] = ()
-) -> None:
-    """Create or update the single report comment on an issue or pull request.
+    github: GitHub,
+    number: int,
+    markdown: str,
+    *,
+    exclude: Collection[str] = (),
+    report: int | None = None,
+) -> int:
+    """Create or update the single report comment on an issue or pull request,
+    and return its id, to pass back as ``report`` for the next update: else
+    the comments are read until it is found.
 
     ``exclude`` lists accounts (the agent's) whose comments are never taken
     for the report, whatever they contain. A report too long for a comment
@@ -283,13 +294,20 @@ def post_report(
         cut = "\n\n…(cut to fit a comment; the run record has the rest)"
         body = body[: MAX_COMMENT - len(cut)] + cut
     excluded = _logins(exclude)
-    for existing in github.comments(number):
-        if existing["body"].startswith(REPORT_MARKER) and _by_runner(
-            existing, excluded
-        ):
-            github.edit_comment(existing["id"], body)
-            return
-    github.comment(number, body)
+    if report is None:
+        report = next(
+            (
+                existing["id"]
+                for existing in github.comments(number)
+                if existing["body"].startswith(REPORT_MARKER)
+                and _by_runner(existing, excluded)
+            ),
+            None,
+        )
+    if report is None:
+        return github.comment(number, body)
+    github.edit_comment(report, body)
+    return report
 
 
 class GitHubChecks:

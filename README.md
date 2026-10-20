@@ -282,8 +282,9 @@ resumed run needs the agent's checkout at its last attempt, or at a commit
 after it that the runner made but did not get to record (as when a push
 failed), which then counts with the next attempt; and one run must not be
 resumed twice at once: the resumes would share the checkout and the record.
-An agent that fails, runs past `--agent-timeout` (an hour by default) or
-changes nothing escalates the run, which is saved like any other outcome.
+An agent that fails, runs past `--agent-timeout` (an hour by default),
+changes nothing or makes a diff over 10 MiB escalates the run, which is
+saved like any other outcome.
 An error in the runner itself (git, the network, a misconfigured oracle)
 stops it instead, and the record keeps the run as it was, ready to resume;
 an attempt that was being checked is checked on, without asking the agent

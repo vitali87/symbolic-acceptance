@@ -30,7 +30,14 @@ from helpers import (
 
 import symbolic_acceptance as sa
 from symbolic_acceptance import record
-from symbolic_acceptance.agents import GRACE, CommandAgent, GitError, diff, git
+from symbolic_acceptance.agents import (
+    GRACE,
+    MAX_DIFF,
+    CommandAgent,
+    GitError,
+    diff,
+    git,
+)
 from symbolic_acceptance.claude import Claude
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.draft import DraftError, draft
@@ -596,6 +603,22 @@ class CommandAgentTests(unittest.TestCase):
             attempt = agent(self.task())
             self.assertLess(time.monotonic() - started, 10)
             self.assertEqual(attempt.claims, "done")
+
+    def test_an_attempt_too_large_to_read_goes_to_a_person(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            script = f"open('big.txt', 'w').write('x' * {MAX_DIFF})"
+            agent = CommandAgent([sys.executable, "-c", script], cwd=tmp)
+            with self.assertRaisesRegex(sa.Escalate, "diff is over"):
+                agent(self.task())
+
+    def test_git_past_its_timeout_is_stopped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            started = time.monotonic()
+            with self.assertRaisesRegex(GitError, "ran past 1s"):
+                git(tmp, "-c", "alias.hang=!sleep 5", "hang", timeout=1)
+            self.assertLess(time.monotonic() - started, 4)
 
     def test_the_runners_git_keeps_its_terminal(self):
         # So that ssh can ask on it: git is in the runner's session.
