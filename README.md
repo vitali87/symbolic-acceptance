@@ -273,11 +273,12 @@ record. An agent that fails, runs past `--agent-timeout` (an hour by
 default) or changes nothing escalates the run, which is saved like any
 other outcome. An error in the runner itself (git, the network, a
 misconfigured oracle) stops it instead, and the record keeps the run as it
-was, ready to resume; an attempt that was being checked is checked again,
-without asking the agent for another. Ctrl-C, or SIGTERM
-from a supervisor or a cancelled CI job, stops a run the same way, ending
-the agent or check it is running and what that started; they are given
-five seconds to clean up, and a second Ctrl-C ends them at once. Without
+was, ready to resume; an attempt that was being checked is checked on,
+without asking the agent for another or asking again what was answered.
+Ctrl-C, or SIGTERM from a supervisor or a cancelled CI job, stops a run the
+same way, ending the agent or check it is running and what that started;
+they are given five seconds to clean up, and a second Ctrl-C ends them at
+once. Without
 `--pr`, people answer on the terminal; with no terminal to ask on, or once
 its input ends (Ctrl-D), the run waits for them, to be resumed.
 

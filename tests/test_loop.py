@@ -568,6 +568,50 @@ class RunTests(unittest.TestCase):
         self.assertEqual(len(agent.tasks), 1, "the agent was not asked again")
         self.assertEqual(resumed.base, "b0")
 
+    def test_a_run_stopped_while_checking_keeps_the_answers_it_had(self):
+        # A person says the change is risky; then the judge's request fails.
+        checklist = sa.loads(
+            '[q.risky]\nask = "Risky?"\nby = "human"\n'
+            '[q.load]\nask = "Survives load?"\nby = "llm"\n'
+            '[[require]]\nid = "r"\nwhen = "risky"\nthat = "load"\nfail = "x"\n'
+        )
+        asked = []
+
+        async def human(questions, context):
+            asked.append([q.id for q in questions])
+            return {"risky": sa.Answer(True)}
+
+        async def broken(questions, context):
+            raise RuntimeError("the network went away")
+
+        async def llm(questions, context):
+            return {"load": sa.Answer(True)}
+
+        async def agent(task):
+            return "commit1"
+
+        seen = []
+        with self.assertRaisesRegex(RuntimeError, "network"):
+            asyncio.run(
+                sa.run(
+                    checklist,
+                    agent=agent,
+                    oracles={"human": human, "llm": broken},
+                    on_progress=seen.append,
+                )
+            )
+        saved = sa.record.loads(sa.record.dumps(seen[-1], checklist), checklist)
+        resumed = asyncio.run(
+            sa.run(
+                checklist,
+                agent=agent,
+                oracles={"human": human, "llm": llm},
+                resume=saved,
+            )
+        )
+        self.assertEqual(resumed.status, sa.APPROVED)
+        self.assertEqual(asked, [["risky"]], "the person was not asked again")
+
     def test_an_agent_that_cannot_go_on_escalates(self):
         seen = []
 

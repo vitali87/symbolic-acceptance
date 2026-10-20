@@ -62,6 +62,8 @@ CHANGES: Literal["changes"] = "changes"
 WAITING: Literal["waiting"] = "waiting"
 ESCALATED: Literal["escalated"] = "escalated"
 RUNNING: Literal["running"] = "running"
+# The reason of an attempt kept while it is checked.
+_CHECKING = "being checked"
 
 
 @dataclass(frozen=True)
@@ -345,12 +347,15 @@ async def evaluate(
     answers: Mapping[str, Answer] | None = None,
     rounds: Sequence[tuple[str, ...]] = (),
     issue: str = "",
+    on_progress: Callable[[Evaluation], object] | None = None,
 ) -> Evaluation:
     """Ask the oracles until the attempt is decided, or an oracle must wait.
 
     ``last`` names the oracles asked only once nothing else is left and no
     requirement has failed (see :func:`symbolic_acceptance.logic.plan`).
     Pass the ``answers`` and ``rounds`` of a waiting evaluation to resume it.
+    ``on_progress`` gets the evaluation so far, waiting, before each round
+    that follows answers: resumed from there, it asks nothing answered.
     """
     _check_oracles(checklist, oracles)
     known = dict(answers or {})
@@ -364,6 +369,7 @@ async def evaluate(
     # made meanwhile (a person's later reply) counts.
     provisional: dict[str, Answer] = {}
     escalations: list[str] = []
+    got: dict[str, Answer] = {}
     # Provisional answers count when planning: once one fails a requirement
     # (a person's NO), people are asked nothing more, so unless an automated
     # check is still owed the attempt is decided and nobody is waited for.
@@ -383,6 +389,11 @@ async def evaluate(
                 "; ".join(notes),
                 tuple(ask),
             )
+        if got and on_progress is not None:
+            progress = Evaluation.from_answers(
+                checklist, attempt, known, done, WAITING, _CHECKING
+            )
+            await _call(on_progress, progress)
         context = Context(
             checklist, attempt, MappingProxyType(known | provisional), issue
         )
@@ -390,7 +401,7 @@ async def evaluate(
         results = await together(
             _put(oracles[name], tuple(groups[name]), context) for name in names
         )
-        got: dict[str, Answer] = {}
+        got = {}
         for name, result in zip(names, results):
             asked = [q.id for q in groups[name]]
             if isinstance(result, Pending):
@@ -471,8 +482,8 @@ async def run(
     coding agent, such as :class:`symbolic_acceptance.agents.CommandAgent`,
     which computes the attempt's diff itself.
     ``on_progress`` gets the run whenever it changes: before each attempt,
-    when an attempt is made and is being checked, and when the check ends,
-    ``running`` or as the run ended, e.g. to save it with
+    when an attempt is made, as its answers come in, and when its check
+    ends, ``running`` or as the run ended, e.g. to save it with
     :func:`symbolic_acceptance.record.save`. A run saved that way can be
     resumed from any of these points. ``base`` names what the run started
     from, such as :attr:`symbolic_acceptance.agents.CommandAgent.base`, and
@@ -492,6 +503,10 @@ async def run(
             await _call(on_progress, result)
         return result
 
+    async def checking(evaluation: Evaluation) -> None:
+        evaluations[-1] = evaluation
+        await report(RUNNING)
+
     if resume is not None:
         if resume.digest != checklist.digest:
             raise ValueError(
@@ -505,17 +520,16 @@ async def run(
         base = base or resume.base
         evaluations = list(resume.evaluations)
         if evaluations and evaluations[-1].status == WAITING:
-            waiting = evaluations.pop()
-            evaluations.append(
-                await evaluate(
-                    checklist,
-                    waiting.attempt,
-                    oracles,
-                    last=last,
-                    answers=waiting.answers,
-                    rounds=waiting.rounds,
-                    issue=issue,
-                )
+            waiting = evaluations[-1]
+            evaluations[-1] = await evaluate(
+                checklist,
+                waiting.attempt,
+                oracles,
+                last=last,
+                answers=waiting.answers,
+                rounds=waiting.rounds,
+                issue=issue,
+                on_progress=checking,
             )
 
     while True:
@@ -541,14 +555,13 @@ async def run(
         if not isinstance(produced, Attempt) or not produced.ref:
             raise TypeError("the agent must return an Attempt or a non-empty ref")
         attempt = replace(produced, number=task.number)
-        # Kept before it is checked, so a run stopped by an error meanwhile
-        # resumes by checking it rather than asking the agent again.
+        # Kept before it is checked, and with each round of answers, so a run
+        # stopped by an error meanwhile resumes by checking it on rather than
+        # asking the agent, or an oracle, again.
         evaluations.append(
-            Evaluation.from_answers(
-                checklist, attempt, {}, (), WAITING, "being checked"
-            )
+            Evaluation.from_answers(checklist, attempt, {}, (), WAITING, _CHECKING)
         )
         await report(RUNNING)
         evaluations[-1] = await evaluate(
-            checklist, attempt, oracles, last=last, issue=issue
+            checklist, attempt, oracles, last=last, issue=issue, on_progress=checking
         )
