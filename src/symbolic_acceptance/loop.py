@@ -492,6 +492,12 @@ async def run(
     from, such as :attr:`symbolic_acceptance.agents.CommandAgent.base`, and
     is kept with it. Pass a saved ``Result`` as ``resume`` to continue it;
     its issue text and base carry over.
+
+    It raises :class:`ValueError` for a ``max_attempts`` below 1, a question
+    no oracle answers, or a ``resume`` of another checklist, issue or base,
+    and :class:`TypeError` for an agent that returns neither an attempt nor
+    a ref. An error from the agent or an oracle (git, the network) ends the
+    run with it: the record keeps the run as it was, to resume.
     """
     if max_attempts < 1:
         raise ValueError("max_attempts must be at least 1")

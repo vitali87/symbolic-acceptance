@@ -150,7 +150,8 @@ def dumps(result: Result, checklist: Checklist) -> str:
 
 
 def loads(text: str, checklist: Checklist) -> Result:
-    """Rebuild a run, re-deciding every evaluation from its answers."""
+    """Rebuild a run, re-deciding every evaluation from its answers; text
+    that is not such a record, or not of this checklist, is a ValueError."""
     data: _Record = json.loads(text)
     if not (
         _fits(data, _Record) and data["format"] == FORMAT and data["version"] == VERSION
@@ -227,4 +228,5 @@ def save(result: Result, checklist: Checklist, path: str | Path) -> None:
 
 
 def load(path: str | Path, checklist: Checklist) -> Result:
+    """The run saved at ``path``, as :func:`loads` reads it."""
     return loads(Path(path).read_text(encoding="utf-8"), checklist)
