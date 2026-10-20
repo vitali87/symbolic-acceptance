@@ -37,3 +37,7 @@ symbolic-acceptance = "symbolic_acceptance.cli:main"
 [project.urls]
 Repository = "https://github.com/vitali87/symbolic-acceptance"
 Issues = "https://github.com/vitali87/symbolic-acceptance/issues"
+
+[dependency-groups]
+# The linters, which CI runs at the versions and hashes uv.lock pins.
+dev = ["ruff==0.17.1", "ty==0.0.89"]

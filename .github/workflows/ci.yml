@@ -1,7 +1,8 @@
 # Tests, which build the package twice to compare, and lint, with no
-# third-party actions and no downloads: the checkout is plain git, the
-# Pythons the runner image holds run the tests, and the package has no
-# dependencies to install.
+# third-party actions: the checkout is plain git, the Pythons the runner image
+# holds run the tests, and the package has no dependencies to install. The one
+# download is the linters: uv, checked against the hash its release
+# publishes, then ruff and ty at the versions and hashes uv.lock pins.
 name: ci
 
 on:
@@ -48,3 +49,15 @@ jobs:
 
       - name: Lint the example checklists
         run: PYTHONPATH=src python3 -m symbolic_acceptance lint --strict examples/*.toml
+
+      - name: Check format, lint and types
+        env:
+          UV: https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-unknown-linux-gnu.tar.gz
+          UV_SHA256: eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/uv.tar.gz" "$UV"
+          echo "$UV_SHA256  $RUNNER_TEMP/uv.tar.gz" | sha256sum -c --quiet
+          tar -xzf "$RUNNER_TEMP/uv.tar.gz" -C "$RUNNER_TEMP" --strip-components 1
+          "$RUNNER_TEMP/uv" run --locked ruff format --check
+          "$RUNNER_TEMP/uv" run --locked ruff check
+          "$RUNNER_TEMP/uv" run --locked ty check

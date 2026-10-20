@@ -16,7 +16,7 @@ goes back to the agent with its reasons and evidence. The run escalates to a
 person on the attempt cap, on no progress, on a regression, or when an
 oracle hands the attempt over.
 
-It has no dependencies: the package, its build and its CI use only the Python
+It has no dependencies: the package and its build use only the Python
 standard library.
 
 ## Changes from the proposal
@@ -212,7 +212,8 @@ package cannot build on it, so the three-valued evaluation it would have
 provided is reimplemented here in about a hundred lines. The rest follows the
 same rule: HTTP through `urllib`, an in-repository PEP 517/660 build backend
 (`build-system.requires = []`), reproducible archives, and a CI workflow with
-no third-party actions.
+no third-party actions, whose one download is the linters, pinned by hash in
+`uv.lock`.
 
 ## Concepts
 

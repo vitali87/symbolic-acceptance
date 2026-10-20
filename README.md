@@ -9,10 +9,11 @@ matters, and every failed requirement goes back to the agent, with the
 reasons and evidence, until the attempt is approved or a person has to step
 in.
 
-**No dependencies.** The package, its build and its CI use only the Python
-standard library (3.11+). There is nothing to download: not at install time,
-not at build time (the build backend is in this repository), not in CI (no
-third-party actions). Builds are reproducible byte for byte.
+**No dependencies.** The package and its build use only the Python standard
+library (3.11+). There is nothing to download at install time or at build time
+(the build backend is in this repository), and CI uses no third-party actions:
+its one download is the linters, at the versions and hashes `uv.lock` pins.
+Builds are reproducible byte for byte.
 
 ## A checklist
 
@@ -292,19 +293,27 @@ supply, which is handy for checking a checklist by hand.
 ## Install
 
 ```sh
-pip install git+https://github.com/vitali87/symbolic-acceptance
+uv tool install git+https://github.com/vitali87/symbolic-acceptance
 ```
 
-or from a checkout, `pip install .`. It needs Python 3.11 or later on a
-POSIX system, and git 2.36 or later for the runner. The build backend lives in
-[`_build/backend.py`](_build/backend.py) and `pyproject.toml` requires
-nothing, so `pip install --no-index .` works offline.
+puts the `symbolic-acceptance` command on your path, and
+`uv add git+https://github.com/vitali87/symbolic-acceptance` adds the library
+to a project; from a checkout, `uv tool install .`. It needs Python 3.11 or
+later on a POSIX system, and git 2.36 or later for the runner. The build
+backend lives in [`_build/backend.py`](_build/backend.py) and `pyproject.toml`
+requires nothing, so `uv tool install --offline .` works offline.
 
 ## Develop
 
 ```sh
-PYTHONPATH=src:tests python3 -m unittest discover -s tests -t tests
+uv run python -m unittest discover -s tests -t tests
+uv run ruff format --check
+uv run ruff check
+uv run ty check
 ```
+
+`uv run` installs ruff and ty at the versions and hashes `uv.lock` pins, as
+CI does.
 
 The design, and how it changed from the original proposal, is in
 [`docs/design.md`](docs/design.md).
