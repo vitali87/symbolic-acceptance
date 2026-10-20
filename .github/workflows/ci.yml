@@ -41,5 +41,10 @@ jobs:
             PYTHONPATH=src:tests timeout -s ABRT 180 "$python" -X faulthandler -m unittest discover -s tests -t tests
           done
 
+      # Only root can give a checkout another owner, as one test must, and
+      # the runner is not root, so the suite skips it there.
+      - name: Test a checkout another user owns
+        run: sudo env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests python3 -m unittest -k checkout_another_owns test_diffs_checks
+
       - name: Lint the example checklists
         run: PYTHONPATH=src python3 -m symbolic_acceptance lint --strict examples/*.toml
