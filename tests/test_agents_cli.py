@@ -1614,6 +1614,61 @@ class CLITests(unittest.TestCase):
             server.shutdown()
         self.assertEqual((drafting.returncode, err), (128 + signal.SIGINT, ""))
 
+    def test_a_stopped_run_sends_github_nothing_more(self):
+        asked, stopped = threading.Event(), threading.Event()
+        received = []
+
+        class Slow(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                received.append((self.command, stopped.is_set()))
+                asked.set()
+                time.sleep(1)
+                self.send_response(200)
+                self.send_header("content-length", "2")
+                self.end_headers()
+                self.wfile.write(b"[]")
+
+            do_POST = do_PATCH = do_GET
+
+            def log_message(self, format: str, *args: object) -> None:
+                pass
+
+        with (
+            http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow) as server,
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(ASKS_A_PERSON)
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            with subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--agent", shlex.join(write), "--cwd", tmp]
+                + ["--github", "owner/repo", "--pr", "5"],
+                env=dict(
+                    os.environ,
+                    GITHUB_API_URL=f"http://127.0.0.1:{server.server_port}",
+                    GH_TOKEN="token",
+                    NO_PROXY="127.0.0.1",
+                    no_proxy="127.0.0.1",
+                    PYTHONPATH=SRC,
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            ) as runner:
+                self.assertTrue(asked.wait(30), "GitHub was never asked")
+                stopped.set()
+                runner.send_signal(signal.SIGINT)
+                _, err = runner.communicate(timeout=30)
+            server.shutdown()
+        self.assertEqual(runner.returncode, 128 + signal.SIGINT, err)
+        # The request under way when it stopped, and none after it.
+        self.assertEqual([late for _, late in received], [False])
+
     def test_a_second_ctrl_c_quits_at_once(self):
         with (
             tempfile.TemporaryDirectory() as tmp,
@@ -1622,9 +1677,11 @@ class CLITests(unittest.TestCase):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
             checklist.write_text(ASKS_A_PERSON)
-            # An agent that will not stop when asked to.
+            # An agent that stops when asked to, but leaves a program that
+            # will not; $$ is the agent's, which leads the group.
             group = Path(outside, "group")
-            agent = f"trap '' TERM; echo $$ > {shlex.quote(str(group))}; sleep 60"
+            left = f"trap '' TERM; echo $$ > {shlex.quote(str(group))}; exec sleep 60"
+            agent = f"({left}) & wait"
             with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--agent", shlex.join(["sh", "-c", agent]), "--cwd", tmp],
@@ -1643,6 +1700,14 @@ class CLITests(unittest.TestCase):
                 assert runner.stderr is not None
                 runner.send_signal(signal.SIGINT)
                 self.assertIn("send it again", runner.stderr.readline())
+                leader = int(group.read_text())
+                while True:  # the agent gone, and the runner done waiting for it
+                    try:
+                        os.kill(leader, 0)
+                    except ProcessLookupError:
+                        break
+                    self.assertLess(time.monotonic(), deadline, "the agent runs on")
+                    time.sleep(0.05)
                 runner.send_signal(signal.SIGINT)
                 # Long before the agent's grace would be up.
                 runner.wait(timeout=GRACE - 1)
@@ -1714,7 +1779,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("attempt 1 changed nothing", out)
 
-    def test_stopping_waits_for_the_programs_and_ends_any_started_after(self):
+    def test_stopping_waits_for_the_programs_and_starts_no_more(self):
         # A process of its own, as stopping is for good.
         script = (
             "import os, sys, threading, time\n"
@@ -1732,7 +1797,11 @@ class CLITests(unittest.TestCase):
             "start = time.monotonic()\n"
             "stop_programs(grace=60)\n"
             "thread.join()\n"
-            "print(*statuses, run(), time.monotonic() - start < 30)\n"
+            "try:\n"
+            "    run()\n"
+            "except InterruptedError:\n"
+            "    statuses.append('refused')\n"
+            "print(*statuses, time.monotonic() - start < 30)\n"
         )
         with tempfile.TemporaryDirectory() as tmp:
             done = subprocess.run(
@@ -1743,8 +1812,8 @@ class CLITests(unittest.TestCase):
                 check=True,
             )
         # Asked to stop, it ended, and the stop with it, long before the
-        # grace was up; the program started after it was killed at once.
-        self.assertEqual(done.stdout, f"{-signal.SIGTERM} {-signal.SIGKILL} True\n")
+        # grace was up; none started after it.
+        self.assertEqual(done.stdout, f"{-signal.SIGTERM} refused True\n")
 
     def test_templates_load(self):
         for kind in ("bug", "feature"):

@@ -12,11 +12,18 @@ import shutil
 import signal
 import sys
 import threading
+import urllib.request
 from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
-from symbolic_acceptance.agents import CommandAgent, GitError, git, stop_programs
+from symbolic_acceptance.agents import (
+    CommandAgent,
+    GitError,
+    git,
+    stop_programs,
+    stopping,
+)
 from symbolic_acceptance.answer import Answer
 from symbolic_acceptance.checklist import (
     Checklist,
@@ -30,7 +37,7 @@ from symbolic_acceptance.claude import DEFAULT_MODEL, Claude, ClaudeError
 from symbolic_acceptance.draft import DraftError, draft
 from symbolic_acceptance.feedback import assess, render_failures
 from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews, post_report
-from symbolic_acceptance.http import HTTPError
+from symbolic_acceptance.http import HTTPError, Response, urlopen
 from symbolic_acceptance.judge import Judge
 from symbolic_acceptance.lint import lint
 from symbolic_acceptance.logic import facts, plan
@@ -291,6 +298,15 @@ def _stop_on_signals() -> None:
         loop.add_signal_handler(stop, _stop, stop, stops)
 
 
+def _send(request: urllib.request.Request, timeout: float) -> Response:
+    """Send nothing once the run is stopping, as git runs nothing then."""
+    if stopping():
+        raise HTTPError(
+            request.get_method(), request.full_url, 0, "not sent: the run is stopping"
+        )
+    return urlopen(request, timeout)
+
+
 def _installed(program: str, what: str) -> None:
     """Refuse a program the machine lacks: one named without a folder, looked
     for on PATH, or by its whole path. One named by a relative path is the
@@ -325,7 +341,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit("error: --github takes a repository as owner/name")
     if args.pr and not args.github:
         raise SystemExit("error: --pr needs --github")
-    github = GitHub(args.github) if args.github else None
+    github = GitHub(args.github, transport=_send) if args.github else None
     ci_fallback = GitHubChecks(github, wait=args.ci_wait) if github else None
     exclude = args.exclude.split(",") if args.exclude else []
     human: Oracle = _ask_at_the_terminal
@@ -336,7 +352,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             reviewers=args.reviewers.split(",") if args.reviewers else None,
             exclude=exclude,
         )
-    claude = Claude(model=args.model)
+    claude = Claude(model=args.model, transport=_send)
     ci = Checks(Commands(args.cwd), fallback=ci_fallback)
     remote = [q for q in used if q.by == "ci" and not ci.handles(q)]
     unnamed = [q.id for q in remote if "check" not in q.options]

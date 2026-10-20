@@ -48,6 +48,7 @@ __all__ = [
     "git",
     "run_program",
     "stop_programs",
+    "stopping",
 ]
 
 _OVERRIDES = (
@@ -111,7 +112,7 @@ OUTPUT = 1 << 20
 
 def stop_programs(grace: float = GRACE) -> None:
     """End every program :func:`run_program` is running, and what they
-    started, for a runner told to stop, and any it starts from now on.
+    started, for a runner told to stop; it starts none from now on.
 
     They are asked to stop (SIGTERM), so that git, say, removes its locks,
     and killed if they have not all ended within ``grace`` seconds. It takes
@@ -135,6 +136,12 @@ def stop_programs(grace: float = GRACE) -> None:
         time.sleep(0.05)
     for group in groups:
         _signal(group, signal.SIGKILL)
+    _running.difference_update(groups)
+
+
+def stopping() -> bool:
+    """Whether :func:`stop_programs` has been called."""
+    return _stopped
 
 
 def _signal(group: int, number: int) -> bool:
@@ -162,13 +169,16 @@ def run_program(
     whatever it starts is stopped when it ends, but for a daemon, which
     leaves that session; and it writes to a file, so a child it leaves
     running with the output open cannot hold the runner up. A program that
-    cannot start raises :class:`OSError`.
+    cannot start raises :class:`OSError`, as does every program once
+    :func:`stop_programs` has been called (:class:`InterruptedError`).
     """
     with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as log:
         stdin.write(given.encode("utf-8"))
         stdin.seek(0)
         _starting.add(threading.get_ident())
         try:
+            if _stopped:
+                raise InterruptedError("not started: the runner is stopping")
             process = subprocess.Popen(
                 argv,
                 cwd=cwd,
@@ -181,18 +191,18 @@ def run_program(
             _running.add(process.pid)
         finally:
             _starting.discard(threading.get_ident())
-        if _stopped:  # stop_programs came as it started
-            os.killpg(process.pid, signal.SIGKILL)
         try:
             status: int | None = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             status = None
         finally:
-            # What it left running, unless stop_programs is giving it time.
+            # What it left running, unless stop_programs is giving it time;
+            # then it stays known until stop_programs is done with it, for a
+            # second stop to kill at once.
             if not _stopped:
                 _signal(process.pid, signal.SIGKILL)
+                _running.discard(process.pid)
             process.wait()
-            _running.discard(process.pid)
         log.seek(max(0, log.seek(0, os.SEEK_END) - OUTPUT))
         return status, log.read().decode("utf-8", errors="replace")
 
