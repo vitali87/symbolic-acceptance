@@ -582,7 +582,10 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        return int(args.handler(args))
+        code = int(args.handler(args))
+        # Here rather than at exit, where a failure is past handling.
+        sys.stdout.flush()
+        return code
     except BrokenPipeError:
         # The reader went away (e.g. `| head`); stop quietly.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())

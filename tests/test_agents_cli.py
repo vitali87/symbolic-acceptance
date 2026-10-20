@@ -814,6 +814,22 @@ class CLITests(unittest.TestCase):
             done = run(str(judged), ANTHROPIC_AUTH_TOKEN="t")
             self.assertIn("attempt 1 changed nothing", done.stdout)
 
+    def test_output_whose_reader_is_gone_ends_quietly(self):
+        # As in `... | head -0`; buffered, as output to a pipe is.
+        reader, writer = os.pipe()
+        os.close(reader)
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}
+        done = subprocess.run(
+            [sys.executable, "-m", "symbolic_acceptance", "template", "feature"],
+            env=env | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+            stdout=writer,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        os.close(writer)
+        self.assertEqual((done.returncode, done.stderr), (1, ""))
+
     def test_usage_errors_exit_2(self):
         run = ("run", str(EXAMPLE), "--agent", "x")
         for args in (
