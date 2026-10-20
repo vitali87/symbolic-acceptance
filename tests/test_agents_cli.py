@@ -1050,8 +1050,8 @@ class CLITests(unittest.TestCase):
     def test_draft_asks_claude_over_http_and_writes_the_checklist(self):
         checklist = '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n[[require]]\nthat = "a"\nfail = "x"\n'
         reply = message({"checklist": checklist, "questions_for_reporter": ["Why?"]})
-        # First a proxy's page in its place, then the API's reply.
-        replies = [b"<html>Sign in to the proxy</html>", reply.body]
+        # First a proxy's page in its place, not even UTF-8, then the API's reply.
+        replies = ["<html>Accès refusé</html>".encode("latin-1"), reply.body]
         asked = []
 
         class MessagesAPI(http.server.BaseHTTPRequestHandler):
@@ -1101,7 +1101,7 @@ class CLITests(unittest.TestCase):
         self.assertEqual(proxied.returncode, 1)
         self.assertEqual(
             proxied.stderr,
-            "error: a reply was not JSON: '<html>Sign in to the proxy</html>'\n",
+            "error: a reply was not JSON: '<html>Acc\ufffds refus\ufffd</html>'\n",
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(written, checklist)

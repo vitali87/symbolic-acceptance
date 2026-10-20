@@ -169,7 +169,8 @@ class Claude:
             # errors are retried, as the official SDKs do.
             repeatable=True,
         )
-        message: _Message = json.loads(response.body)
+        # Decoded leniently, so that a reply that is not JSON is reported as such.
+        message: _Message = json.loads(response.body.decode(errors="replace"))
         stop = message["stop_reason"]
         if stop == "refusal":
             details = message["stop_details"]

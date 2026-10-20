@@ -144,12 +144,13 @@ class GitHub:
             transport=self.transport,
         )
 
-    def _pages(self, path: str) -> Iterator[bytes]:
-        """The body of every page of a list, following ``Link: rel="next"``."""
+    def _pages(self, path: str) -> Iterator[str]:
+        """The body of every page of a list, following ``Link: rel="next"``;
+        decoded leniently, so that a reply that is not JSON is reported as such."""
         url: str | None = self._url(f"{path}?per_page=100")
         while url:
             response = self._request("GET", url)
-            yield response.body
+            yield response.body.decode(errors="replace")
             match = _NEXT.search(response.header("link") or "")
             url = match.group(1) if match else None
 
