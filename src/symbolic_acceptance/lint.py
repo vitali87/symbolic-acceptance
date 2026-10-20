@@ -38,7 +38,7 @@ from symbolic_acceptance.checklist import (
 )
 from symbolic_acceptance.checks import admits, command, frozen_paths, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
-from symbolic_acceptance.templates import ORACLES, TEMPLATES
+from symbolic_acceptance.templates import FORMAT_GUIDE, ORACLES, TEMPLATES
 
 __all__ = ["MAX_EXHAUSTIVE", "Finding", "lint"]
 
@@ -60,10 +60,19 @@ _READERS = {
 _KEYS = (*_READERS, "ask", "by", "context")
 # What a shell's pipes, command lists and redirections are made of.
 _SHELL = frozenset("|&;<>")
-# The blanks the templates leave to fill in, such as "<short title>", and
-# only those: other text in angle brackets is text ("x < lo or x > hi").
-_BLANKS = sorted({b for t in TEMPLATES.values() for b in re.findall(r"<[^<>]+>", t)})
-_PLACEHOLDER = re.compile("|".join(map(re.escape, _BLANKS)))
+# The blanks of more than a word that the templates and the format guide
+# leave to fill in, such as "<short title>", numbered as they may be once
+# copied ("<acceptance criterion 2, ...>"); other text in angle brackets is
+# text, as "x < lo or x > hi" is, or "<title>" in HTML.
+_BLANKS = {
+    blank
+    for text in (*TEMPLATES.values(), FORMAT_GUIDE)
+    for blank in re.findall(r"<[^<>]+>", text)
+    if " " in blank
+}
+_PLACEHOLDER = re.compile(
+    "|".join(re.sub(r"\d+", r"\\d+", re.escape(blank)) for blank in sorted(_BLANKS))
+)
 
 
 @dataclass(frozen=True)

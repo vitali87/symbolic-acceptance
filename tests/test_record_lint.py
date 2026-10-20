@@ -336,6 +336,21 @@ class LintTests(unittest.TestCase):
             [f.message for f in findings],
         )
         self.assertTrue(all(f.level == "warning" for f in findings))
+        # A criterion copied to make another, and a blank of the format guide.
+        blank = "<acceptance criterion 2, as a yes/no question>"
+        copied = sa.loads(
+            f'[q.criterion_2]\nask = "{blank}"\nby = "llm"\n'
+            '[q.sso]\nask = "SSO alone?"\nby = "ci"\nfrozen = ["<their paths>"]\n'
+            '[[require]]\nthat = "criterion_2"\nfail = "x"\n'
+            '[[require]]\nthat = "sso"\nfail = "y"\n'
+        )
+        self.assertEqual(
+            [f.message for f in sa.lint(copied) if f.code == "placeholder"],
+            [
+                f"q.criterion_2.ask still holds the template's {blank}",
+                "q.sso.frozen[0] still holds the template's <their paths>",
+            ],
+        )
         # Other text in angle brackets is just text.
         for ask in (
             "Does the page set its <title>?",
