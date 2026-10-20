@@ -95,10 +95,13 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k not in RUNNER_SECRETS | _ELSEWHERE}
 
 
-# The process groups of the programs run_program is running now, and
-# whether stop_programs has been called, after which none may run.
+# The process groups of the programs run_program is running now, the
+# threads starting one, whose group is not known until it has started, and
+# whether stop_programs has been called, after which none may run: a flag,
+# as a threading.Event takes a lock to be set.
 _running: set[int] = set()
-_stopped = threading.Event()
+_starting: set[int] = set()
+_stopped = False
 # Seconds the programs asked to stop have to end before they are killed.
 GRACE = 5.0
 # The most of a program's output kept, from its end: what the runner reads
@@ -111,9 +114,16 @@ def stop_programs(grace: float = GRACE) -> None:
     started, for a runner told to stop, and any it starts from now on.
 
     They are asked to stop (SIGTERM), so that git, say, removes its locks,
-    and killed if they have not all ended within ``grace`` seconds.
+    and killed if they have not all ended within ``grace`` seconds. It takes
+    no lock, so that a signal handler can call it even while the call it
+    interrupted is under way, as a second Ctrl-C does.
     """
-    _stopped.set()
+    global _stopped
+    _stopped = True
+    # A program being started is known once it has: wait for it, unless it
+    # is this very thread's, interrupted by the signal handler calling this.
+    while _starting - {threading.get_ident()}:
+        time.sleep(0.001)
     groups = _running.copy()
     for group in groups:
         _signal(group, signal.SIGTERM)
@@ -157,17 +167,21 @@ def run_program(
     with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as log:
         stdin.write(given.encode("utf-8"))
         stdin.seek(0)
-        process = subprocess.Popen(
-            argv,
-            cwd=cwd,
-            env=env,
-            stdin=stdin,
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        _running.add(process.pid)
-        if _stopped.is_set():  # stop_programs came as it started
+        _starting.add(threading.get_ident())
+        try:
+            process = subprocess.Popen(
+                argv,
+                cwd=cwd,
+                env=env,
+                stdin=stdin,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            _running.add(process.pid)
+        finally:
+            _starting.discard(threading.get_ident())
+        if _stopped:  # stop_programs came as it started
             os.killpg(process.pid, signal.SIGKILL)
         try:
             status: int | None = process.wait(timeout=timeout)
@@ -175,7 +189,7 @@ def run_program(
             status = None
         finally:
             # What it left running, unless stop_programs is giving it time.
-            if not _stopped.is_set():
+            if not _stopped:
                 _signal(process.pid, signal.SIGKILL)
             process.wait()
             _running.discard(process.pid)
@@ -229,7 +243,7 @@ def git(
     may, on the terminal), and gives up after five minutes.
     """
     # A stopped run commits, pushes or checks nothing a program left.
-    if _stopped.is_set():
+    if _stopped:
         raise GitError(f"git {' '.join(args)} not run: the runner is stopping")
     hidden = _ELSEWHERE if secrets else _ELSEWHERE | RUNNER_SECRETS
     env = {k: v for k, v in os.environ.items() if k not in hidden}
