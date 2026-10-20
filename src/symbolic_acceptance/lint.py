@@ -13,8 +13,10 @@ looks for checklists that load but cannot mean what their author intended:
   checks held up behind a person (``gated-by-person``), questions nothing
   reads (``unused-question``) or asked twice (``duplicate-question``),
   options no built-in oracle reads, as a typo is (``unknown-option``), CI
-  check runs an attempt could fake (``unfrozen-workflows``), and blanks a
-  template left to fill in (``placeholder``);
+  check runs an attempt could fake (``unfrozen-workflows``), commands and
+  check runs whose NO helps the attempt pass, which one that never ran gives
+  too (``no-helps``), and blanks a template left to fill in
+  (``placeholder``);
 * info: checklists too large for the exhaustive checks (``not-exhaustive``).
 """
 
@@ -36,7 +38,7 @@ from symbolic_acceptance.checklist import (
     render,
 )
 from symbolic_acceptance.checks import admits, command, frozen_paths, matches
-from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
+from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value, wanted
 from symbolic_acceptance.templates import FORMAT_GUIDE, ORACLES, TEMPLATES
 
 __all__ = ["MAX_EXHAUSTIVE", "Finding", "lint"]
@@ -285,6 +287,34 @@ def _check_runs_findings(checklist: Checklist) -> list[Finding]:
     ]
 
 
+def _no_helps_findings(checklist: Checklist) -> list[Finding]:
+    """A command or check run that never ran answers NO, which proves nothing
+    where a NO helps the attempt pass."""
+    helps = wanted(checklist)
+    findings = []
+    for qid in checklist.used():
+        question = checklist.questions[qid]
+        if question.by != "ci" or False not in helps[qid]:
+            continue
+        if "run" in question.options:
+            unrun = "a command that times out or cannot run"
+        elif "check" in question.options:
+            unrun = "a check run that is skipped, cancelled or neutral"
+        else:
+            continue
+        findings.append(
+            Finding(
+                "warning",
+                "no-helps",
+                f"a NO helps the attempt pass (under not, or in when), but {unrun} "
+                "answers NO too; ask it the other way round, so that a YES helps "
+                '(with expect = "fail" for a command that must fail)',
+                qid,
+            )
+        )
+    return findings
+
+
 def _texts(value: object, path: str) -> Iterator[tuple[str, str]]:
     """Every string in the checklist's data, with where it is."""
     if isinstance(value, str):
@@ -382,6 +412,7 @@ def lint(
                 )
 
     findings.extend(_check_runs_findings(checklist))
+    findings.extend(_no_helps_findings(checklist))
     findings.extend(_placeholder_findings(checklist))
 
     ordered = checklist.used()

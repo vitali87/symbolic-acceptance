@@ -430,6 +430,32 @@ class LintTests(unittest.TestCase):
         )
         self.assertNotIn("unfrozen-workflows", self.codes(shallow))
 
+    def test_a_command_or_check_run_must_not_pass_by_not_running(self):
+        frozen = '[q.f]\nask = "Frozen?"\nby = "ci"\nfrozen = [".github/*"]\n'
+        for option in ('run = "pytest"', 'check = "tests"'):
+            for require in (
+                'that = { all = ["f", { not = "t" }] }',
+                'when = "t"\nthat = "f"',
+            ):
+                with self.subTest(option, require=require):
+                    read_as_no = sa.loads(
+                        f'[q.t]\nask = "T?"\nby = "ci"\n{option}\n{frozen}'
+                        f'[[require]]\nid = "r"\n{require}\nfail = "x"\n'
+                    )
+                    self.assertEqual(self.codes(read_as_no), ["no-helps"])
+        # Asked the other way round, a YES helps, which only a run can give.
+        failing = sa.loads(
+            '[q.t]\nask = "T?"\nby = "ci"\nrun = "pytest"\nexpect = "fail"\n'
+            f"{frozen}"
+            '[[require]]\nid = "r"\nthat = { all = ["f", "t"] }\nfail = "x"\n'
+        )
+        self.assertEqual(self.codes(failing), [])
+        # A frozen check's NO is a change the attempt made: proof enough.
+        changed = sa.loads(
+            f'{frozen}[[require]]\nid = "r"\nthat = {{ not = "f" }}\nfail = "x"\n'
+        )
+        self.assertNotIn("no-helps", self.codes(changed))
+
     def test_large_checklists_skip_exhaustive_checks(self):
         ids = [f"q{n}" for n in range(MAX_EXHAUSTIVE + 1)]
         text = "".join(f'[q.{q}]\nask = "{q}?"\nby = "ci"\n' for q in ids)

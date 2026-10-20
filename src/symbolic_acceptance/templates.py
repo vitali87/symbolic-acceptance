@@ -56,6 +56,9 @@ Rules:
   question of its own that gates the SSO requirement. When the condition is
   about files, decide it with frozen = [<their paths>], under `not`, rather
   than asking the judge.
+- A command or check run that never ran answers NO, so ask it so that YES
+  helps the attempt pass, never under `not` or in `when`: expect = "fail"
+  asks for a command that must fail.
 - Ids are letters, digits and underscores, and start with a letter or an
   underscore.
 """
