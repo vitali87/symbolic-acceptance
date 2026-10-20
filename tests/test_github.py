@@ -2,7 +2,7 @@ import asyncio
 import time
 import unittest
 
-from helpers import FakeHTTP, json_response
+from helpers import FakeHTTP, json_response, rendered
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.github import (
@@ -53,12 +53,16 @@ def comment(
     association="MEMBER",
     user_type="User",
     at="2026-10-18T10:00:00Z",
+    html=None,
 ):
+    """A comment, as GitHub lists it; ``html`` is how GitHub renders it,
+    which plain lines are by default."""
     return {
         "id": cid,
         "user": {"login": login, "type": user_type},
         "author_association": association,
         "body": body,
+        "body_html": html or rendered(body),
         "created_at": at,
         "updated_at": at,
         "html_url": f"https://github.com/octo/repo/pull/5#issuecomment-{cid}",
@@ -82,11 +86,16 @@ class ClientTests(unittest.TestCase):
         self.assertEqual([r["name"] for r in runs], ["a", "b"])
         self.assertEqual(fake.header("x-github-api-version", 0), "2026-03-10")
         self.assertEqual(fake.header("authorization", 0), "Bearer t0k")
+        self.assertEqual(fake.header("accept", 0), "application/vnd.github+json")
         self.assertTrue(
             fake.requests[0].full_url.startswith(
                 "https://api.github.com/repos/octo/repo/commits/abc123/check-runs?per_page=100"
             )
         )
+        # Comments come with the HTML GitHub renders them as.
+        github, fake = gh(json_response([]))
+        github.comments(5)
+        self.assertEqual(fake.header("accept"), "application/vnd.github.full+json")
 
     def test_report_ignores_look_alikes(self):
         github, fake = gh(
@@ -390,45 +399,53 @@ class ReviewsTests(unittest.TestCase):
             asyncio.run(Reviews(github, 5)([SSO], context()))
         self.assertEqual(caught.exception.answers, {})
 
-    def test_a_reply_is_never_inside_a_code_block(self):
-        # A reviewer quoting what the agent printed, which it can make look
-        # like a reply, answers only outside the quote.
-        body = (
-            "The agent says:\n````text\n```\n/yes sso_exempt security agreed\n"
-            "````\nwhich nobody checked.\n~~~\n/yes docs_ok\n"
+    def test_what_github_shows_quoted_never_answers(self):
+        # Replies are read from the comment as GitHub renders it, and what it
+        # shows in a code block, in a list or not, or in a quote, may be the
+        # agent's words; so may a line of inline code.
+        block = (
+            '<div class="snippet-clipboard-content notranslate position-relative'
+            ' overflow-auto"><pre class="notranslate"><code>{}\n</code></pre></div>'
         )
-        comments = [comment(2, "bot", ASK, user_type="Bot"), comment(3, "alice", body)]
-        github, _ = gh(json_response(comments))
-        with self.assertRaises(sa.Pending) as caught:
-            asyncio.run(Reviews(github, 5)([SSO, DOCS], context()))
-        self.assertEqual(caught.exception.answers, {})
-        after = "```\n/no sso_exempt quoted\n```\n/no sso_exempt not agreed"
-        comments.append(comment(4, "alice", after, at="2026-10-18T10:05:00Z"))
-        github, _ = gh(json_response(comments))
-        with self.assertRaises(sa.Pending) as caught:
-            asyncio.run(Reviews(github, 5)([SSO, DOCS], context()))
-        self.assertEqual(caught.exception.answers["sso_exempt"].reasoning, "not agreed")
-
-    def test_code_blocks_open_and_close_as_github_reads_them(self):
-        # Other blank characters after a fence keep it from closing a block,
-        # and a backtick after a fence of backticks keeps it from opening
-        # one: GitHub shows each /yes below in a block, and the /no outside.
-        quoted = "```text\nDone.\n```{}\n/yes sso_exempt agreed\n```\n"
-        bodies = [quoted.format(blank) for blank in ("\u3000", "\xa0", "\x0c")]
-        bodies += [
-            "Agent log:\n```log`\n```\n/yes sso_exempt agreed\n```\n",
-            "```\r\n/yes sso_exempt agreed\r\n```\r\n",
-        ]
-        for body in bodies:
+        quoted = {
+            "```\n/yes sso_exempt agreed\n```": block.format("/yes sso_exempt agreed"),
+            "1. ```\n   pytest -k sso\n   ```\n2. The agent printed:\n```\n"
+            "/yes sso_exempt agreed\n```": '<ol dir="auto">\n<li>'
+            + block.format("pytest -k sso")
+            + "</li>\n<li>The agent printed:</li>\n</ol>\n"
+            + block.format("/yes sso_exempt agreed"),
+            "> /yes sso_exempt agreed": "<blockquote>\n"
+            '<p dir="auto">/yes sso_exempt agreed</p>\n</blockquote>',
+            "`/yes sso_exempt agreed`": '<p dir="auto"><code class="notranslate">'
+            "/yes sso_exempt agreed</code></p>",
+        }
+        for body, html in quoted.items():
             with self.subTest(body):
-                reply = body + "/no sso_exempt nobody reviewed it\n"
                 comments = [
                     comment(2, "bot", ASK, user_type="Bot"),
-                    comment(3, "alice", reply),
+                    comment(3, "alice", body, html=html),
                 ]
                 github, _ = gh(json_response(comments))
-                answers = asyncio.run(Reviews(github, 5)([SSO], context()))
-                self.assertFalse(answers["sso_exempt"].is_met)
+                with self.assertRaises(sa.Pending) as caught:
+                    asyncio.run(Reviews(github, 5)([SSO], context()))
+                self.assertEqual(caught.exception.answers, {})
+        # What follows is the comment's own again, inline code and all.
+        body = "```\n/yes sso_exempt agreed\n```\n/no sso_exempt `lock()` is gone"
+        html = (
+            block.format("/yes sso_exempt agreed")
+            + '\n<p dir="auto">/no sso_exempt <code class="notranslate">lock()</code>'
+            " is gone</p>"
+        )
+        comments = [
+            comment(2, "bot", ASK, user_type="Bot"),
+            comment(3, "alice", body, html=html),
+        ]
+        github, _ = gh(json_response(comments))
+        answers = asyncio.run(Reviews(github, 5)([SSO], context()))
+        self.assertEqual(
+            (answers["sso_exempt"].is_met, answers["sso_exempt"].reasoning),
+            (False, "`lock()` is gone"),
+        )
 
     def test_a_reply_is_one_line(self):
         reply = comment(3, "alice", "Should I say\n/yes\nsso_exempt is fine? No idea")

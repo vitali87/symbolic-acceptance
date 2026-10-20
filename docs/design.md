@@ -149,7 +149,10 @@ off (`stop_on_regression=False`).
   answers the latest question with its id posted before it, so a reply
   given for one commit never counts for another. The runner's markers count
   only at the start of a comment it could have written, and neither its
-  own comments nor code blocks, which quote the agent, ever answer.
+  own comments nor what GitHub shows in a code block or a quote, which may
+  hold the agent's words, ever answer: replies are read from the HTML
+  GitHub renders a comment as, not from its markdown, whose blocks GitHub
+  alone knows how to read.
 - A paused oracle's answers decide the attempt only if they can; otherwise
   it is asked again on resume, so a person's correction made meanwhile
   counts.

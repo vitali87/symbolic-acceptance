@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import http.server
 import io
 import json
@@ -234,6 +235,12 @@ index 4444444..0000000
 Comment = dict[str, object]
 
 
+def rendered(body: str) -> str:
+    """The HTML GitHub renders a comment of plain lines as (body_html)."""
+    lines = "<br>\n".join(html.escape(line) for line in body.split("\n"))
+    return f'<p dir="auto">{lines}</p>'
+
+
 @contextlib.contextmanager
 def github_api() -> Iterator[tuple[str, list[Comment], list[tuple[str, str]]]]:
     """A stand-in for GitHub's API for issue comments, on this machine: its
@@ -259,9 +266,11 @@ def github_api() -> Iterator[tuple[str, list[Comment], list[tuple[str, str]]]]:
 
         def do_POST(self) -> None:
             at = f"2026-10-19T10:00:{len(comments):02d}Z"
+            body = self.sent()
             comment: Comment = {
                 "id": len(comments) + 1,
-                "body": self.sent(),
+                "body": body,
+                "body_html": rendered(body),
                 "user": {"login": "runner[bot]", "type": "Bot"},
                 "author_association": "NONE",
                 "created_at": at,
@@ -273,7 +282,9 @@ def github_api() -> Iterator[tuple[str, list[Comment], list[tuple[str, str]]]]:
 
         def do_PATCH(self) -> None:
             comment = comments[int(self.path.rsplit("/", 1)[1]) - 1]
-            comment |= {"body": self.sent(), "updated_at": "2026-10-19T11:00:00Z"}
+            body = self.sent()
+            edited = {"body": body, "body_html": rendered(body)}
+            comment |= edited | {"updated_at": "2026-10-19T11:00:00Z"}
             self.reply(comment)
 
         def log_message(self, *args: object) -> None:

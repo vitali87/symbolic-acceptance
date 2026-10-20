@@ -24,6 +24,7 @@ from helpers import (
     finished_run,
     github_api,
     message,
+    rendered,
     repo,
 )
 
@@ -1281,6 +1282,7 @@ class CLITests(unittest.TestCase):
                 {
                     "id": 3,
                     "body": "/yes ok looks right",
+                    "body_html": rendered("/yes ok looks right"),
                     "user": {"login": "alice", "type": "User"},
                     "author_association": "MEMBER",
                     "created_at": "2026-10-19T10:30:00Z",

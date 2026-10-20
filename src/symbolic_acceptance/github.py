@@ -18,6 +18,7 @@ import time
 import urllib.parse
 from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from typing import TypedDict
 
 from symbolic_acceptance import http
@@ -52,10 +53,8 @@ _MARKER = "<!-- symbolic-acceptance:"
 _ASKED = re.compile(
     re.escape(_MARKER) + r"ask ref=(?P<ref>\S+) ids=(?P<ids>[\w,]+) -->", re.ASCII
 )
-# A code fence as GitHub reads one (CommonMark): a fence of backticks takes
-# no backtick after it, and only spaces and tabs may follow a closing one.
-_FENCE = re.compile(r" {0,3}(`{3,}(?!.*`)|~{3,})(.*)$")
 _TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+_JSON = "application/vnd.github+json"
 REPORT_MARKER = f"{_MARKER}report -->"
 # GitHub refuses a comment over 65,536 characters; this leaves room for
 # however it counts them.
@@ -68,10 +67,12 @@ class User(TypedDict):
 
 
 class Comment(TypedDict):
-    """The fields of an issue comment that are read here."""
+    """The fields of an issue comment that are read here: its markdown, and
+    the HTML GitHub renders it as."""
 
     id: int
     body: str
+    body_html: str
     user: User | None
     author_association: str
     created_at: str
@@ -127,9 +128,15 @@ class GitHub:
     def _url(self, path: str) -> str:
         return f"{self.api.rstrip('/')}/repos/{self.repo}{path}"
 
-    def _request(self, method: str, url: str, body: http.JSON = None) -> http.Response:
+    def _request(
+        self,
+        method: str,
+        url: str,
+        body: http.JSON = None,
+        accept: str = _JSON,
+    ) -> http.Response:
         headers = {
-            "accept": "application/vnd.github+json",
+            "accept": accept,
             "x-github-api-version": API_VERSION,
             "user-agent": "symbolic-acceptance",
         }
@@ -144,12 +151,12 @@ class GitHub:
             transport=self.transport,
         )
 
-    def _pages(self, path: str) -> Iterator[str]:
+    def _pages(self, path: str, accept: str = _JSON) -> Iterator[str]:
         """The body of every page of a list, following ``Link: rel="next"``;
         decoded leniently, so that a reply that is not JSON is reported as such."""
         url: str | None = self._url(f"{path}?per_page=100")
         while url:
-            response = self._request("GET", url)
+            response = self._request("GET", url, accept=accept)
             yield response.body.decode(errors="replace")
             match = _NEXT.search(response.header("link") or "")
             url = match.group(1) if match else None
@@ -161,7 +168,9 @@ class GitHub:
 
     def comments(self, number: int) -> list[Comment]:
         path = f"/issues/{number}/comments"
-        pages: list[list[Comment]] = [json.loads(page) for page in self._pages(path)]
+        # With the HTML GitHub renders each as (body_html) besides its markdown.
+        full = "application/vnd.github.full+json"
+        pages: list[list[Comment]] = [json.loads(p) for p in self._pages(path, full)]
         return [comment for page in pages for comment in page]
 
     def comment(self, number: int, body: str) -> None:
@@ -204,19 +213,54 @@ def _logins(names: Collection[str]) -> set[str]:
     }
 
 
-def _outside_code(body: str) -> str:
-    """The comment's own lines: a fenced code block quotes, it never replies."""
-    lines, fence = [], ""
-    for line in re.split(r"\r\n|\r|\n", body):
-        match = _FENCE.match(line)
-        if not fence:
-            if match:
-                fence = match[1]
-            else:
-                lines.append(line)
-        elif match and match[1].startswith(fence) and not match[2].strip(" \t"):
-            fence = ""
-    return "\n".join(lines)
+class _OwnWords(HTMLParser):
+    """The text of a comment as GitHub shows it, line by line, but for what
+    it shows in a code block or a quote, which may be anyone's words, the
+    agent's included. Inline code keeps its backticks, so a line of code is
+    no reply either."""
+
+    _QUOTING = frozenset({"pre", "blockquote"})
+    # What starts a line of its own; anything else runs on in its line.
+    _LINES = _QUOTING | frozenset(
+        {"br", "p", "div", "li", "dd", "dt", "tr", "td", "th", "hr", "summary"}
+        | {f"h{level}" for level in range(1, 7)}
+    )
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.quoting = 0
+        self.text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: object) -> None:
+        self._mark(tag)
+        if tag in self._QUOTING:
+            self.quoting += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._QUOTING:
+            self.quoting -= 1
+        self._mark(tag)
+
+    def handle_data(self, data: str) -> None:
+        if not self.quoting:
+            self.text.append(data)
+
+    def _mark(self, tag: str) -> None:
+        """Outside a quote, inline code's backtick, or the end of a line."""
+        if self.quoting:
+            return
+        if tag == "code":
+            self.text.append("`")
+        elif tag in self._LINES:
+            self.text.append("\n")
+
+
+def _own_words(comment: Comment) -> str:
+    """The lines of ``comment`` in its author's own words."""
+    parser = _OwnWords()
+    parser.feed(comment["body_html"])
+    parser.close()
+    return "".join(parser.text)
 
 
 def _by_runner(comment: Comment, exclude: Collection[str]) -> bool:
@@ -336,9 +380,11 @@ class Reviews:
     collaborators, never from bots or from ``exclude`` (the agent's own
     account). Edited comments never count, since anyone with write access
     can edit another person's comment; correct an answer with a new reply.
-    Nor do the runner's own comments, whoever posts them, or lines inside a
-    fenced code block: both quote what the agent printed, which can look
-    like a reply. The latest reply to a question wins.
+    Nor do the runner's own comments, whoever posts them, nor what GitHub
+    shows of a comment in a code block or a quote: these may hold what the
+    agent printed, which can look like a reply. Replies are read from the
+    comment as GitHub renders it, so they are what a reader of the pull
+    request sees. The latest reply to a question wins.
     """
 
     def __init__(
@@ -392,7 +438,7 @@ class Reviews:
                 if match and _by_runner(comment, self.exclude):
                     latest.update(dict.fromkeys(match["ids"].split(","), match["ref"]))
             elif self._allowed(comment):
-                for verdict, qid, why in _REPLY.findall(_outside_code(comment["body"])):
+                for verdict, qid, why in _REPLY.findall(_own_words(comment)):
                     if latest.get(qid) == ref:
                         answers[qid] = Answer(
                             verdict.lower() == "yes",
