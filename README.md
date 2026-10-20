@@ -250,7 +250,7 @@ From the command line:
 ```sh
 symbolic-acceptance template bug > acceptance.toml   # or: draft issue.md (Claude drafts it)
 symbolic-acceptance lint acceptance.toml             # before a person approves it
-symbolic-acceptance digest acceptance.toml           # pin the approved version
+symbolic-acceptance digest acceptance.toml           # the approved version, as every report names it
 symbolic-acceptance run acceptance.toml --issue issue.md \
     --agent "claude -p --permission-mode auto" --cwd work \
     --push agent/issue-342 --record run.json --github owner/repo --pr 57

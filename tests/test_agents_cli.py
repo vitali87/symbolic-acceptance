@@ -555,7 +555,7 @@ class DraftTests(unittest.TestCase):
 
 class CLITests(unittest.TestCase):
     def test_lint_and_show(self):
-        code, out = cli("lint", str(EXAMPLE))
+        code, out = cli("lint", str(EXAMPLE), "--oracles", "ci, llm, human")
         self.assertEqual(code, 0)
         self.assertIn("ok (6 requirements)", out)
         code, out = cli("show", str(EXAMPLE))
@@ -797,6 +797,7 @@ class CLITests(unittest.TestCase):
         done, _ = run(subprocess.DEVNULL)
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("no terminal to ask a person", done.stdout)
+        self.assertRegex(done.stdout, "Run it again with --resume .*run.json to go on")
         # A reply opens with y, yes, n or no, as a word; anything else is
         # asked again.
         done, saved = typed(b"maybe\nnothing to add\nYes: looks fine\n")

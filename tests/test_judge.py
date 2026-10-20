@@ -579,7 +579,7 @@ class HTTPTests(unittest.TestCase):
         def timeout(request, seconds):
             raise TimeoutError("read timed out")
 
-        with self.assertRaisesRegex(http.HTTPError, "connection failed"):
+        with self.assertRaisesRegex(http.HTTPError, "/x failed: connection failed"):
             http.request("POST", "https://example.test/x", transport=timeout)
 
     def test_retry_after_may_be_a_date_or_unreadable(self):

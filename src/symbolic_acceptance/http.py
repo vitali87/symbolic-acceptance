@@ -45,7 +45,9 @@ class Response:
 
 class HTTPError(RuntimeError):
     def __init__(self, method: str, url: str, status: int, detail: str) -> None:
-        super().__init__(f"{method} {url} failed with HTTP {status}: {detail}")
+        # Status 0 is no reply at all.
+        reply = f" with HTTP {status}" if status else ""
+        super().__init__(f"{method} {url} failed{reply}: {detail}")
 
 
 Transport = Callable[[urllib.request.Request, float], Response]

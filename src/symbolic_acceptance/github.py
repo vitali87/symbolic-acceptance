@@ -320,7 +320,7 @@ class GitHubChecks:
                 return answers
             now = time.monotonic()
             if now >= deadline:
-                raise Pending("CI: " + "; ".join(waiting), answers=answers)
+                raise Pending("; ".join(waiting), answers=answers)
             await asyncio.sleep(min(self.poll, deadline - now))
 
 

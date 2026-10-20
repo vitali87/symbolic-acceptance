@@ -449,7 +449,7 @@ def _verdict(
             f"attempt {evaluations[-2].attempt.number} ({', '.join(sorted(failing))})"
         )
     if len(evaluations) >= max_attempts:
-        return ESCALATED, f"attempt cap: {max_attempts} attempts without approval"
+        return ESCALATED, f"attempt cap: no approval in {max_attempts} attempt(s)"
     return None
 
 

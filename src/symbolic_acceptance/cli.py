@@ -74,7 +74,11 @@ def _record(path: str, checklist: Checklist) -> Result:
 
 
 def _cmd_lint(args: argparse.Namespace) -> int:
-    oracles = tuple(args.oracles.split(",")) if args.oracles else ORACLES
+    oracles = (
+        tuple(name.strip() for name in args.oracles.split(","))
+        if args.oracles
+        else ORACLES
+    )
     worst = 0
     for path in args.files:
         try:
@@ -331,8 +335,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(f"error: {', '.join(unnamed)} need check, run or frozen")
     if remote and not (github and args.push):
         raise SystemExit(
-            f"error: {', '.join(remote)} are answered by GitHub check runs; pass "
-            "--github and --push so that every attempt reaches CI"
+            f"error: GitHub check runs answer {', '.join(remote)}; pass --github "
+            "and --push so that every attempt reaches CI"
         )
     oracles: dict[str, Oracle] = {
         "ci": ci,
@@ -415,6 +419,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             )
         )
     print(f"{result.status}: {result.reason}")
+    if result.status == WAITING and record_path:
+        print(f"Run it again with --resume {record_path} to go on.")
     if result.last and result.last.failures:
         sys.stdout.write(result.last.feedback)
     return 0 if result.status == APPROVED else 3 if result.status == WAITING else 1
@@ -440,7 +446,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     sub = commands.add_parser("lint", help="check checklists before approving them")
-    sub.add_argument("files", nargs="+")
+    sub.add_argument("files", nargs="+", help="checklists (TOML)")
     sub.add_argument(
         "--oracles", help="comma-separated oracle names (default ci,llm,human)"
     )
@@ -461,17 +467,30 @@ def _parser() -> argparse.ArgumentParser:
 
     sub = commands.add_parser("explain", help="decide a checklist from answers in JSON")
     sub.add_argument("file")
-    sub.add_argument("answers", help='JSON: {"question_id": true, ...}')
+    sub.add_argument(
+        "answers", help='a file of answers in JSON: {"question_id": true, ...}'
+    )
     sub.set_defaults(handler=_cmd_explain)
 
     sub = commands.add_parser(
         "draft", help="draft a checklist from an issue with Claude"
     )
     sub.add_argument("issue", help="file with the issue text")
-    sub.add_argument("--template", choices=sorted(TEMPLATES), default="bug")
-    sub.add_argument("--out", default="acceptance.toml")
-    sub.add_argument("--model", default=DEFAULT_MODEL)
-    sub.add_argument("--force", action="store_true")
+    sub.add_argument(
+        "--template",
+        choices=sorted(TEMPLATES),
+        default="bug",
+        help="the template to start from (default bug)",
+    )
+    sub.add_argument(
+        "--out",
+        default="acceptance.toml",
+        help="where to write the draft (default acceptance.toml)",
+    )
+    sub.add_argument(
+        "--model", default=DEFAULT_MODEL, help=f"Claude model (default {DEFAULT_MODEL})"
+    )
+    sub.add_argument("--force", action="store_true", help="replace --out if it exists")
     sub.set_defaults(handler=_cmd_draft)
 
     sub = commands.add_parser("report", help="render a recorded run as Markdown")
