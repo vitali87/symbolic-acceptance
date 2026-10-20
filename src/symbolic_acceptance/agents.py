@@ -390,6 +390,8 @@ class CommandAgent:
         push: str | None = None,
         env: Mapping[str, str] = os.environ,
     ) -> None:
+        if isinstance(argv, str):
+            raise TypeError(f"argv must be a list of arguments, not {argv!r}")
         if not argv:
             raise ValueError("argv must name the agent's command")
         self.argv = list(argv)
@@ -406,6 +408,11 @@ class CommandAgent:
         return git(self.cwd, "rev-parse", f"{commit}^{{tree}}").strip()
 
     def __call__(self, task: Task) -> Attempt:
+        if task.base and task.base != self.base:
+            raise ValueError(
+                f"the run started from {task.base[:12]} and the agent from "
+                f"{self.base[:12]}; give the agent the run's base"
+            )
         before = self._head()
         start, what = (
             (task.previous.ref, f"attempt {task.number - 1}")

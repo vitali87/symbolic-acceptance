@@ -259,6 +259,14 @@ result.status  # "approved" | "escalated" | "waiting"
 result.reason
 ```
 
+To resume, pass the saved run, `saved = sa.record.load("run.json",
+checklist)`, as `resume=saved`, and give the agent its base,
+`CommandAgent(..., base=saved.base)`: an agent started from another commit
+refuses the task. Unlike the command line, `run` takes no signals:
+on Ctrl-C or an error, call `symbolic_acceptance.agents.stop_programs()`
+before leaving, or a thread still running the agent goes on to commit and
+push. That stops programs for the rest of the process.
+
 From the command line:
 
 ```sh

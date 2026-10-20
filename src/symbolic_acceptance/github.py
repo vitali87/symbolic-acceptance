@@ -210,6 +210,8 @@ def _edited(comment: Comment) -> bool:
 def _logins(names: Collection[str]) -> set[str]:
     """Logins as GitHub compares them: no spaces or "@", any case, and an
     app's account by its name, with or without the "[bot]" GitHub adds."""
+    if isinstance(names, str):
+        raise TypeError(f"logins must be a list of names, not the string {names!r}")
     return {
         name.strip().removeprefix("@").lower().removesuffix("[bot]")
         for name in names

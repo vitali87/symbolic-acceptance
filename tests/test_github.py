@@ -489,6 +489,13 @@ class ReviewsTests(unittest.TestCase):
                     asyncio.run(Reviews(github, 5, exclude=exclude)([SSO], context()))
                 self.assertEqual(caught.exception.answers, {})
 
+    def test_a_login_is_not_a_list_of_logins(self):
+        # Read letter by letter, "agent" would exclude no one.
+        github, _ = gh()
+        for options in ({"exclude": "agent"}, {"reviewers": "alice"}):
+            with self.subTest(options), self.assertRaisesRegex(TypeError, "list"):
+                Reviews(github, 5, **options)
+
     def test_an_apps_account_is_excluded_with_or_without_its_bot_suffix(self):
         # The agent's app asks a question of its own, worded to mislead.
         forged = comment(2, "claude[bot]", ASK, association="NONE", user_type="Bot")

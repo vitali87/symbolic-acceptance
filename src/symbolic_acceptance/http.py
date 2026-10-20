@@ -45,10 +45,12 @@ class Response:
 
 
 class HTTPError(RuntimeError):
+    """A request that failed: ``status`` is the reply's, or 0 for none."""
+
     def __init__(self, method: str, url: str, status: int, detail: str) -> None:
-        # Status 0 is no reply at all.
         reply = f" with HTTP {status}" if status else ""
         super().__init__(f"{method} {url} failed{reply}: {detail}")
+        self.status = status
 
 
 Transport = Callable[[urllib.request.Request, float], Response]

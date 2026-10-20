@@ -189,6 +189,9 @@ class Task:
     number: int
     feedback: tuple[Failure, ...] = ()
     previous: Attempt | None = None
+    # The commit the run started from, when it knows it, which every attempt
+    # is compared with.
+    base: str = ""
 
     def prompt(self) -> str:
         """Instructions for a coding agent: the issue, the bar, the feedback."""
@@ -545,6 +548,7 @@ async def run(
             number=len(evaluations) + 1,
             feedback=previous.failures if previous else (),
             previous=previous.attempt if previous else None,
+            base=base,
         )
         try:
             produced = await _call(agent, task)

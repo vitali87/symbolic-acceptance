@@ -608,8 +608,9 @@ class HTTPTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(
             http.HTTPError, "HTTP 403: Resource not accessible"
-        ):
+        ) as caught:
             http.request("GET", "https://example.test/x", transport=fake)
+        self.assertEqual(caught.exception.status, 403)
         self.assertEqual(len(fake.requests), 1)
 
     def test_claude_retries_server_errors(self):

@@ -369,7 +369,8 @@ def lint(
     oracles: Collection[str] | None = None,
     last: Collection[str] = DEFAULT_LAST,
 ) -> list[Finding]:
-    """Return findings, errors first. ``oracles`` lists the oracle names known."""
+    """Return findings, errors first. ``oracles`` lists the oracle names known;
+    without it, every oracle is taken for one."""
     findings: list[Finding] = []
     used = set(checklist.used())
 

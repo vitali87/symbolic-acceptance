@@ -80,6 +80,22 @@ class CommandAgentTests(unittest.TestCase):
             self.assertRaisesRegex(ValueError, "argv must name"),
         ):
             CommandAgent([], cwd=tmp)
+        # One string is no command line: "claude -p" would run "c".
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(TypeError, "list of arguments"),
+        ):
+            CommandAgent("claude -p", cwd=tmp)
+
+    def test_an_agent_refuses_a_run_from_another_base(self):
+        # As when a run is resumed with an agent not given the run's base: it
+        # would compare attempts with the latest, not with where the run began.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            agent = CommandAgent([sys.executable, "-c", "pass"], cwd=tmp)
+            task = sa.Task("", example(), 2, base="0" * 40)
+            with self.assertRaisesRegex(ValueError, "give the agent the run's base"):
+                agent(task)
 
     def test_uncommitted_changes_become_the_attempt(self):
         with tempfile.TemporaryDirectory() as tmp:

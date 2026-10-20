@@ -485,6 +485,7 @@ class RunTests(unittest.TestCase):
             )
         )
         self.assertEqual((first.issue, first.base), ("#342", "b0"))
+        self.assertEqual(agent.tasks[0].base, "b0")
         script.silent.clear()
         second = asyncio.run(
             sa.run(self.checklist, agent=agent, oracles=script.oracles(), resume=first)
