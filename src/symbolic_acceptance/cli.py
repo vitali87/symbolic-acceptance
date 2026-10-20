@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import os
 import re
@@ -13,7 +12,7 @@ import shutil
 import signal
 import sys
 import threading
-from collections.abc import Generator, Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from symbolic_acceptance import __version__, record
@@ -252,13 +251,12 @@ async def _typed() -> str:
 _STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
-def _stop(signum: int, frame: object) -> None:
+def _stop(signum: int, stops: Collection[int]) -> None:
     """End the agent or check running now and stop as soon as the rest has,
     the record kept as last saved; a second signal, for a request still
     waiting on the network, quits at once."""
-    for stop in _STOPS:
-        if signal.getsignal(stop) is _stop:
-            signal.signal(stop, _quit)
+    for stop in stops:
+        signal.signal(stop, _quit)
     name = signal.Signals(signum).name
     try:
         print(f"stopping on {name}; send it again to quit at once", file=sys.stderr)
@@ -275,24 +273,22 @@ def _quit(signum: int, frame: object) -> None:
     os._exit(128 + signum)
 
 
-@contextlib.contextmanager
-def _stoppable() -> Generator[None]:
-    """Stop on Ctrl-C, SIGTERM or SIGHUP as :func:`_stop` does, unless one was
-    ignored from the start (a shell's background job), or this is not the
-    main thread, the only one that can handle signals."""
+def _stop_on_signals() -> None:
+    """Stop the running loop on Ctrl-C, SIGTERM or SIGHUP as :func:`_stop`
+    does, unless one was ignored from the start (a shell's background job),
+    or this is not the main thread, the only one that can handle signals.
+
+    The loop takes them, as a callback between its steps, rather than a
+    handler Python runs wherever the main thread is: the main thread, waiting
+    on the loop, is not woken by a signal another thread receives, and a
+    handler run in the middle of a write to stderr cannot write to it.
+    """
     if threading.current_thread() is not threading.main_thread():
-        yield
         return
-    previous = {
-        stop: signal.signal(stop, _stop)
-        for stop in _STOPS
-        if signal.getsignal(stop) is not signal.SIG_IGN
-    }
-    try:
-        yield
-    finally:
-        for stop, handler in previous.items():
-            signal.signal(stop, handler)
+    loop = asyncio.get_running_loop()
+    stops = [stop for stop in _STOPS if signal.getsignal(stop) is not signal.SIG_IGN]
+    for stop in stops:
+        loop.add_signal_handler(stop, _stop, stop, stops)
 
 
 def _installed(program: str, what: str) -> None:
@@ -422,6 +418,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             post_report(github, args.pr, markdown(result, checklist), exclude=exclude)
 
     async def stopping_on_an_error() -> Result:
+        _stop_on_signals()
         try:
             return await run(
                 checklist,
@@ -440,8 +437,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
             stop_programs()
             raise
 
-    with _stoppable():
-        result = asyncio.run(stopping_on_an_error())
+    result = asyncio.run(stopping_on_an_error())
     print(f"{result.status}: {result.reason}")
     if result.status == WAITING and record_path:
         print(f"Run it again with --resume {record_path} to go on.")

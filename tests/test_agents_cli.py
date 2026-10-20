@@ -1397,6 +1397,99 @@ class CLITests(unittest.TestCase):
             self.assertEqual(runner.returncode, 128 + signal.SIGINT, err.decode())
             self.assertEqual(json.loads(saved.read_text())["status"], "running")
 
+    def test_ctrl_c_as_it_writes_to_stderr_stops_it_cleanly(self):
+        # Its stderr full, it is stuck writing the questions when Ctrl-C
+        # comes, and the notice it then writes must not break that write.
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            saved = Path(outside, "run.json")
+            keyboard, terminal = os.openpty()
+            errors, written = os.pipe()
+            os.set_blocking(written, False)
+            with contextlib.suppress(BlockingIOError):
+                while True:
+                    os.write(written, b"." * 4096)
+            os.set_blocking(written, True)
+            with subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
+                env=NO_GIT_CONFIG | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                stdin=terminal,
+                stdout=subprocess.DEVNULL,
+                stderr=written,
+            ) as runner:
+                os.close(written)
+                deadline = time.monotonic() + 30
+                while not (
+                    saved.exists() and json.loads(saved.read_text())["evaluations"]
+                ):
+                    self.assertLess(time.monotonic(), deadline, "no attempt was made")
+                    time.sleep(0.05)
+                time.sleep(0.5)  # into the write of its questions
+                runner.send_signal(signal.SIGINT)
+                with os.fdopen(errors, "rb") as stream:
+                    err = stream.read()
+                runner.wait(timeout=20)
+            os.close(keyboard)
+            os.close(terminal)
+        self.assertEqual(runner.returncode, 128 + signal.SIGINT, err[-2000:])
+        self.assertNotIn(b"Traceback", err)
+        self.assertIn(b"stopping on SIGINT", err)
+
+    def test_ctrl_c_that_another_thread_receives_stops_the_run(self):
+        # The kernel may give a signal to any thread, and Python handles it in
+        # the main one, which waits on the terminal and must be woken.
+        interrupt = (
+            "import json, signal, sys, threading, time\n"
+            "from pathlib import Path\n"
+            "from symbolic_acceptance.cli import main\n"
+            "def interrupt(saved):\n"
+            "    while not (saved.exists() and json.loads(saved.read_text())['evaluations']):\n"
+            "        time.sleep(0.05)\n"
+            "    time.sleep(0.5)\n"
+            "    signal.pthread_kill(threading.get_ident(), signal.SIGINT)\n"
+            "threading.Thread(target=interrupt, args=(Path(sys.argv[1]),)).start()\n"
+            "sys.exit(main(sys.argv[2:]))\n"
+        )
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+            )
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            saved = Path(outside, "run.json")
+            keyboard, terminal = os.openpty()
+            with subprocess.Popen(
+                [sys.executable, "-c", interrupt, str(saved), "run", str(checklist)]
+                + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
+                env=NO_GIT_CONFIG | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                stdin=terminal,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            ) as runner:
+                try:
+                    _, err = runner.communicate(timeout=60)
+                finally:
+                    runner.kill()  # a run never woken
+            os.close(keyboard)
+            os.close(terminal)
+        self.assertEqual(runner.returncode, 128 + signal.SIGINT, err.decode())
+        self.assertIn(b"stopping on SIGINT", err)
+
     def test_ctrl_c_ends_a_draft_quietly(self):
         asked = threading.Event()
 
