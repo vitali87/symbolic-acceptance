@@ -26,6 +26,7 @@ from helpers import (
     message,
     rendered,
     repo,
+    serve,
 )
 
 import symbolic_acceptance as sa
@@ -1248,10 +1249,9 @@ class CLITests(unittest.TestCase):
 
         # A server on this machine stands in for the Messages API.
         with (
-            http.server.ThreadingHTTPServer(("127.0.0.1", 0), MessagesAPI) as server,
+            serve(MessagesAPI) as url,
             tempfile.TemporaryDirectory() as tmp,
         ):
-            threading.Thread(target=server.serve_forever, daemon=True).start()
             issue, out = Path(tmp, "issue.md"), Path(tmp, "acceptance.toml")
             issue.write_text("Logins are not throttled\n")
 
@@ -1261,7 +1261,7 @@ class CLITests(unittest.TestCase):
                     + ["--out", str(out)],
                     env=dict(
                         os.environ,
-                        ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+                        ANTHROPIC_BASE_URL=url,
                         ANTHROPIC_API_KEY="key",
                         NO_PROXY="127.0.0.1",
                         no_proxy="127.0.0.1",
@@ -1275,7 +1275,6 @@ class CLITests(unittest.TestCase):
                 )
 
             refused, proxied, done = drafting(), drafting(), drafting()
-            server.shutdown()
             written = out.read_text()
         self.assertEqual(refused.returncode, 1)
         self.assertRegex(
@@ -1372,13 +1371,10 @@ class CLITests(unittest.TestCase):
         # The judge cannot reach Claude, which hangs up on it, while a slow
         # check runs beside it.
         with (
-            socketserver.TCPServer(
-                ("127.0.0.1", 0), socketserver.BaseRequestHandler
-            ) as claude,
+            serve(socketserver.BaseRequestHandler) as claude,
             tempfile.TemporaryDirectory() as tmp,
             tempfile.TemporaryDirectory() as outside,
         ):
-            threading.Thread(target=claude.serve_forever, daemon=True).start()
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
             checklist.write_text(
@@ -1387,7 +1383,6 @@ class CLITests(unittest.TestCase):
                 '[[require]]\nthat = { all = ["slow", "judged"] }\nid = "r"\n'
                 'fail = "x"\n'
             )
-            port = claude.server_address[1]
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             started = time.monotonic()
             done = subprocess.run(
@@ -1397,7 +1392,7 @@ class CLITests(unittest.TestCase):
                 | {
                     "PYTHONPATH": SRC,
                     "ANTHROPIC_API_KEY": "key",
-                    "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
+                    "ANTHROPIC_BASE_URL": claude,
                     "NO_PROXY": "127.0.0.1",
                     "no_proxy": "127.0.0.1",
                 },
@@ -1407,7 +1402,6 @@ class CLITests(unittest.TestCase):
                 check=False,
                 timeout=90,
             )
-            claude.shutdown()
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("connection failed", done.stderr)
         self.assertLess(time.monotonic() - started, 30, "the check was stopped")
@@ -1636,10 +1630,9 @@ class CLITests(unittest.TestCase):
                 time.sleep(30)
 
         with (
-            http.server.ThreadingHTTPServer(("127.0.0.1", 0), Silent) as server,
+            serve(Silent) as url,
             tempfile.TemporaryDirectory() as tmp,
         ):
-            threading.Thread(target=server.serve_forever, daemon=True).start()
             issue = Path(tmp, "issue.md")
             issue.write_text("Logins are not throttled\n")
             with subprocess.Popen(
@@ -1647,7 +1640,7 @@ class CLITests(unittest.TestCase):
                 + ["--out", str(Path(tmp, "acceptance.toml"))],
                 env=dict(
                     os.environ,
-                    ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+                    ANTHROPIC_BASE_URL=url,
                     ANTHROPIC_API_KEY="key",
                     NO_PROXY="127.0.0.1",
                     no_proxy="127.0.0.1",
@@ -1660,7 +1653,6 @@ class CLITests(unittest.TestCase):
                 self.assertTrue(asked.wait(30), "Claude was never asked")
                 drafting.send_signal(signal.SIGINT)
                 _, err = drafting.communicate(timeout=20)
-            server.shutdown()
         self.assertEqual((drafting.returncode, err), (128 + signal.SIGINT, ""))
 
     def test_a_stopped_run_sends_github_nothing_more(self):
@@ -1683,11 +1675,10 @@ class CLITests(unittest.TestCase):
                 pass
 
         with (
-            http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow) as server,
+            serve(Slow) as url,
             tempfile.TemporaryDirectory() as tmp,
             tempfile.TemporaryDirectory() as outside,
         ):
-            threading.Thread(target=server.serve_forever, daemon=True).start()
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
             checklist.write_text(ASKS_A_PERSON)
@@ -1699,7 +1690,7 @@ class CLITests(unittest.TestCase):
                 + ["--github", "owner/repo", "--pr", "5"],
                 env=dict(
                     os.environ,
-                    GITHUB_API_URL=f"http://127.0.0.1:{server.server_port}",
+                    GITHUB_API_URL=url,
                     GH_TOKEN="token",
                     NO_PROXY="127.0.0.1",
                     no_proxy="127.0.0.1",
@@ -1716,7 +1707,6 @@ class CLITests(unittest.TestCase):
                 runner.send_signal(signal.SIGINT)
                 _, err = runner.communicate(timeout=30)
                 stopping = time.monotonic() - started - asking
-            server.shutdown()
         self.assertEqual(runner.returncode, 128 + signal.SIGINT, err)
         # The request under way when it stopped, and none after it; it ended
         # once that one was answered.

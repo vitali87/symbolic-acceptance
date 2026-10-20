@@ -10,6 +10,7 @@ import io
 import json
 import os
 import signal
+import socketserver
 import threading
 import urllib.request
 from collections.abc import Callable, Generator, Iterable, Mapping
@@ -240,6 +241,23 @@ def rendered(body: str) -> str:
 
 
 @contextlib.contextmanager
+def serve(handler: type[socketserver.BaseRequestHandler]) -> Generator[str]:
+    """``handler`` answering on this machine, at the URL this yields.
+
+    It is socketserver's server rather than http.server's, which first looks
+    up the name of the address it listens on, a lookup that can take half a
+    minute on macOS.
+    """
+    with socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler) as server:
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            yield f"http://127.0.0.1:{server.server_address[1]}"
+        finally:
+            server.shutdown()
+
+
+@contextlib.contextmanager
 def github_api() -> Generator[tuple[str, list[Comment], list[tuple[str, str]]]]:
     """A stand-in for GitHub's API for issue comments, on this machine: its
     URL, the comments it holds and each request's method and token."""
@@ -289,9 +307,5 @@ def github_api() -> Generator[tuple[str, list[Comment], list[tuple[str, str]]]]:
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-    with http.server.ThreadingHTTPServer(("127.0.0.1", 0), API) as server:
-        threading.Thread(target=server.serve_forever, daemon=True).start()
-        try:
-            yield f"http://127.0.0.1:{server.server_port}", comments, requests
-        finally:
-            server.shutdown()
+    with serve(API) as url:
+        yield url, comments, requests
