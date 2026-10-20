@@ -160,7 +160,7 @@ def run_program(
         process = subprocess.Popen(
             argv,
             cwd=cwd,
-            env=dict(env),
+            env=env,
             stdin=stdin,
             stdout=log,
             stderr=subprocess.STDOUT,

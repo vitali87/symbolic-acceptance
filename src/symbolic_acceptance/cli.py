@@ -320,9 +320,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(f"error: --cwd {args.cwd} is not a folder")
     # What would fail only once the agent has worked is checked now.
     _installed(argv[0], "--agent")
-    for qid in checklist.used():
-        if "run" in checklist.questions[qid].options:
-            _installed(command(checklist.questions[qid])[0], f"q.{qid}.run")
+    used = [checklist.questions[qid] for qid in checklist.used()]
+    for question in used:
+        if "run" in question.options:
+            _installed(command(question)[0], f"q.{question.id}.run")
     issue = _read(args.issue) if args.issue else ""
     if args.github and not re.fullmatch(r"[^/\s]+/[^/\s]+", args.github):
         raise SystemExit("error: --github takes a repository as owner/name")
@@ -341,19 +342,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
         )
     claude = Claude(model=args.model)
     ci = Checks(Commands(args.cwd), fallback=ci_fallback)
-    remote = [
-        qid
-        for qid in checklist.used()
-        if checklist.questions[qid].by == "ci"
-        and not ci.handles(checklist.questions[qid])
-    ]
-    unnamed = [qid for qid in remote if "check" not in checklist.questions[qid].options]
+    remote = [q for q in used if q.by == "ci" and not ci.handles(q)]
+    unnamed = [q.id for q in remote if "check" not in q.options]
     if unnamed:
         raise SystemExit(f"error: {', '.join(unnamed)} need check, run or frozen")
     if remote and not (github and args.push):
         raise SystemExit(
-            f"error: GitHub check runs answer {', '.join(remote)}; pass --github "
-            "and --push so that every attempt reaches CI"
+            f"error: GitHub check runs answer {', '.join(q.id for q in remote)}; "
+            "pass --github and --push so that every attempt reaches CI"
         )
     # Without one, GitHub hides a private repository and soon limits the rate.
     if github and (args.pr or remote) and not github.token:
@@ -369,12 +365,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
         if issue and resume.issue and issue != resume.issue:
             raise SystemExit("error: --issue differs from the run being resumed")
     record_path = args.record or args.resume
-    resuming_it = (
-        args.resume and Path(args.record or "").resolve() == Path(args.resume).resolve()
-    )
     if args.record and Path(args.record).is_dir():
         raise SystemExit(f"error: {args.record} is a folder; name the file to save in")
-    if args.record and not resuming_it and Path(args.record).exists():
+    if (
+        args.record
+        and Path(args.record).exists()
+        and not (args.resume and Path(args.record).samefile(args.resume))
+    ):
         raise SystemExit(
             f"error: {args.record} holds a run; pass --resume {args.record} to "
             "continue it"
@@ -404,7 +401,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.push:
         git(args.cwd, "check-ref-format", "--branch", args.push)
         git(args.cwd, "remote", "get-url", "origin")
-    judged = any(checklist.questions[q].by == "llm" for q in checklist.used())
+    judged = any(q.by == "llm" for q in used)
     if judged and not (claude.api_key or claude.auth_token):
         raise SystemExit(
             "error: the judge needs ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN"
@@ -414,7 +411,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         argv,
         cwd=args.cwd,
         timeout=args.agent_timeout,
-        base=(resume.base if resume else "") or None,
+        base=resume.base if resume else None,
         push=args.push,
     )
 
