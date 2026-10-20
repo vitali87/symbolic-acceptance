@@ -300,9 +300,11 @@ class RunTests(unittest.TestCase):
     def test_what_a_run_hands_out_cannot_be_changed(self):
         # Oracles, agents and listeners get the same objects, so none of them
         # can change what the others see.
-        result, agent = run(self.checklist, [dict(PASSING, new_test=False), PASSING])
+        # A compound requirement fails too, so that its failure is a group.
+        first = dict(PASSING, new_test=False, can_unlock=False, backs_off=False)
+        result, agent = run(self.checklist, [first, PASSING])
         evaluation = result.evaluations[0]
-        failure = evaluation.failures[0]
+        failure, compound = evaluation.failures
         context = sa.Context(self.checklist, evaluation.attempt, evaluation.answers)
         for value, name in (
             (result, "status"),
@@ -312,6 +314,7 @@ class RunTests(unittest.TestCase):
             (agent.tasks[1], "feedback"),
             (failure, "reason"),
             (failure.reason, "answer"),
+            (compound.reason, "parts"),
             (evaluation.answers["new_test"], "is_met"),
             (self.checklist, "requirements"),
             (self.checklist.questions["new_test"], "ask"),
