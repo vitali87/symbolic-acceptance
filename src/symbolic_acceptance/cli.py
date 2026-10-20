@@ -168,6 +168,8 @@ def _cmd_explain(args: argparse.Namespace) -> int:
 
 def _cmd_draft(args: argparse.Namespace) -> int:
     out = Path(args.out)
+    if out.is_dir():
+        raise SystemExit(f"error: {out} is a folder; name the file to write")
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
     # Checked before Claude is asked, and paid, for a draft.
@@ -194,7 +196,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
 
 
 # A reply at the terminal: y, yes, n or no, as a word, then why.
-_REPLY = re.compile(r"(yes|y|no|n)\b[\s,:;.-]*(.*)", re.IGNORECASE)
+_REPLY = re.compile(r"(yes|y|no|n)(?:[\s,:;.!-]+(.*))?", re.IGNORECASE)
 
 
 class TerminalReviewer:
@@ -221,16 +223,19 @@ class TerminalReviewer:
                     )
                 if reply := _REPLY.fullmatch(typed.strip()):
                     yes = reply[1][0].lower() == "y"
-                    answers[question.id] = Answer(yes, reply[2], by="human:terminal")
+                    why = reply[2] or ""
+                    answers[question.id] = Answer(yes, why, by="human:terminal")
                     break
         return answers
 
 
 async def _typed() -> str:
-    """The next line typed at the terminal, or "" once its input ends.
+    """The next line typed at the terminal, as far as Ctrl-D if that ends it,
+    or "" once its input ends.
 
     It is waited for on the event loop, which a stopping run stops, rather
-    than by input() in a thread, which nothing can stop.
+    than by input() in a thread, which nothing can stop; and read in one go,
+    as much as the terminal has, so that a line Ctrl-D ends cannot block.
     """
     loop = asyncio.get_running_loop()
     typed = asyncio.Event()
@@ -239,7 +244,7 @@ async def _typed() -> str:
         await typed.wait()
     finally:
         loop.remove_reader(sys.stdin)
-    return sys.stdin.readline()
+    return os.read(sys.stdin.fileno(), 1 << 16).decode(errors="replace")
 
 
 # Ctrl-C, and what a supervisor or a cancelled CI job sends.
@@ -436,6 +441,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
     return 0 if result.status == APPROVED else 3 if result.status == WAITING else 1
 
 
+def _seconds(text: str) -> float:
+    """A number of seconds above zero, for an option."""
+    seconds = float(text)
+    if not seconds > 0:  # nan is not either
+        raise argparse.ArgumentTypeError(f"must be more than 0, not {text}")
+    return seconds
+
+
 def _count(text: str) -> int:
     """A whole number from 1 up, for an option."""
     number = int(text)
@@ -515,7 +528,7 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--cwd", default=".", help="the agent's checkout (default .)")
     sub.add_argument(
         "--agent-timeout",
-        type=float,
+        type=_seconds,
         default=3600.0,
         help="seconds the agent has for each attempt (default 3600)",
     )
@@ -569,6 +582,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         # The reader went away (e.g. `| head`); stop quietly.
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 1
+    except KeyboardInterrupt:
+        # Ctrl-C outside run, which stops what it runs first: draft waiting
+        # on Claude, say.
+        return 128 + signal.SIGINT
     except (
         ClaudeError,
         DraftError,

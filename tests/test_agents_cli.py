@@ -781,6 +781,7 @@ class CLITests(unittest.TestCase):
             run[:2],
             (*run, "--samples", "0"),
             (*run, "--max-attempts", "x"),
+            (*run, "--agent-timeout", "0"),
         ):
             with (
                 self.subTest(args),
@@ -834,6 +835,7 @@ class CLITests(unittest.TestCase):
                     # The same package as this process, wherever that came from.
                     env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
                     check=False,
+                    timeout=60,
                 )
                 return done, json.loads(saved.read_text())
 
@@ -852,17 +854,20 @@ class CLITests(unittest.TestCase):
         self.assertRegex(done.stdout, "Run it again with --resume .*run.json to go on")
         # A reply opens with y, yes, n or no, as a word; anything else is
         # asked again.
-        done, saved = typed(b"maybe\nnothing to add\nYes: looks fine\n")
+        done, saved = typed(b"maybe\nnothing to add\nn/a\nYes: looks fine\n")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.count("ok: Is it ok? [y/n, then why]"), 3)
+        self.assertEqual(done.stdout.count("ok: Is it ok? [y/n, then why]"), 4)
         self.assertEqual(
             saved["evaluations"][-1]["answers"]["ok"],
             {"is_met": True, "reasoning": "looks fine", "by": "human:terminal"},
         )
-        # Ending the input (Ctrl-D) leaves the run waiting, to resume later.
+        # Ending the input (Ctrl-D) leaves the run waiting, to resume later;
+        # after a reply, it ends the reply.
         done, saved = typed(b"\x04")
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertEqual(saved["status"], "waiting")
+        done, saved = typed(b"y\x04")
+        self.assertEqual(done.returncode, 0, done.stderr)
 
     def test_run_stops_on_a_regression(self):
         with (
@@ -1046,6 +1051,8 @@ class CLITests(unittest.TestCase):
             nowhere = str(Path(tmp, "nowhere", "acceptance.toml"))
             with self.assertRaisesRegex(SystemExit, "no folder to write"):
                 cli("draft", str(issue), "--out", nowhere)
+            with self.assertRaisesRegex(SystemExit, "is a folder"):
+                cli("draft", str(issue), "--out", tmp, "--force")
 
     def test_draft_asks_claude_over_http_and_writes_the_checklist(self):
         checklist = '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n[[require]]\nthat = "a"\nfail = "x"\n'
@@ -1311,6 +1318,42 @@ class CLITests(unittest.TestCase):
             os.close(terminal)
             self.assertEqual(runner.returncode, 128 + signal.SIGINT, err.decode())
             self.assertEqual(json.loads(saved.read_text())["status"], "running")
+
+    def test_ctrl_c_ends_a_draft_quietly(self):
+        asked = threading.Event()
+
+        class Silent(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                asked.set()
+                time.sleep(30)
+
+        with (
+            http.server.ThreadingHTTPServer(("127.0.0.1", 0), Silent) as server,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            issue = Path(tmp, "issue.md")
+            issue.write_text("Logins are not throttled\n")
+            with subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "draft", str(issue)]
+                + ["--out", str(Path(tmp, "acceptance.toml"))],
+                env=dict(
+                    os.environ,
+                    ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+                    ANTHROPIC_API_KEY="key",
+                    NO_PROXY="127.0.0.1",
+                    no_proxy="127.0.0.1",
+                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                ),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            ) as drafting:
+                self.assertTrue(asked.wait(30), "Claude was never asked")
+                drafting.send_signal(signal.SIGINT)
+                _, err = drafting.communicate(timeout=20)
+            server.shutdown()
+        self.assertEqual((drafting.returncode, err), (128 + signal.SIGINT, ""))
 
     def test_a_second_ctrl_c_quits_at_once(self):
         with (
