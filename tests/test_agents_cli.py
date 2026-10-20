@@ -6,7 +6,7 @@ import os
 import select
 import shlex
 import signal
-import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -1369,11 +1369,16 @@ class CLITests(unittest.TestCase):
         self.assertEqual(requests, [])
 
     def test_an_error_stops_the_checks_still_running(self):
-        # The judge cannot reach Claude while a slow check runs beside it.
+        # The judge cannot reach Claude, which hangs up on it, while a slow
+        # check runs beside it.
         with (
+            socketserver.TCPServer(
+                ("127.0.0.1", 0), socketserver.BaseRequestHandler
+            ) as claude,
             tempfile.TemporaryDirectory() as tmp,
             tempfile.TemporaryDirectory() as outside,
         ):
+            threading.Thread(target=claude.serve_forever, daemon=True).start()
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
             checklist.write_text(
@@ -1382,11 +1387,7 @@ class CLITests(unittest.TestCase):
                 '[[require]]\nthat = { all = ["slow", "judged"] }\nid = "r"\n'
                 'fail = "x"\n'
             )
-            # Bound but never listening: refused, and no one else's port.
-            closed = socket.socket()
-            self.addCleanup(closed.close)
-            closed.bind(("127.0.0.1", 0))
-            port = closed.getsockname()[1]
+            port = claude.server_address[1]
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             started = time.monotonic()
             done = subprocess.run(
@@ -1406,6 +1407,7 @@ class CLITests(unittest.TestCase):
                 check=False,
                 timeout=90,
             )
+            claude.shutdown()
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("connection failed", done.stderr)
         self.assertLess(time.monotonic() - started, 30, "the check was stopped")
