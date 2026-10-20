@@ -548,6 +548,9 @@ class DraftTests(unittest.TestCase):
         fake = FakeHTTP(bad, bad)
         with self.assertRaisesRegex(DraftError, "no valid draft after 2 tries"):
             draft("x", claude=Claude(api_key="k", transport=fake), tries=2)
+        fake = FakeHTTP(bad)
+        with self.assertRaisesRegex(DraftError, "the last draft:\nnope = 1$"):
+            draft("x", claude=Claude(api_key="k", transport=fake), tries=1)
 
 
 class CLITests(unittest.TestCase):
@@ -966,6 +969,9 @@ class CLITests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "exists; pass --force"):
                 cli("draft", str(issue), "--out", str(out))
             self.assertEqual(out.read_text(), "approved already")
+            nowhere = str(Path(tmp, "nowhere", "acceptance.toml"))
+            with self.assertRaisesRegex(SystemExit, "no folder to write"):
+                cli("draft", str(issue), "--out", nowhere)
 
     def test_draft_asks_claude_over_http_and_writes_the_checklist(self):
         checklist = '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n[[require]]\nthat = "a"\nfail = "x"\n'

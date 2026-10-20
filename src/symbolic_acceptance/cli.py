@@ -161,6 +161,9 @@ def _cmd_draft(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if out.exists() and not args.force:
         raise SystemExit(f"error: {out} exists; pass --force to replace it")
+    # Checked before Claude is asked, and paid, for a draft.
+    if not out.parent.is_dir():
+        raise SystemExit(f"error: no folder to write {out} in")
     issue = _read(args.issue)
     result = draft(issue, template=args.template, claude=Claude(model=args.model))
     text = result.text if result.text.endswith("\n") else result.text + "\n"

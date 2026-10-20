@@ -68,7 +68,7 @@ def draft(
         'Return the complete checklist as TOML in "checklist".'
     )
     content = request
-    problems = ""
+    text = problems = ""
     for _ in range(tries):
         reply = claude.json(system=SYSTEM, content=content, shape=_Reply).data
         text = reply["checklist"]
@@ -88,4 +88,7 @@ def draft(
             f"It has these problems:\n{problems}\n"
             "Return a corrected, complete checklist."
         )
-    raise DraftError(f"no valid draft after {tries} tries; last problems:\n{problems}")
+    raise DraftError(
+        f"no valid draft after {tries} tries; the last one's problems:\n{problems}\n"
+        f"the last draft:\n{text.rstrip()}"
+    )
