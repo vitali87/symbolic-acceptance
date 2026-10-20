@@ -167,16 +167,21 @@ hand the attempt to a person.
   it has one), and never in an edited comment (anyone with write access can
   edit someone else's). A reply answers the latest question with its id
   posted before it, so it counts for that commit alone. The runner's own
-  markers count only at the start of a comment it could have written, and
-  neither its own comments nor what GitHub shows in a code block or a
-  quote, which may hold the agent's words, ever answer, whoever posted
-  them: replies are read from the comment as GitHub renders it. An agent
-  account needs no write access, and must not have it: it could delete a
-  reviewer's NO.
+  markers count only at the start of a comment it could have written (a
+  bot's or a trusted account's), so put in `exclude` any other bot whose
+  comments can start with text the agent controls, as one quoting test
+  output might. Neither the runner's own comments nor what GitHub shows in
+  a code block or a quote, which may hold the agent's words, ever answer,
+  whoever posted them: replies are read from the comment as GitHub renders
+  it. An agent account needs no write access, and must not have it: it
+  could delete a reviewer's NO.
 - Freeze `.github/` when CI check runs answer questions; otherwise an attempt
   could add a workflow that reports a check of the same name. Lint warns.
   Only runs from GitHub Actions count, unless `GitHubChecks(app=...)` names
-  another CI app, whose configuration should then be frozen too.
+  another CI app, whose configuration should then be frozen too. The
+  latest run of a name answers, so name a job no other workflow's job
+  shares: one whose run the attempt could bring about later would answer
+  for both.
 - `CommandAgent` never pushes an attempt that changes `.github/`: pushing
   runs the workflows a commit holds, with the token they ask for, before
   any check could refuse them. It hands such an attempt to a person.

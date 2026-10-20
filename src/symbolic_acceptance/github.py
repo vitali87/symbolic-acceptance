@@ -304,7 +304,8 @@ class GitHubChecks:
 
     Only runs reported by ``app`` count, GitHub Actions by default: another
     CI app installed on the repository could run a configuration the attempt
-    added and report a check of the same name.
+    added and report a check of the same name. The latest run of the name
+    answers, so the name must be a job's that no other workflow shares.
     """
 
     def __init__(

@@ -204,7 +204,9 @@ off (`stop_on_regression=False`).
   So a sandboxed agent must not be able to write `.git`: mount it
   read-only, and the runner commits for it.
 - An `llm` question in a `when` condition helps the attempt with a NO,
-  which has nothing to quote, so the judge's NO there stands unbacked.
+  which has nothing to quote, so the judge's NO there stands unbacked, as
+  does an absence question's YES, such as the templates' `tests_intact`;
+  with `samples > 1`, every sample must give it.
   Where the condition is about files ("does it touch SSO?"), a frozen
   check over those paths decides exactly whether they changed instead,
   though not whether code elsewhere changes what they do.
