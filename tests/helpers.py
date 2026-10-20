@@ -7,6 +7,8 @@ import contextlib
 import http.server
 import io
 import json
+import os
+import signal
 import threading
 import urllib.request
 from collections.abc import Callable, Iterable, Iterator, Mapping
@@ -17,6 +19,28 @@ from symbolic_acceptance.agents import git as run_git
 from symbolic_acceptance.cli import main
 from symbolic_acceptance.http import Response
 from symbolic_acceptance.loop import Oracle
+
+# The suite runs the same whoever runs it. Git takes no identity from the
+# environment and reads no one's settings, so that a developer's
+# commit.gpgsign, say, fails no test, unless the suite is pointed at some
+# (GIT_CONFIG_GLOBAL, to try the runner against hostile ones).
+_MACHINE = (
+    "GIT_AUTHOR_",
+    "GIT_COMMITTER_",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_KEY_",
+    "GIT_CONFIG_VALUE_",
+)
+for _key in [key for key in os.environ if key.startswith(_MACHINE)]:
+    del os.environ[_key]
+os.environ.setdefault("GIT_CONFIG_GLOBAL", os.devnull)
+os.environ.setdefault("GIT_CONFIG_SYSTEM", os.devnull)
+# A signal ignored here, as Ctrl-C is in a shell's background job and a
+# hang-up under nohup, would be ignored by the processes the tests start too,
+# and the tests that stop them would fail. One handled here is not inherited.
+for _stop in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    if signal.getsignal(_stop) is signal.SIG_IGN:
+        signal.signal(_stop, lambda signum, frame: None)
 
 ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE = ROOT / "examples" / "issue-342.toml"
