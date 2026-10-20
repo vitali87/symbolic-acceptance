@@ -1669,6 +1669,47 @@ class CLITests(unittest.TestCase):
         # The request under way when it stopped, and none after it.
         self.assertEqual([late for _, late in received], [False])
 
+    def test_a_stop_ends_the_runners_own_git(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            git = repo(tmp)
+            git("remote", "add", "origin", "ssh://example.invalid/repo.git")
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            # An ssh that never answers, as a remote that does not.
+            ssh = Path(outside, "ssh")
+            hang = f"echo $$ > {shlex.quote(str(ssh))}; exec sleep 60"
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            with subprocess.Popen(
+                [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
+                + ["--agent", shlex.join(write), "--cwd", tmp]
+                + ["--github", "owner/repo", "--push", "attempts"],
+                env=dict(
+                    os.environ,
+                    GIT_SSH_COMMAND=shlex.join(["sh", "-c", hang, "--"]),
+                    PYTHONPATH=SRC,
+                ),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            ) as runner:
+                deadline = time.monotonic() + 30
+                while not ssh.exists() or not ssh.read_text():
+                    self.assertLess(time.monotonic(), deadline, "git never pushed")
+                    time.sleep(0.05)
+                # As a supervisor stops it: the runner alone, not its git.
+                runner.send_signal(signal.SIGTERM)
+                _, err = runner.communicate(timeout=GRACE + 5)
+            with contextlib.suppress(ProcessLookupError):  # what git left
+                os.kill(int(ssh.read_text()), signal.SIGKILL)
+        self.assertEqual(runner.returncode, 128 + signal.SIGTERM, err)
+
     def test_a_second_ctrl_c_quits_at_once(self):
         with (
             tempfile.TemporaryDirectory() as tmp,

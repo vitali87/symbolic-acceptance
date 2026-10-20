@@ -281,9 +281,9 @@ stops it instead, and the record keeps the run as it was, ready to resume;
 an attempt that was being checked is checked on, without asking the agent
 for another or asking again what was answered. Ctrl-C, SIGTERM from a
 supervisor or a cancelled CI job, or a hang-up (the terminal closing) stops
-a run the same way: nothing more is started, committed or sent, and the
-agent or check it is running, and what that started, is given five seconds
-to clean up; a second Ctrl-C ends them at once. Without `--pr`, people answer on the terminal; with no
+a run the same way: nothing more is started, committed or sent, and what
+is running (the agent or a check, with what that started, or git) is given
+five seconds to clean up; a second Ctrl-C ends it at once. Without `--pr`, people answer on the terminal; with no
 terminal to ask on, or once its input ends (Ctrl-D), the run waits for
 them, to be resumed.
 

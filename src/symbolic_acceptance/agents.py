@@ -33,6 +33,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import IO
 
 from symbolic_acceptance.diffs import parse
 from symbolic_acceptance.loop import Attempt, Escalate, Task
@@ -96,10 +97,13 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
     return {k: v for k, v in env.items() if k not in RUNNER_SECRETS | _ELSEWHERE}
 
 
-# The process groups of the programs run_program is running now, the
-# threads starting one, whose group is not known until it has started, and
-# whether stop_programs has been called, after which none may run: a flag,
-# as a threading.Event takes a lock to be set.
+# The programs run_program and git are running now, as os.kill takes them:
+# a program in a session of its own by its group, negated, so that what it
+# started goes with it; the runner's git by its process, as it shares the
+# runner's terminal so that ssh can ask on it. Then the threads starting one,
+# whose process is not known until it has started, and whether stop_programs
+# has been called, after which none starts: a flag, as a threading.Event
+# takes a lock to be set.
 _running: set[int] = set()
 _starting: set[int] = set()
 _stopped = False
@@ -112,7 +116,8 @@ OUTPUT = 1 << 20
 
 def stop_programs(grace: float = GRACE) -> None:
     """End every program :func:`run_program` is running, and what they
-    started, for a runner told to stop; it starts none from now on.
+    started, and every :func:`git` command, for a runner told to stop; none
+    starts from now on.
 
     They are asked to stop (SIGTERM), so that git, say, removes its locks,
     and killed if they have not all ended within ``grace`` seconds. It takes
@@ -125,18 +130,18 @@ def stop_programs(grace: float = GRACE) -> None:
     # is this very thread's, interrupted by the signal handler calling this.
     while _starting - {threading.get_ident()}:
         time.sleep(0.001)
-    groups = _running.copy()
-    for group in groups:
-        _signal(group, signal.SIGTERM)
+    targets = _running.copy()
+    for target in targets:
+        _signal(target, signal.SIGTERM)
     deadline = time.monotonic() + grace
-    # Signal 0 only asks whether a process of the group is left. One that
-    # ended is left until it is reaped, which nothing does where the runner
-    # is a container's first process: there, stopping takes the whole grace.
-    while any(_signal(group, 0) for group in groups) and time.monotonic() < deadline:
+    # Signal 0 only asks whether a process is left. One that ended is left
+    # until it is reaped, which nothing does where the runner is a
+    # container's first process: there, stopping takes the whole grace.
+    while any(_signal(t, 0) for t in targets) and time.monotonic() < deadline:
         time.sleep(0.05)
-    for group in groups:
-        _signal(group, signal.SIGKILL)
-    _running.difference_update(groups)
+    for target in targets:
+        _signal(target, signal.SIGKILL)
+    _running.difference_update(targets)
 
 
 def stopping() -> bool:
@@ -144,13 +149,58 @@ def stopping() -> bool:
     return _stopped
 
 
-def _signal(group: int, number: int) -> bool:
-    """Send the process group signal ``number``: whether it had a process."""
+def _signal(target: int, number: int) -> bool:
+    """Send ``target`` signal ``number``: whether there was a process."""
     try:
-        os.killpg(group, number)
+        os.kill(target, number)
     except ProcessLookupError:
         return False
     return True
+
+
+def _run(
+    argv: Sequence[str],
+    *,
+    cwd: str | Path,
+    env: Mapping[str, str],
+    timeout: float,
+    stdin: IO[bytes] | None,
+    stdout: IO[bytes],
+    stderr: IO[bytes] | int,
+    session: bool,
+) -> int | None:
+    """Run ``argv`` to its end, known to :func:`stop_programs` meanwhile, and
+    return its exit status, or ``None`` past ``timeout``. Then what is left
+    of it is killed: with a ``session`` of its own, whatever it started too."""
+    _starting.add(threading.get_ident())
+    try:
+        if _stopped:
+            raise InterruptedError("not started: the runner is stopping")
+        process = subprocess.Popen(
+            argv,
+            cwd=cwd,
+            env=env,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            start_new_session=session,
+        )
+        target = -process.pid if session else process.pid
+        _running.add(target)
+    finally:
+        _starting.discard(threading.get_ident())
+    try:
+        return process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return None
+    finally:
+        # What is left of it, unless stop_programs is giving it time; then it
+        # stays known until stop_programs is done with it, for a second stop
+        # to kill at once.
+        if not _stopped:
+            _signal(target, signal.SIGKILL)
+            _running.discard(target)
+        process.wait()
 
 
 def run_program(
@@ -175,34 +225,16 @@ def run_program(
     with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as log:
         stdin.write(given.encode("utf-8"))
         stdin.seek(0)
-        _starting.add(threading.get_ident())
-        try:
-            if _stopped:
-                raise InterruptedError("not started: the runner is stopping")
-            process = subprocess.Popen(
-                argv,
-                cwd=cwd,
-                env=env,
-                stdin=stdin,
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                start_new_session=True,
-            )
-            _running.add(process.pid)
-        finally:
-            _starting.discard(threading.get_ident())
-        try:
-            status: int | None = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            status = None
-        finally:
-            # What it left running, unless stop_programs is giving it time;
-            # then it stays known until stop_programs is done with it, for a
-            # second stop to kill at once.
-            if not _stopped:
-                _signal(process.pid, signal.SIGKILL)
-                _running.discard(process.pid)
-            process.wait()
+        status = _run(
+            argv,
+            cwd=cwd,
+            env=env,
+            timeout=timeout,
+            stdin=stdin,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            session=True,
+        )
         log.seek(max(0, log.seek(0, os.SEEK_END) - OUTPUT))
         return status, log.read().decode("utf-8", errors="replace")
 
@@ -250,32 +282,43 @@ def git(
     credential helper), so the runner's GitHub token is withheld unless
     ``secrets``: a push, and the look at the branch before it, may need it
     for a credential helper. Git does not ask for a password itself (ssh
-    may, on the terminal), and gives up after five minutes.
+    may, on the terminal), and gives up after five minutes. A runner told to
+    stop (:func:`stop_programs`) runs no more of it, and stops what runs.
     """
-    # A stopped run commits, pushes or checks nothing a program left.
-    if _stopped:
-        raise GitError(f"git {' '.join(args)} not run: the runner is stopping")
     hidden = _ELSEWHERE if secrets else _ELSEWHERE | RUNNER_SECRETS
     env = {k: v for k, v in os.environ.items() if k not in hidden}
     env["GIT_TERMINAL_PROMPT"] = "0"
-    try:
-        done = subprocess.run(
-            ["git", *_OVERRIDES, *args],
-            cwd=cwd,
-            env=env | _ISOLATED if isolated else env,
-            capture_output=True,
-            timeout=300,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        raise GitError(f"git {' '.join(args)} ran past 300s") from None
-    if done.returncode != 0:
-        error = (done.stderr or done.stdout).decode(errors="replace").strip()
+    # Its output goes to files, as a program's does, so that a child git
+    # leaves behind (ssh, say) holding it open cannot hold the runner up.
+    with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
+        try:
+            status = _run(
+                ["git", *_OVERRIDES, *args],
+                cwd=cwd,
+                env=env | _ISOLATED if isolated else env,
+                timeout=300,
+                stdin=None,
+                stdout=out,
+                stderr=err,
+                session=False,
+            )
+        # A stopped run commits, pushes or checks nothing a program left.
+        except InterruptedError:
+            raise GitError(
+                f"git {' '.join(args)} not run: the runner is stopping"
+            ) from None
+        if status is None:
+            raise GitError(f"git {' '.join(args)} ran past 300s")
+        out.seek(0)
+        err.seek(0)
+        stdout, stderr = out.read(), err.read()
+    if status != 0:
+        error = (stderr or stdout).decode(errors="replace").strip()
         raise GitError(f"git {' '.join(args)} failed: {error}")
     # Decoded here rather than in text mode, which would take a carriage
     # return inside a line for a line break: file content could then forge
     # lines of a diff. "replace" covers binary and non-UTF-8 files.
-    return done.stdout.decode(errors="replace")
+    return stdout.decode(errors="replace")
 
 
 def diff(cwd: str | Path, base: str, head: str) -> str:
