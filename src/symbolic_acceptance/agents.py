@@ -118,7 +118,9 @@ def stop_programs(grace: float = GRACE) -> None:
     for group in groups:
         _signal(group, signal.SIGTERM)
     deadline = time.monotonic() + grace
-    # Signal 0 only asks whether a process of the group is left.
+    # Signal 0 only asks whether a process of the group is left. One that
+    # ended is left until it is reaped, which nothing does where the runner
+    # is a container's first process: there, stopping takes the whole grace.
     while any(_signal(group, 0) for group in groups) and time.monotonic() < deadline:
         time.sleep(0.05)
     for group in groups:
@@ -222,8 +224,9 @@ def git(
     ``isolated`` also leaves out the user's and the system's configuration.
     Git may run programs the checkout's configuration names (a filter, a
     credential helper), so the runner's GitHub token is withheld unless
-    ``secrets``, for a push whose credential helper needs it. Git never
-    stops to ask for a password, and gives up after five minutes.
+    ``secrets``, for a push whose credential helper needs it. Git does not
+    ask for a password itself (ssh may, on the terminal), and gives up
+    after five minutes.
     """
     # A stopped run commits, pushes or checks nothing a program left.
     if _stopped.is_set():
