@@ -55,7 +55,7 @@ class RecordTests(unittest.TestCase):
     def test_rejects_another_checklist(self):
         text = record.dumps(self.result, self.checklist)
         other = sa.loads(EXAMPLE.read_text().replace("Throttle", "Limit"))
-        with self.assertRaisesRegex(ValueError, "different checklist"):
+        with self.assertRaisesRegex(ValueError, "different .* as checklist.source$"):
             record.loads(text, other)
 
     def test_rejects_a_status_its_answers_do_not_support(self):

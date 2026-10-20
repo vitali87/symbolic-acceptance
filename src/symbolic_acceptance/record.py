@@ -158,9 +158,11 @@ def loads(text: str, checklist: Checklist) -> Result:
         raise ValueError(f"not a {FORMAT} v{VERSION} record")
     digest = data["checklist"]["digest"]
     if digest != checklist.digest:
+        held = data["checklist"]["source"] is not None
         raise ValueError(
             "the record was made with a different checklist "
             f"(record {digest[:12]}, checklist {checklist.digest[:12]})"
+            + ("; it holds that one as checklist.source" if held else "")
         )
     evaluations = []
     for item in data["evaluations"]:
