@@ -978,6 +978,8 @@ class CLITests(unittest.TestCase):
     def test_draft_asks_claude_over_http_and_writes_the_checklist(self):
         checklist = '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n[[require]]\nthat = "a"\nfail = "x"\n'
         reply = message({"checklist": checklist, "questions_for_reporter": ["Why?"]})
+        # First a proxy's page in its place, then the API's reply.
+        replies = [b"<html>Sign in to the proxy</html>", reply.body]
         asked = []
 
         class MessagesAPI(http.server.BaseHTTPRequestHandler):
@@ -986,10 +988,11 @@ class CLITests(unittest.TestCase):
                 asked.append(
                     (self.path, self.headers["x-api-key"], self.rfile.read(length))
                 )
+                body = replies.pop(0)
                 self.send_response(200)
-                self.send_header("content-length", str(len(reply.body)))
+                self.send_header("content-length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(reply.body)
+                self.wfile.write(body)
 
             def log_message(self, *args):
                 pass
@@ -1002,29 +1005,38 @@ class CLITests(unittest.TestCase):
             threading.Thread(target=server.serve_forever, daemon=True).start()
             issue, out = Path(tmp, "issue.md"), Path(tmp, "acceptance.toml")
             issue.write_text("Logins are not throttled\n")
-            done = subprocess.run(
-                [sys.executable, "-m", "symbolic_acceptance", "draft", str(issue)]
-                + ["--out", str(out)],
-                env=dict(
-                    os.environ,
-                    ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
-                    ANTHROPIC_API_KEY="key",
-                    NO_PROXY="127.0.0.1",
-                    no_proxy="127.0.0.1",
-                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
-                ),
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+
+            def drafting():
+                return subprocess.run(
+                    [sys.executable, "-m", "symbolic_acceptance", "draft", str(issue)]
+                    + ["--out", str(out)],
+                    env=dict(
+                        os.environ,
+                        ANTHROPIC_BASE_URL=f"http://127.0.0.1:{server.server_port}",
+                        ANTHROPIC_API_KEY="key",
+                        NO_PROXY="127.0.0.1",
+                        no_proxy="127.0.0.1",
+                        PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                    ),
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+            proxied, done = drafting(), drafting()
             server.shutdown()
             written = out.read_text()
+        self.assertEqual(proxied.returncode, 1)
+        self.assertEqual(
+            proxied.stderr,
+            "error: a reply was not JSON: '<html>Sign in to the proxy</html>'\n",
+        )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(written, checklist)
         self.assertIn("Questions for the reporter:\n  - Why?", done.stdout)
-        ((path, key, body),) = asked
-        self.assertEqual((path, key), ("/v1/messages", "key"))
-        self.assertIn("Logins are not throttled", body.decode())
+        for path, key, body in asked:
+            self.assertEqual((path, key), ("/v1/messages", "key"))
+            self.assertIn("Logins are not throttled", body.decode())
 
     def run_on_github(self, checklist, tmp, url, *more):
         """``run`` in a process of its own, with GitHub at ``url``."""
