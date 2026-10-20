@@ -136,19 +136,18 @@ hand the attempt to a person.
   diff algorithm and file order, how hunks are cut and what their headers
   name); the runner's own commit and push still read that configuration
   (see [`docs/design.md`](docs/design.md)).
-- An answer from the judge that helps the attempt pass must be backed by the
-  diff wherever it can be: each quote of a YES names a file and gives whole
-  lines of it, consecutive in the diff, and together they hold more than a
-  trivial line the change adds or removes, not merely respaces;
-  the quotes are checked. An
-  unbacked helpful answer is asked for again, then gives way to the other
-  one, or goes to a person when the checklist reads the question both ways.
-  Which answer helps follows from the checklist: YES inside `that`, NO
-  inside a `when` condition, flipped by `not`; a question read one way tells
-  the judge which, so that when unsure it gives the other. A question marked
-  `kind = "absence"` ("does it leave the API unchanged?") has nothing to
-  quote for its YES, so its NO quotes what breaks it. With `samples > 1`,
-  every sample must give the helpful answer.
+- An answer from the judge that helps the attempt pass must be backed by
+  the diff wherever it can be: each quote of a YES names a file and gives
+  whole lines of it, consecutive in the diff, and together they hold more
+  than a trivial line the change adds or removes, not merely respaces; the
+  quotes are checked. An unbacked helpful answer is asked for again, then
+  gives way to the other one, or goes to a person when the checklist reads
+  the question both ways. Which answer helps follows from the checklist:
+  YES inside `that`, NO inside a `when` condition, flipped by `not`; a
+  question read one way tells the judge which, so that when unsure it gives
+  the other. A question marked `kind = "absence"` ("does it leave the API
+  unchanged?") has nothing to quote for its YES, so its NO quotes what
+  breaks it. With `samples > 1`, every sample must give the helpful answer.
 - `run` commands execute in a fresh clone of the attempt's commit that
   reads none of the checkout's git configuration or attributes, so nothing
   in the checkout outside the commit can change their result. Submodules
@@ -159,8 +158,9 @@ hand the attempt to a person.
   declines, and a reply cut off before it ends.
 - A `frozen = [<globs>]` check over the checklist, CI configuration and
   existing tests, as in the templates, fails any change to them (there `*`
-  matches across directories); a new regression test can be let in with
-  `allow_new`, whose patterns match only paths as deep as themselves.
+  matches across directories); a new regression test, or one moved in, can
+  be let in with `allow_new`, whose patterns match only paths as deep as
+  themselves.
 - On GitHub, only owners, members and collaborators (or an allowlist) can
   answer, never bots or the accounts in `exclude` (put the agent's there if
   it has one), and never in an edited comment (anyone with write access can
