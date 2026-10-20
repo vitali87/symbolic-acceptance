@@ -1,8 +1,9 @@
-# Tests, which build the package twice to compare, and lint, with no
-# third-party actions: the checkout is plain git, the Pythons the runner image
-# holds run the tests, and the package has no dependencies to install. The one
-# download is the linters: uv, checked against the hash its release
-# publishes, then ruff and ty at the versions and hashes uv.lock pins.
+# Tests on Linux and macOS, which build the package twice to compare, and
+# lint, with no third-party actions: the checkout is plain git, the Pythons
+# the runner image holds run the tests, and the package has no dependencies
+# to install. The one download is the linters, run on Linux: uv, checked
+# against the hash its release publishes, then ruff and ty at the versions
+# and hashes uv.lock pins.
 name: ci
 
 on:
@@ -19,7 +20,11 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-26]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - name: Check out
@@ -28,7 +33,7 @@ jobs:
         run: |
           git init -q .
           git remote add origin "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git"
-          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 | tr -d '\n')
           git -c http.extraheader="AUTHORIZATION: basic $auth" fetch -q --depth 1 origin "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
 
@@ -37,20 +42,22 @@ jobs:
       - name: Test on Python 3.11 to 3.14
         run: |
           for minor in 11 12 13 14; do
-            python=$(ls -d "$RUNNER_TOOL_CACHE"/Python/3."$minor".*/x64/bin/python3."$minor" | sort -V | tail -n 1)
+            python=$(ls -d "$RUNNER_TOOL_CACHE"/Python/3."$minor".*/*/bin/python3."$minor" | sort -V | tail -n 1)
             "$python" --version
-            PYTHONPATH=src:tests timeout -s ABRT 180 "$python" -X faulthandler -m unittest discover -s tests -t tests
+            PYTHONPATH=src:tests "$python" -c 'import faulthandler, unittest; faulthandler.dump_traceback_later(180, exit=True); unittest.main(module=None)' discover -s tests -t tests
           done
 
       # Only root can give a checkout another owner, as one test must, and
       # the runner is not root, so the suite skips it there.
       - name: Test a checkout another user owns
+        if: runner.os == 'Linux'
         run: sudo env PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests python3 -m unittest -k checkout_another_owns test_diffs_checks
 
       - name: Lint the example checklists
         run: PYTHONPATH=src python3 -m symbolic_acceptance lint --strict examples/*.toml
 
       - name: Check format, lint and types
+        if: runner.os == 'Linux'
         env:
           UV: https://github.com/astral-sh/uv/releases/download/0.13.1/uv-x86_64-unknown-linux-gnu.tar.gz
           UV_SHA256: eadd9d27c134ab5ac1ffd4473b97a741407f3ea238288f03121fc4deddf90220
