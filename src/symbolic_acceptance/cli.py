@@ -295,10 +295,12 @@ def _stoppable() -> Generator[None]:
             signal.signal(stop, handler)
 
 
-def _on_path(program: str, what: str) -> None:
-    """Refuse a program named without a folder that is not on PATH."""
-    if "/" not in program and shutil.which(program) is None:
-        raise SystemExit(f"error: {what}: {program} is not a program on PATH")
+def _installed(program: str, what: str) -> None:
+    """Refuse a program the machine lacks: one named without a folder, looked
+    for on PATH, or by its whole path. One named by a relative path is the
+    checkout's, which an attempt may add."""
+    if ("/" not in program or os.path.isabs(program)) and not shutil.which(program):
+        raise SystemExit(f"error: {what}: {program} is not a program on this machine")
 
 
 def _cmd_run(args: argparse.Namespace) -> int:
@@ -317,10 +319,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if not Path(args.cwd).is_dir():
         raise SystemExit(f"error: --cwd {args.cwd} is not a folder")
     # What would fail only once the agent has worked is checked now.
-    _on_path(argv[0], "--agent")
+    _installed(argv[0], "--agent")
     for qid in checklist.used():
         if "run" in checklist.questions[qid].options:
-            _on_path(command(checklist.questions[qid])[0], f"q.{qid}.run")
+            _installed(command(checklist.questions[qid])[0], f"q.{qid}.run")
     issue = _read(args.issue) if args.issue else ""
     if args.github and not re.fullmatch(r"[^/\s]+/[^/\s]+", args.github):
         raise SystemExit("error: --github takes a repository as owner/name")
@@ -353,6 +355,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
             f"error: GitHub check runs answer {', '.join(remote)}; pass --github "
             "and --push so that every attempt reaches CI"
         )
+    # Without one, GitHub hides a private repository and soon limits the rate.
+    if github and (args.pr or remote) and not github.token:
+        raise SystemExit("error: --github needs a token in GITHUB_TOKEN or GH_TOKEN")
     oracles: dict[str, Oracle] = {
         "ci": ci,
         "llm": Judge(claude, samples=args.samples),
@@ -397,9 +402,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     # name to commit the agent's leftovers in, and where to push them.
     git(args.cwd, "var", "GIT_COMMITTER_IDENT")
     if args.push:
+        git(args.cwd, "check-ref-format", "--branch", args.push)
         git(args.cwd, "remote", "get-url", "origin")
-    if github and args.pr and not github.token:
-        raise SystemExit("error: --pr needs a token in GITHUB_TOKEN or GH_TOKEN")
     judged = any(checklist.questions[q].by == "llm" for q in checklist.used())
     if judged and not (claude.api_key or claude.auth_token):
         raise SystemExit(

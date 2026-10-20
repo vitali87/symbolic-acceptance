@@ -737,11 +737,16 @@ class CLITests(unittest.TestCase):
             missing = "no-such-program-xyz"
             linted = Path(tmp, "linted.toml")
             linted.write_text(local.read_text().replace("true", f"{missing} --check"))
+            gone = f"/{missing}/bin/check"
+            placed = Path(tmp, "placed.toml")
+            placed.write_text(local.read_text().replace('"true"', f'"{gone}"'))
             for setup, refusal in (
                 ((str(local), "--agent", missing), f"--agent: {missing} is not"),
                 ((str(linted), "--agent", "true"), f"q.a.run: {missing} is not"),
+                ((str(placed), "--agent", "true"), f"q.a.run: {gone} is not"),
                 ((str(local), "--agent", "true", "--github", "octo"), "owner/name"),
                 ((str(local), "--agent", "true", "--push", "a"), "remote 'origin'"),
+                ((str(local), "--agent", "true", "--push", "a..b"), "branch name"),
             ):
                 with self.subTest(refusal), self.assertRaisesRegex(SystemExit, refusal):
                     cli("run", *setup, "--cwd", str(work))
@@ -778,8 +783,17 @@ class CLITests(unittest.TestCase):
 
             done = run(str(judged))
             self.assertIn("the judge needs ANTHROPIC_API_KEY", done.stderr)
-            done = run(str(local), "--github", "octo/repo", "--pr", "5")
-            self.assertIn("--pr needs a token in GITHUB_TOKEN", done.stderr)
+            checked = Path(tmp, "checked.toml")
+            checked.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\ncheck = "tests"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            for more in (
+                ("--github", "octo/repo", "--pr", "5"),
+                ("--github", "octo/repo", "--push", "agent"),
+            ):
+                done = run(str(checked if "--push" in more else local), *more)
+                self.assertIn("--github needs a token in GITHUB_TOKEN", done.stderr)
             # No name to commit in: the agent's leftovers could not be kept.
             nameless = Path(tmp, "nameless")
             nameless.mkdir()
