@@ -47,10 +47,6 @@ class Fact:
     question: Question
     answer: Answer
 
-    @property
-    def actual(self) -> bool:
-        return self.answer.is_met
-
 
 @dataclass(frozen=True)
 class Group:

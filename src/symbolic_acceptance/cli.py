@@ -606,7 +606,3 @@ def main(argv: Sequence[str] | None = None) -> int:
         # A service's reply that is not JSON: a proxy's page, say, or another
         # server at ANTHROPIC_BASE_URL or GITHUB_API_URL.
         raise SystemExit(f"error: a reply was not JSON: {error.doc[:300]!r}") from None
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
