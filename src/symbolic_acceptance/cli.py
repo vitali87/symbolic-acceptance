@@ -253,10 +253,13 @@ def _stop(signum: int, frame: object) -> None:
     for stop in _STOPS:
         if signal.getsignal(stop) is _stop:
             signal.signal(stop, _quit)
-    # Whoever read stderr may be gone with the same Ctrl-C.
-    with contextlib.suppress(OSError):
-        name = signal.Signals(signum).name
+    name = signal.Signals(signum).name
+    try:
         print(f"stopping on {name}; send it again to quit at once", file=sys.stderr)
+    except OSError:
+        # Whoever read stderr went with the same Ctrl-C. What is written there
+        # from now on goes nowhere, so that flushing it cannot fail the exit.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
     stop_programs()
     raise SystemExit(128 + signum)
 
