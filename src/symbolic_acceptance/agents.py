@@ -361,9 +361,11 @@ class CommandAgent:
     """Run ``argv`` in ``cwd`` once per attempt.
 
     ``base`` is the commit attempts are compared with; it defaults to the
-    checkout's HEAD now, before the agent has run, so pass it to
+    checkout's HEAD now, before the agent has run (read with git, which
+    raises :class:`GitError` where there is none), so pass it to
     :func:`symbolic_acceptance.loop.run` to keep it with the run, and pass
-    the recorded one back when resuming. Each attempt starts from the
+    the recorded one back when resuming: an agent with another base refuses
+    the run's tasks. Each attempt starts from the
     previous one, or ``base`` for the first, which the checkout must hold:
     a commit the runner made after it that no record kept, as when a push
     failed, counts with the attempt. With ``push``, each attempt is pushed
