@@ -760,9 +760,11 @@ class CLITests(unittest.TestCase):
         done, _ = run(subprocess.DEVNULL)
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("no terminal to ask a person", done.stdout)
-        done, saved = typed(b"maybe\ny, looks fine\n")
+        # A reply opens with y, yes, n or no, as a word; anything else is
+        # asked again.
+        done, saved = typed(b"maybe\nnothing to add\nYes: looks fine\n")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.count("ok: Is it ok? [y/n, then why]"), 2)
+        self.assertEqual(done.stdout.count("ok: Is it ok? [y/n, then why]"), 3)
         self.assertEqual(
             saved["evaluations"][-1]["answers"]["ok"],
             {"is_met": True, "reasoning": "looks fine", "by": "human:terminal"},

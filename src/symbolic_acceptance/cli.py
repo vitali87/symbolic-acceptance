@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import json
 import os
+import re
 import shlex
 import signal
 import sys
@@ -180,6 +181,10 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+# A reply at the terminal: y, yes, n or no, as a word, then why.
+_REPLY = re.compile(r"(yes|y|no|n)\b[\s,:;.-]*(.*)", re.IGNORECASE)
+
+
 class TerminalReviewer:
     """A ``human`` oracle that asks on the terminal."""
 
@@ -197,17 +202,15 @@ class TerminalReviewer:
             while True:
                 prompt = f"  {question.id}: {question.ask} [y/n, then why] "
                 print(prompt, end="", flush=True)
-                reply = await _typed()
-                if not reply:
+                typed = await _typed()
+                if not typed:
                     raise Pending(
                         "the person at the terminal stopped answering", answers=answers
                     )
-                reply = reply.strip()
-                if reply[:1].lower() in ("y", "n"):
+                if reply := _REPLY.fullmatch(typed.strip()):
+                    yes = reply[1][0].lower() == "y"
+                    answers[question.id] = Answer(yes, reply[2], by="human:terminal")
                     break
-            answers[question.id] = Answer(
-                reply[:1].lower() == "y", reply[1:].strip(" ,:-"), by="human:terminal"
-            )
         return answers
 
 
