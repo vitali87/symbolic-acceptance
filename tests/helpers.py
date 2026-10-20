@@ -12,12 +12,13 @@ import os
 import signal
 import threading
 import urllib.request
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from pathlib import Path
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import git as run_git
 from symbolic_acceptance.cli import main
+from symbolic_acceptance.github import Comment
 from symbolic_acceptance.http import Response
 from symbolic_acceptance.loop import Oracle
 
@@ -232,9 +233,6 @@ index 4444444..0000000
 """
 
 
-Comment = dict[str, object]
-
-
 def rendered(body: str) -> str:
     """The HTML GitHub renders a comment of plain lines as (body_html)."""
     lines = "<br>\n".join(html.escape(line) for line in body.split("\n"))
@@ -242,7 +240,7 @@ def rendered(body: str) -> str:
 
 
 @contextlib.contextmanager
-def github_api() -> Iterator[tuple[str, list[Comment], list[tuple[str, str]]]]:
+def github_api() -> Generator[tuple[str, list[Comment], list[tuple[str, str]]]]:
     """A stand-in for GitHub's API for issue comments, on this machine: its
     URL, the comments it holds and each request's method and token."""
     comments: list[Comment] = []
@@ -283,11 +281,12 @@ def github_api() -> Iterator[tuple[str, list[Comment], list[tuple[str, str]]]]:
         def do_PATCH(self) -> None:
             comment = comments[int(self.path.rsplit("/", 1)[1]) - 1]
             body = self.sent()
-            edited = {"body": body, "body_html": rendered(body)}
-            comment |= edited | {"updated_at": "2026-10-19T11:00:00Z"}
+            comment.update(
+                body=body, body_html=rendered(body), updated_at="2026-10-19T11:00:00Z"
+            )
             self.reply(comment)
 
-        def log_message(self, *args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             pass
 
     with http.server.ThreadingHTTPServer(("127.0.0.1", 0), API) as server:

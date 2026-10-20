@@ -1,6 +1,7 @@
 import tempfile
 import tomllib
 import unittest
+from collections.abc import MutableMapping
 from pathlib import Path
 
 from helpers import EXAMPLE, example
@@ -175,12 +176,19 @@ class DigestTests(unittest.TestCase):
         checklist = sa.loads(written('{ B = "2", A = "1" }'))
         reordered = sa.loads(written('{ A = "1", B = "2" }'))
         self.assertEqual(checklist.digest, reordered.digest)
-        source = checklist.to_dict()["q"]["a"]
         self.assertEqual(
-            (source["env"], source["labels"]), ({"A": "1", "B": "2"}, ["x", "y"])
+            checklist.to_dict()["q"],
+            {
+                "a": {
+                    "ask": "Is A done?",
+                    "by": "ci",
+                    "labels": ["x", "y"],
+                    "env": {"A": "1", "B": "2"},
+                }
+            },
         )
-        with self.assertRaises(TypeError, msg="the digest stays true"):
-            checklist.questions["a"].options["env"]["A"] = "3"
+        env = checklist.questions["a"].options["env"]
+        self.assertNotIsInstance(env, MutableMapping, "the digest stays true")
 
     def test_dates_in_options_have_a_digest(self):
         dated = MINIMAL.replace('by = "ci"', 'by = "ci"\nsince = 2026-10-01')

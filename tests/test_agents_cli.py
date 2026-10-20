@@ -452,10 +452,13 @@ class CommandAgentTests(unittest.TestCase):
             Path(tmp, "app.py").write_text("print('v2')\n")
             git("commit", "-qam", "Attempt 1")
             first = agent(self.task())
+            assert first.diff is not None
             self.assertIn("+print('v2')", first.diff)
             Path(tmp, "app.py").write_text("print('v3')\n")
             git("commit", "-qam", "Attempt 2")
-            self.assertIn("+print('v3')", agent(self.task(2, previous=first)).diff)
+            second = agent(self.task(2, previous=first))
+            assert second.diff is not None
+            self.assertIn("+print('v3')", second.diff)
             git("checkout", "-q", base)
             # Elsewhere, or not in this clone at all.
             for previous in (first, sa.Attempt("1" * 40, 1)):
@@ -1193,7 +1196,7 @@ class CLITests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, *args):
+            def log_message(self, format: str, *args: object) -> None:
                 pass
 
         # A server on this machine stands in for the Messages API.

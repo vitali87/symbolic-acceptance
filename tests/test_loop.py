@@ -329,6 +329,8 @@ class RunTests(unittest.TestCase):
         evaluation = result.evaluations[0]
         failure, compound = evaluation.failures
         context = sa.Context(self.checklist, evaluation.attempt, evaluation.answers)
+        protected = self.checklist.requirement("protected").that
+        assert isinstance(protected, sa.AnyOf)
         for value, name in (
             (result, "status"),
             (evaluation, "status"),
@@ -343,8 +345,8 @@ class RunTests(unittest.TestCase):
             (self.checklist.questions["new_test"], "ask"),
             (self.checklist.requirement("new_test"), "fail"),
             (self.checklist.requirement("new_test").that, "id"),
-            (self.checklist.requirement("protected").that, "items"),
-            (self.checklist.requirement("protected").that.items[0], "items"),
+            (protected, "items"),
+            (protected.items[0], "items"),
             (self.checklist.requirement("sso").when, "item"),
         ):
             with (
@@ -488,9 +490,9 @@ class RunTests(unittest.TestCase):
             sa.run(self.checklist, agent=agent, oracles=script.oracles(), resume=first)
         )
         self.assertEqual((second.issue, second.base), ("#342", "b0"))
-        for other, refusal in (
-            ({"issue": "another issue"}, "issue text differs"),
-            ({"base": "b1"}, "base differs"),
+        for issue, base, refusal in (
+            ("another issue", "", "issue text differs"),
+            ("", "b1", "base differs"),
         ):
             with self.subTest(refusal), self.assertRaisesRegex(ValueError, refusal):
                 asyncio.run(
@@ -499,7 +501,8 @@ class RunTests(unittest.TestCase):
                         agent=agent,
                         oracles=script.oracles(),
                         resume=first,
-                        **other,
+                        issue=issue,
+                        base=base,
                     )
                 )
 
