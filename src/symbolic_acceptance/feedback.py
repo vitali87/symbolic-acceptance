@@ -4,7 +4,8 @@ A failure is explained along its expression, not by listing every NO: an
 ``all`` that is NO is explained by the items that are NO (fix each), an
 ``any`` that is NO by all of its alternatives (fix any one), and ``not`` flips
 what is wanted. So a NO is only reported where YES was needed, and a YES is
-reported where NO was needed.
+reported where NO was needed. A requirement that applies only ``when`` also
+says why it applies, explained the same way: the other way out.
 """
 
 from __future__ import annotations
@@ -50,9 +51,6 @@ class Fact:
     def actual(self) -> bool:
         return self.answer.is_met
 
-    def facts(self) -> tuple[Fact, ...]:
-        return (self,)
-
 
 @dataclass(frozen=True)
 class Group:
@@ -67,9 +65,6 @@ class Group:
     actual: bool
     parts: tuple[Reason, ...]
     fix: Literal["each", "one"] | None = None
-
-    def facts(self) -> tuple[Fact, ...]:
-        return tuple(fact for part in self.parts for fact in part.facts())
 
 
 Reason = Fact | Group
@@ -167,13 +162,6 @@ def _lines(reason: Reason, wanted: bool, indent: str) -> list[str]:
     return lines
 
 
-def _because(reason: Reason) -> str:
-    if isinstance(reason, Fact):
-        return f"   Applies because {reason.question.id} is YES."
-    listed = ", ".join(f"{f.question.id} is {yes_no(f.actual)}" for f in reason.facts())
-    return f"   Applies because {render(reason.expr)} is YES ({listed})."
-
-
 def render_failures(failures: Sequence[Failure]) -> str:
     """Plain-text feedback: every failed requirement, its message and causes."""
     if not failures:
@@ -181,7 +169,14 @@ def render_failures(failures: Sequence[Failure]) -> str:
     lines: list[str] = []
     for number, failure in enumerate(failures, start=1):
         lines.append(f"{number}. {failure.requirement.id}: {failure.requirement.fail}")
-        if failure.because is not None:
-            lines.append(_because(failure.because))
-        lines += [*_lines(failure.reason, True, "   "), ""]
+        lines += _lines(failure.reason, True, "   ")
+        if (because := failure.because) is not None:
+            gate = (
+                because.question.id
+                if isinstance(because, Fact)
+                else render(because.expr)
+            )
+            lines.append(f"   It applies because {gate} is YES; or make that NO:")
+            lines += _lines(because, False, "   ")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"

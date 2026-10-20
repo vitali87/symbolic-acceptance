@@ -51,12 +51,13 @@ class ExplainTests(unittest.TestCase):
             fail = "x"
             """
         )
-        reason = sa.explain(
-            checklist.requirement("r").that, checklist, answers({"a": True, "b": False})
-        )
+        truth = answers({"a": True, "b": False})
+        reason = sa.explain(checklist.requirement("r").that, checklist, truth)
         assert isinstance(reason, sa.Group)
         self.assertEqual(reason.fix, "each")
-        self.assertEqual([fact.question.id for fact in reason.facts()], ["b"])
+        text = sa.render_failures(sa.assess(checklist, truth).failures)
+        self.assertIn("- b: needs YES, got NO", text)
+        self.assertNotIn("- a:", text)
 
     def test_any_lists_every_alternative(self):
         checklist = example()
@@ -66,9 +67,10 @@ class ExplainTests(unittest.TestCase):
         )
         assert isinstance(reason, sa.Group)
         self.assertEqual(reason.fix, "one")
-        self.assertEqual(
-            [fact.question.id for fact in reason.facts()], ["can_unlock", "backs_off"]
-        )
+        text = sa.render_failures(sa.assess(checklist, answers(truth)).failures)
+        self.assertIn("- can_unlock: needs YES, got NO", text)
+        self.assertIn("- backs_off: needs YES, got NO", text)
+        self.assertNotIn("- locks_account:", text)
 
     def test_not_reports_the_yes_that_caused_it(self):
         assessment = sa.assess(CHECKLIST, answers({"a": True, "b": True, "c": True}))
@@ -120,19 +122,26 @@ class AssessTests(unittest.TestCase):
             self.assertIn(assessment.status, ("approved", "changes"))
             self.assertEqual(assessment.status == "changes", bool(assessment.failures))
 
-    def test_render_mentions_the_gate(self):
+    def test_render_shows_the_gate_as_the_other_way_out(self):
         checklist = example()
-        truth = dict(PASSING, sso_untouched=False, sso_exempt=False)
-        text = sa.render_failures(
-            sa.assess(
-                checklist, answers(truth, sso_exempt="needs security review")
-            ).failures
+        truth = answers(
+            dict(PASSING, sso_untouched=False, sso_exempt=False),
+            sso_exempt="needs security review",
         )
+        truth["sso_untouched"] = sa.Answer(
+            False, "1 frozen file(s) changed", ("src/auth/sso/saml.py (modified)",)
+        )
+        text = sa.render_failures(sa.assess(checklist, truth).failures)
         self.assertIn("1. sso: Single sign-on changed without approval", text)
-        self.assertIn(
-            "Applies because not(sso_untouched) is YES (sso_untouched is NO).", text
-        )
         self.assertIn("Why: needs security review", text)
+        self.assertIn(
+            "   It applies because not(sso_untouched) is YES; or make that NO:\n"
+            "   - sso_untouched: needs YES, got NO [ci]\n"
+            "     Q: Does the change leave the single sign-on code alone?\n"
+            "     Why: 1 frozen file(s) changed\n"
+            "     Evidence: src/auth/sso/saml.py (modified)\n",
+            text,
+        )
 
     def test_render_names_what_a_gate_read(self):
         checklist = sa.loads(
@@ -160,9 +169,14 @@ class AssessTests(unittest.TestCase):
         failures = sa.assess(checklist, answers({"a": True, "b": False, "c": False}))
         text = sa.render_failures(failures.failures)
         self.assertIn(
-            "Applies because all(a, not(b)) is YES (a is YES, b is NO).", text
+            "   It applies because all(a, not(b)) is YES; or make that NO:\n"
+            "   - all(a, not(b)): needs NO; fix any one of:\n"
+            "     - a: needs NO, got YES [test]\n"
+            "       Q: A?\n"
+            "     - b: needs YES, got NO [test]\n",
+            text,
         )
-        self.assertIn("2. plain: y\n   Applies because a is YES.\n", text)
+        self.assertIn("   It applies because a is YES; or make that NO:\n", text)
 
     def test_render_shows_each_cause_and_who_answered(self):
         truth = {
