@@ -429,6 +429,19 @@ class ReviewsTests(unittest.TestCase):
                 with self.assertRaises(sa.Pending) as caught:
                     asyncio.run(Reviews(github, 5)([SSO], context()))
                 self.assertEqual(caught.exception.answers, {})
+        # Each block GitHub shows starts a line, however its HTML is laid out.
+        comments = [
+            comment(2, "bot", ASK, user_type="Bot"),
+            comment(
+                3,
+                "alice",
+                "Read it.\n\n/yes sso_exempt agreed",
+                html='<p dir="auto">Read it.</p><p dir="auto">/yes sso_exempt agreed</p>',
+            ),
+        ]
+        github, _ = gh(json_response(comments))
+        answers = asyncio.run(Reviews(github, 5)([SSO], context()))
+        self.assertTrue(answers["sso_exempt"].is_met)
         # What follows is the comment's own again, inline code and all.
         body = "```\n/yes sso_exempt agreed\n```\n/no sso_exempt `lock()` is gone"
         html = (

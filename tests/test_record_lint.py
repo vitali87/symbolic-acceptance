@@ -299,13 +299,15 @@ class LintTests(unittest.TestCase):
             # Shell syntax after a #, which is no comment there, and none
             # quoted mid-word or escaped.
             '[q.t]\nask = "T?"\nby = "ci"\nrun = "repro --issue #342 | grep -q x"\n'
+            '[q.x]\nask = "X?"\nby = "ci"\nrun = "<in.txt sort"\n'
+            '[q.y]\nask = "Y?"\nby = "ci"\nrun = \'printf a\\ b | wc -l\'\n'
             '[q.u]\nask = "U?"\nby = "ci"\nrun = "grep -E --regexp=\'a|b\' f"\n'
             '[q.v]\nask = "V?"\nby = "ci"\nrun = \'find . -exec rm {} \\;\'\n'
             # An oracle of one's own reads its own options.
             '[q.w]\nask = "W?"\nby = "security"\nkind = "sast"\nexpect = "clean"\n'
             '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d", "e", '
             '"f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", '
-            '"s", "t", "u", "v", "w"] }\nfail = "x"\n'
+            '"s", "t", "u", "v", "w", "x", "y"] }\nfail = "x"\n'
         )
         findings = [f for f in sa.lint(c) if f.code == "bad-option"]
         shell = (
@@ -330,6 +332,8 @@ class LintTests(unittest.TestCase):
                 ("r", "q.r.expect works only with run"),
                 ("s", "q.s.allow_new works only with frozen"),
                 ("t", "q.t.run has |" + shell),
+                ("x", "q.x.run has <" + shell),
+                ("y", "q.y.run has |" + shell),
             ],
         )
         self.assertTrue(all(f.level == "error" for f in findings))
