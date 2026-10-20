@@ -60,6 +60,25 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(resumed.status, sa.APPROVED)
         self.assertEqual(script.asked_ids("ci").count("repro_fixed"), 1)
 
+    def test_waits_on_what_answers_given_with_a_pause_led_to(self):
+        checklist = sa.loads(
+            '[q.risky]\nask = "Risky?"\nby = "human"\n'
+            '[q.load]\nask = "Survives load?"\nby = "llm"\n'
+            '[q.signoff]\nask = "Signed off?"\nby = "human"\n'
+            '[[require]]\nid = "r"\nwhen = "risky"\n'
+            'that = { all = ["load", "signoff"] }\nfail = "x"\n'
+        )
+
+        async def human(questions, context):
+            raise sa.Pending("asked", answers={"risky": sa.Answer(True)})
+
+        async def llm(questions, context):
+            return {"load": sa.Answer(True)}
+
+        waiting = evaluate(checklist, {"human": human, "llm": llm})
+        self.assertEqual(waiting.status, sa.WAITING)
+        self.assertEqual(waiting.waiting_on, ("signoff",))
+
     def test_a_persons_no_decides_without_waiting_for_the_rest(self):
         checklist = sa.loads(
             '[q.ux]\nask = "UX ok?"\nby = "human"\n'

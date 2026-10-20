@@ -355,10 +355,9 @@ async def evaluate(
     _check_oracles(checklist, oracles)
     known = dict(answers or {})
     done = list(rounds)
-    # Oracles that paused, the questions they owe and why: they are not asked
-    # again until the run resumes.
+    # Oracles that paused, and why: they are not asked again until the run
+    # resumes.
     paused: set[str] = set()
-    waiting: list[str] = []
     notes: list[str] = []
     # Answers passed with a pause. They count if the attempt is decided now;
     # if it must wait, they are asked for again on resume, so a correction
@@ -382,7 +381,7 @@ async def evaluate(
                 done,
                 WAITING,
                 "; ".join(notes),
-                tuple(waiting),
+                tuple(ask),
             )
         context = Context(
             checklist, attempt, MappingProxyType(known | provisional), issue
@@ -398,7 +397,6 @@ async def evaluate(
                 partial = _accepted(name, asked, result.answers)
                 provisional.update(partial)
                 paused.add(name)
-                waiting += [qid for qid in asked if qid not in partial]
                 notes.append(f"{name}: {result}")
             elif isinstance(result, Escalate):
                 escalations.append(f"{name}: {result}")
