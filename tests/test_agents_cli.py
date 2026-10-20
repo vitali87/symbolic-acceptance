@@ -1692,6 +1692,7 @@ class CLITests(unittest.TestCase):
             checklist = Path(outside, "acceptance.toml")
             checklist.write_text(ASKS_A_PERSON)
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            started = time.monotonic()
             with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--agent", shlex.join(write), "--cwd", tmp]
@@ -1710,13 +1711,17 @@ class CLITests(unittest.TestCase):
                 text=True,
             ) as runner:
                 self.assertTrue(asked.wait(30), "GitHub was never asked")
+                asking = time.monotonic() - started
                 stopped.set()
                 runner.send_signal(signal.SIGINT)
                 _, err = runner.communicate(timeout=30)
+                stopping = time.monotonic() - started - asking
             server.shutdown()
         self.assertEqual(runner.returncode, 128 + signal.SIGINT, err)
-        # The request under way when it stopped, and none after it.
+        # The request under way when it stopped, and none after it; it ended
+        # once that one was answered.
         self.assertEqual([late for _, late in received], [False])
+        self.assertLess(stopping, 10, f"GitHub was asked after {asking:.1f}s\n{err}")
 
     def test_a_stop_ends_the_runners_own_git(self):
         with (
