@@ -199,34 +199,32 @@ def _cmd_report(args: argparse.Namespace) -> int:
 _REPLY = re.compile(r"(yes|y|no|n)(?:[\s,:;.!-]+(.*))?", re.IGNORECASE)
 
 
-class TerminalReviewer:
+async def _ask_at_the_terminal(
+    questions: Sequence[Question], context: Context
+) -> dict[str, Answer]:
     """A ``human`` oracle that asks on the terminal."""
-
-    async def __call__(
-        self, questions: Sequence[Question], context: Context
-    ) -> dict[str, Answer]:
-        if not sys.stdin.isatty():
-            raise Pending("no terminal to ask a person; pass --pr to ask on GitHub")
-        attempt = context.attempt
-        answers: dict[str, Answer] = {}
-        print(f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):")
-        for question in questions:
-            if question.context:
-                print(f"  ({' '.join(question.context.split())})")
-            while True:
-                prompt = f"  {question.id}: {question.ask} [y/n, then why] "
-                print(prompt, end="", flush=True)
-                typed = await _typed()
-                if not typed:
-                    raise Pending(
-                        "the person at the terminal stopped answering", answers=answers
-                    )
-                if reply := _REPLY.fullmatch(typed.strip()):
-                    yes = reply[1][0].lower() == "y"
-                    why = reply[2] or ""
-                    answers[question.id] = Answer(yes, why, by="human:terminal")
-                    break
-        return answers
+    if not sys.stdin.isatty():
+        raise Pending("no terminal to ask a person; pass --pr to ask on GitHub")
+    attempt = context.attempt
+    answers: dict[str, Answer] = {}
+    print(f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):")
+    for question in questions:
+        if question.context:
+            print(f"  ({' '.join(question.context.split())})")
+        while True:
+            prompt = f"  {question.id}: {question.ask} [y/n, then why] "
+            print(prompt, end="", flush=True)
+            typed = await _typed()
+            if not typed:
+                raise Pending(
+                    "the person at the terminal stopped answering", answers=answers
+                )
+            if reply := _REPLY.fullmatch(typed.strip()):
+                yes = reply[1][0].lower() == "y"
+                why = reply[2] or ""
+                answers[question.id] = Answer(yes, why, by="human:terminal")
+                break
+    return answers
 
 
 async def _typed() -> str:
@@ -331,7 +329,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     github = GitHub(args.github) if args.github else None
     ci_fallback = GitHubChecks(github, wait=args.ci_wait) if github else None
     exclude = args.exclude.split(",") if args.exclude else []
-    human: Oracle = TerminalReviewer()
+    human: Oracle = _ask_at_the_terminal
     if github and args.pr:
         human = Reviews(
             github,
