@@ -11,6 +11,7 @@ import json
 import os
 import signal
 import socketserver
+import tempfile
 import threading
 import urllib.request
 from collections.abc import Callable, Generator, Iterable, Mapping
@@ -238,6 +239,14 @@ def rendered(body: str) -> str:
     """The HTML GitHub renders a comment of plain lines as (body_html)."""
     lines = "<br>\n".join(html.escape(line) for line in body.split("\n"))
     return f'<p dir="auto">{lines}</p>'
+
+
+def folds_case() -> bool:
+    """Whether the temporary folder, where a check checks a commit out, takes
+    ``A`` and ``a`` for one name, as macOS does by default."""
+    with tempfile.TemporaryDirectory() as tmp:
+        Path(tmp, "A").touch()
+        return Path(tmp, "a").exists()
 
 
 @contextlib.contextmanager

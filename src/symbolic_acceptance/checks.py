@@ -166,11 +166,13 @@ class Commands:
     not the commit's. The command runs the attempt's code, so like the agent
     it gets ``env`` (by default this process's environment) without the
     runner's GitHub token, and no input; whatever it starts is stopped when
-    it ends, but for a daemon, which leaves its session. A command that runs
-    past ``timeout`` answers NO, whatever ``expect`` says, as does a program
-    of the attempt's own (a relative path, like ``./repro.sh``) that is gone
-    or cannot run; a program the machine lacks is an :class:`OracleError`,
-    for a person to fix.
+    it ends, but for what leaves its process group, as a daemon does. A
+    commit that cannot be checked out here as it is (two names that macOS
+    takes for one file, say) answers NO, as does a command that runs past
+    ``timeout``, whatever ``expect`` says, or a program of the attempt's own
+    (a relative path, like ``./repro.sh``) that is gone or cannot run; a
+    program the machine lacks is an :class:`OracleError`, for a person to
+    fix.
     """
 
     def __init__(
@@ -209,6 +211,17 @@ class Commands:
             git(tree, *fetch, context.attempt.ref, isolated=True, timeout=self.timeout)
             checkout = ("checkout", "--quiet", "--detach", "FETCH_HEAD")
             git(tree, *checkout, isolated=True, timeout=self.timeout)
+            # Names that the file system here takes for one file, as macOS's
+            # does when they differ only in case or Unicode form, are checked
+            # out one over the other: a new test over a frozen one, say.
+            if lost := git(tree, "diff", "--name-only", "-z", isolated=True):
+                names = ", ".join(lost.split("\0")[:-1])
+                reason = (
+                    f"`{shlex.join(argv)}` not run: {names} cannot be checked "
+                    "out as committed here, where names that differ only in "
+                    "case or Unicode form are one file"
+                )
+                return Answer(False, reason, by="ci:run")
             return self._run(argv, tree, expect)
 
     def _run(self, argv: list[str], tree: str, expect: Callable[[int], bool]) -> Answer:

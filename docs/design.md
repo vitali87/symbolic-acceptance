@@ -176,9 +176,11 @@ off (`stop_on_regression=False`).
 - The diff ignores what the checkout's or the user's git configuration says
   about submodules, renames and context, so a gitlink cannot drop out of it
   nor a new file pass for a changed one, and frozen paths match whatever
-  their case. A new file whose name differs from a frozen one only in case
-  still replaces it when checked out on a case-insensitive file system, so
-  local `run` checks and CI belong on case-sensitive ones.
+  their case. A new file whose name differs from a frozen one only in case,
+  or in Unicode form, replaces it when checked out on a file system that
+  takes the two names for one, as macOS's does: a local `run` check answers
+  NO for such a commit rather than run it, and CI belongs on case-sensitive
+  file systems.
 - The agent, and the `run` commands that execute its code, run without the
   runner's GitHub token, so they cannot report a check run or comment as
   the runner by accident. That stops no agent set on it: as the runner's
@@ -186,7 +188,8 @@ off (`stop_on_regression=False`).
   program in `.git` that the runner's push runs with it. Runner and agent
   also share a machine, so what the agent writes outside its checkout (user
   site-packages, say, or a file a symlink in the commit points to), or a
-  daemon it leaves running, can still change a local `run` check. Checks
+  process it leaves running outside its process group, as a daemon does,
+  can still change a local `run` check. Checks
   that must hold against an agent set on gaming them belong in CI, behind
   frozen workflows; against one attacking the runner itself, run the agent
   in a sandbox that holds none of the runner's credentials, with a checkout

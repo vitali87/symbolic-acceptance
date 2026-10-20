@@ -8,7 +8,7 @@ import unittest
 import zlib
 from pathlib import Path
 
-from helpers import DIFF, SRC, repo
+from helpers import DIFF, SRC, folds_case, repo
 
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import OUTPUT, GitError, diff, run_program
@@ -523,6 +523,22 @@ class CommandsTests(unittest.TestCase):
         answer = Commands(self.tmp.name, timeout=0.5)(slow, context(ref=self.head))
         self.assertFalse(answer.is_met)
         self.assertIn("timed out after 0.5s", answer.reasoning)
+
+    @unittest.skipUnless(folds_case(), "this file system holds both names apart")
+    def test_names_the_file_system_takes_for_one_are_not_checked(self):
+        # A new test that differs from a frozen one only in case, which git
+        # holds apart, would be checked out over it: the command would run
+        # the agent's test for the frozen one.
+        Path(self.tmp.name, "test_app.py").write_text("frozen\n")
+        Path(self.tmp.name, "agent").write_text("the agent's\n")
+        blob = self.git("hash-object", "-w", "agent").strip()
+        self.git("add", "test_app.py")
+        self.git("update-index", "--add", "--cacheinfo", f"100644,{blob},TEST_app.py")
+        self.git("commit", "-qm", "Twin")
+        self.head = self.git("rev-parse", "HEAD").strip()
+        answer = self.check(run_question("sees", "print(open('test_app.py').read())"))
+        self.assertFalse(answer.is_met)
+        self.assertIn("differ only in case", answer.reasoning)
 
     def test_what_a_command_leaves_running_neither_holds_it_up_nor_outlives_it(self):
         marker = Path(self.tmp.name, "late")
