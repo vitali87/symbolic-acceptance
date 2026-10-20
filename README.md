@@ -265,23 +265,23 @@ symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 `run` starts from a checkout whose changes are all committed, and keeps the
 commit it started from in the record, so every attempt is compared with it.
 A checkout that belongs to another user, as in a container job, needs
-`safe.directory` in the runner's git configuration, as git asks of any.
-A resumed run needs the agent's checkout at its last attempt, or at a
-commit after it that the runner made but did not get to record (as when a
-push failed), which then counts with the next attempt; and one run must not
-be resumed twice at once: the resumes would share the checkout and the
-record. An agent that fails, runs past `--agent-timeout` (an hour by
-default) or changes nothing escalates the run, which is saved like any
-other outcome. An error in the runner itself (git, the network, a
-misconfigured oracle) stops it instead, and the record keeps the run as it
-was, ready to resume; an attempt that was being checked is checked on,
-without asking the agent for another or asking again what was answered.
-Ctrl-C, or SIGTERM from a supervisor or a cancelled CI job, stops a run the
-same way, ending the agent or check it is running and what that started;
-they are given five seconds to clean up, and a second Ctrl-C ends them at
-once. Without
-`--pr`, people answer on the terminal; with no terminal to ask on, or once
-its input ends (Ctrl-D), the run waits for them, to be resumed.
+`safe.directory` in the runner's git configuration, as git asks of any. A
+resumed run needs the agent's checkout at its last attempt, or at a commit
+after it that the runner made but did not get to record (as when a push
+failed), which then counts with the next attempt; and one run must not be
+resumed twice at once: the resumes would share the checkout and the record.
+An agent that fails, runs past `--agent-timeout` (an hour by default) or
+changes nothing escalates the run, which is saved like any other outcome.
+An error in the runner itself (git, the network, a misconfigured oracle)
+stops it instead, and the record keeps the run as it was, ready to resume;
+an attempt that was being checked is checked on, without asking the agent
+for another or asking again what was answered. Ctrl-C, SIGTERM from a
+supervisor or a cancelled CI job, or a hang-up (the terminal closing) stops
+a run the same way, ending the agent or check it is running and what that
+started; they are given five seconds to clean up, and a second Ctrl-C ends
+them at once. Without `--pr`, people answer on the terminal; with no
+terminal to ask on, or once its input ends (Ctrl-D), the run waits for
+them, to be resumed.
 
 `explain acceptance.toml answers.json` decides a checklist from answers you
 supply, which is handy for checking a checklist by hand.

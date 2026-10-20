@@ -247,8 +247,9 @@ async def _typed() -> str:
     return os.read(sys.stdin.fileno(), 1 << 16).decode(errors="replace")
 
 
-# Ctrl-C, and what a supervisor or a cancelled CI job sends.
-_STOPS = (signal.SIGINT, signal.SIGTERM)
+# Ctrl-C, what a supervisor or a cancelled CI job sends, and a hang-up: the
+# terminal closed, which would end the runner and leave the agent working.
+_STOPS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
 def _stop(signum: int, frame: object) -> None:
@@ -276,7 +277,7 @@ def _quit(signum: int, frame: object) -> None:
 
 @contextlib.contextmanager
 def _stoppable() -> Generator[None]:
-    """Stop on Ctrl-C or SIGTERM as :func:`_stop` does, unless the signal was
+    """Stop on Ctrl-C, SIGTERM or SIGHUP as :func:`_stop` does, unless one was
     ignored from the start (a shell's background job), or this is not the
     main thread, the only one that can handle signals."""
     if threading.current_thread() is not threading.main_thread():
@@ -463,7 +464,7 @@ def _parser() -> argparse.ArgumentParser:
         description="Acceptance checklists for coding agents.",
         epilog="Exit status: 0 approved (or clean), 1 changes, escalated or "
         "errors (options it refuses included), 2 malformed arguments, 3 waiting "
-        "(or undecided), 130 or 143 stopped by Ctrl-C or SIGTERM.",
+        "(or undecided), 130, 143 or 129 stopped by Ctrl-C, SIGTERM or a hang-up.",
     )
     parser.add_argument("--version", action="version", version=__version__)
     commands = parser.add_subparsers(dest="command", required=True)

@@ -1195,14 +1195,15 @@ class CLITests(unittest.TestCase):
         self.assertIn("no terminal to ask a person", done.stdout)
         self.assertEqual(requests, [])
 
-    def test_ctrl_c_or_sigterm_stops_the_agent_and_leaves_the_run_to_resume(self):
+    def test_ctrl_c_sigterm_or_a_hang_up_stops_the_agent_and_keeps_the_run(self):
         # The agent is in its own git commit, held up by a hook that takes a
         # second to clean up once asked to stop, when the runner is told to
-        # stop; once with nobody reading its errors.
+        # stop; with nobody reading its errors once, as a closed terminal.
         for stop, reading in (
             (signal.SIGINT, True),
             (signal.SIGTERM, True),
             (signal.SIGINT, False),
+            (signal.SIGHUP, False),
         ):
             with (
                 self.subTest(stop.name, reading=reading),
