@@ -228,10 +228,10 @@ def run_program(
     :data:`OUTPUT` bytes of it.
 
     It reads ``given`` and nothing else. It runs in a session of its own, so
-    whatever it starts is stopped when it ends, but for a daemon, which
-    leaves that session; and it writes to a file, so a child it leaves
-    running with the output open cannot hold the runner up. A program that
-    cannot start raises :class:`OSError`, as does every program once
+    whatever it starts is stopped when it ends, but for what leaves its
+    process group, as a daemon does; and it writes to a file, so a child it
+    leaves running with the output open cannot hold the runner up. A program
+    that cannot start raises :class:`OSError`, as does every program once
     :func:`stop_programs` has been called (:class:`InterruptedError`).
     """
     with tempfile.TemporaryFile() as stdin, tempfile.TemporaryFile() as log:

@@ -316,7 +316,9 @@ uv tool install git+https://github.com/vitali87/symbolic-acceptance
 puts the `symbolic-acceptance` command on your path, and
 `uv add git+https://github.com/vitali87/symbolic-acceptance` adds the library
 to a project; from a checkout, `uv tool install .`. It needs Python 3.11 or
-later on a POSIX system, and git 2.36 or later for the runner. The build
+later on a POSIX system, and git 2.36 or later for the runner. Python from
+python.org on macOS checks HTTPS against no certificates until its Install
+Certificates command has run, or `SSL_CERT_FILE` names some. The build
 backend lives in [`_build/backend.py`](_build/backend.py) and `pyproject.toml`
 requires nothing, so `uv tool install --offline .` works offline.
 
