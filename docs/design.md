@@ -175,14 +175,16 @@ off (`stop_on_regression=False`).
   local `run` checks and CI belong on case-sensitive ones.
 - The agent, and the `run` commands that execute its code, run without the
   runner's GitHub token, so they cannot report a check run or comment as
-  the runner. Runner and agent still share a user and a machine, so what
-  the agent writes outside its checkout (user site-packages, say, or a
-  file a symlink in the commit points to), or a daemon it leaves running,
-  can still change a local `run` check. Checks that must hold against an
-  agent set on gaming them belong in CI, behind frozen workflows; against
-  one attacking the runner itself, run the agent in a sandbox that holds
-  none of the runner's credentials, with a checkout that has none
-  persisted.
+  the runner by accident. That stops no agent set on it: as the runner's
+  user it can read the token in the runner's own environment, or name a
+  program in `.git` that the runner's push runs with it. Runner and agent
+  also share a machine, so what the agent writes outside its checkout (user
+  site-packages, say, or a file a symlink in the commit points to), or a
+  daemon it leaves running, can still change a local `run` check. Checks
+  that must hold against an agent set on gaming them belong in CI, behind
+  frozen workflows; against one attacking the runner itself, run the agent
+  in a sandbox that holds none of the runner's credentials, with a checkout
+  that has none persisted.
   The runner's own git (status, add, commit, push) reads the checkout's
   `.git`, whose configuration can name programs git runs (filters, a
   signing program, credential helpers) and where a push goes; only the

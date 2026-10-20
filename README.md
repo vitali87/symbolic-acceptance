@@ -188,8 +188,9 @@ hand the attempt to a person.
   would be committed with the attempt. The command line refuses to.
 - The agent, and the `run` commands that execute its code, get no GitHub
   token from the runner, with which they could report a check run or
-  comment as the runner. Give the agent no other credentials that can
-  comment as a reviewer either: a reply posted with your token reads as
+  comment as the runner, though one set on it can still take it from the
+  runner, whose user it runs as. Give the agent no other credentials that
+  can comment as a reviewer either: a reply posted with your token reads as
   yours. What local `run` checks cannot protect against, and how to run an
   agent that might attack the runner itself, is in
   [`docs/design.md`](docs/design.md).

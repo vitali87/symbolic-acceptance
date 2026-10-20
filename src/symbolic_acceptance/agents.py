@@ -10,15 +10,16 @@ diff is computed here with git, from where the run started to that commit,
 and the agent's own output is kept only as its claims.
 
 The agent runs without the runner's GitHub token, which would let it report
-a check run or comment as the runner. It can write to the checkout's git
-configuration and attributes, so every git command here overrides what they
-could change: hooks, replace refs, the file monitor, and in the diff
-textconv and external drivers, binary files, path prefixes, quoting,
-renames and how many files rename detection reads, submodules, context
-and blank lines, object ids, how lines are matched up and files ordered,
-and the function names in hunk headers, which it leaves out. A
-filter can still rewrite what the agent's changes are committed as, which
-is the agent's to decide anyway: everyone judges the commit.
+a check run or comment as the runner; an agent set on getting it, as the
+runner's user, still can (docs/design.md says how to sandbox one). It can
+write to the checkout's git configuration and attributes, so every git
+command here overrides what they could change: hooks, replace refs, the file
+monitor, and in the diff textconv and external drivers, binary files, path
+prefixes, quoting, renames and how many files rename detection reads,
+submodules, context and blank lines, object ids, how lines are matched up
+and files ordered, and the function names in hunk headers, which it leaves
+out. A filter can still rewrite what the agent's changes are committed as,
+which is the agent's to decide anyway: everyone judges the commit.
 """
 
 from __future__ import annotations
