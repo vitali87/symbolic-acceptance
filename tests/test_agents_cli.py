@@ -597,6 +597,14 @@ class CommandAgentTests(unittest.TestCase):
             self.assertLess(time.monotonic() - started, 10)
             self.assertEqual(attempt.claims, "done")
 
+    def test_the_runners_git_keeps_its_terminal(self):
+        # So that ssh can ask on it: git is in the runner's session.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo(tmp)
+            sid = shlex.join([sys.executable, "-c", "import os; print(os.getsid(0))"])
+            alias = f"alias.sid=!{sid}"
+            self.assertEqual(git(tmp, "-c", alias, "sid"), f"{os.getsid(0)}\n")
+
     def test_failing_agent_is_an_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
