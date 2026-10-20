@@ -57,8 +57,8 @@ Transport = Callable[[urllib.request.Request, float], Response]
 
 
 def urlopen(request: urllib.request.Request, timeout: float) -> Response:
-    """The default transport: ``urllib``, honouring ``HTTPS_PROXY``, and
-    ``SSL_CERT_FILE`` for the certificates that HTTPS is checked against."""
+    """The default transport: ``urllib``, honouring ``HTTPS_PROXY``, which
+    checks HTTPS against the system's certificates, or ``SSL_CERT_FILE``'s."""
     try:
         with urllib.request.urlopen(request, timeout=timeout) as reply:
             return Response(reply.status, reply.read(), dict(reply.headers.items()))

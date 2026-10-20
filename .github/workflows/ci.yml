@@ -44,7 +44,7 @@ jobs:
           for minor in 11 12 13 14; do
             python=$(ls -d "$RUNNER_TOOL_CACHE"/Python/3."$minor".*/*/bin/python3."$minor" | sort -V | tail -n 1)
             "$python" --version
-            PYTHONPATH=src:tests "$python" -c 'import faulthandler, unittest; faulthandler.dump_traceback_later(180, exit=True); unittest.main(module=None)' discover -v -s tests -t tests
+            PYTHONPATH=src:tests "$python" -X faulthandler -c 'import faulthandler, unittest; faulthandler.dump_traceback_later(180, exit=True); unittest.main(module=None)' discover -v -s tests -t tests
           done
 
       # Only root can give a checkout another owner, as one test must, and

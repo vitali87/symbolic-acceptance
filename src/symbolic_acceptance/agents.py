@@ -101,11 +101,11 @@ def for_agent(env: Mapping[str, str]) -> dict[str, str]:
 
 # The programs run_program and git are running now, as os.kill takes them:
 # a program in a session of its own by its group, negated, so that what it
-# started goes with it; the runner's git by its process, as it shares the
-# runner's terminal so that ssh can ask on it. Then the threads starting one,
-# whose process is not known until it has started, and whether stop_programs
-# has been called, after which none starts: a flag, as a threading.Event
-# takes a lock to be set.
+# started in that group goes with it; the runner's git by its process, as it
+# shares the runner's terminal so that ssh can ask on it. Then the threads
+# starting one, whose process is not known until it has started, and whether
+# stop_programs has been called, after which none starts: a flag, as a
+# threading.Event takes a lock to be set.
 _running: set[int] = set()
 _starting: set[int] = set()
 _stopped = False
@@ -121,8 +121,8 @@ MAX_DIFF = 10 << 20
 
 def stop_programs(grace: float = GRACE) -> None:
     """End every program :func:`run_program` is running, and what they
-    started, and every :func:`git` command, for a runner told to stop; none
-    starts from now on.
+    started but for what left their process groups, and every :func:`git`
+    command, for a runner told to stop; none starts from now on.
 
     They are asked to stop (SIGTERM), so that git, say, removes its locks,
     and killed if they have not all ended within ``grace`` seconds. It takes
@@ -178,8 +178,9 @@ def _run(
 ) -> int | None:
     """Run ``argv`` to its end, known to :func:`stop_programs` meanwhile, and
     return its exit status, or ``None`` past ``timeout``. Then what is left
-    of it is killed: with a ``session`` of its own, whatever it started;
-    without, the program itself if it ran past ``timeout``."""
+    of it is killed: with a ``session`` of its own, whatever it started that
+    is still in its process group; without, the program itself if it ran
+    past ``timeout``."""
     _starting.add(threading.get_ident())
     try:
         if _stopped:
