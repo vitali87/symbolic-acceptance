@@ -1202,12 +1202,15 @@ class CLITests(unittest.TestCase):
                 )
                 head = git(tmp, "rev-parse", "HEAD")
                 saved = Path(outside, "run.json")
+                # Its output buffered, as it is unless one asks otherwise.
+                env = {
+                    k: v for k, v in NO_GIT_CONFIG.items() if k != "PYTHONUNBUFFERED"
+                }
                 runner = subprocess.Popen(
                     [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                     + ["--agent", shlex.join([sys.executable, "-c", commits])]
                     + ["--cwd", tmp, "--record", str(saved)],
-                    env=NO_GIT_CONFIG
-                    | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                    env=env | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
