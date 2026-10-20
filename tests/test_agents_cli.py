@@ -1305,9 +1305,11 @@ class CLITests(unittest.TestCase):
                 '[[require]]\nthat = { all = ["slow", "judged"] }\nid = "r"\n'
                 'fail = "x"\n'
             )
-            with socket.socket() as closed:
-                closed.bind(("127.0.0.1", 0))
-                port = closed.getsockname()[1]
+            # Bound but never listening: refused, and no one else's port.
+            closed = socket.socket()
+            self.addCleanup(closed.close)
+            closed.bind(("127.0.0.1", 0))
+            port = closed.getsockname()[1]
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             started = time.monotonic()
             done = subprocess.run(
@@ -1486,9 +1488,18 @@ class CLITests(unittest.TestCase):
                     time.sleep(0.05)
                 time.sleep(0.5)  # into the write of its questions
                 runner.send_signal(signal.SIGINT)
-                with os.fdopen(errors, "rb") as stream:
-                    err = stream.read()
-                runner.wait(timeout=20)
+                try:
+                    # All it wrote, once it ends; cat gives up if it never does.
+                    err = subprocess.run(
+                        ["cat"],
+                        stdin=errors,
+                        capture_output=True,
+                        check=True,
+                        timeout=20,
+                    ).stdout
+                finally:
+                    runner.kill()  # a run that never ended
+                    os.close(errors)
             os.close(keyboard)
             os.close(terminal)
         self.assertEqual(runner.returncode, 128 + signal.SIGINT, err[-2000:])
