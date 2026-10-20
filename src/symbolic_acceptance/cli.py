@@ -454,10 +454,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 
 def _seconds(text: str) -> float:
-    """A number of seconds above zero, for an option."""
+    """A number of seconds from 0 up, for an option."""
     seconds = float(text)
-    if not seconds > 0:  # nan is not either
-        raise argparse.ArgumentTypeError(f"must be more than 0, not {text}")
+    if not seconds >= 0:  # nan is not
+        raise argparse.ArgumentTypeError(f"must be 0 or more, not {text}")
     return seconds
 
 
@@ -559,7 +559,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     sub.add_argument(
         "--ci-wait",
-        type=float,
+        type=_seconds,
         default=1800.0,
         help="seconds to wait for CI before pausing the run (default 1800)",
     )

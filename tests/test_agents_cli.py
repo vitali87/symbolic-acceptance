@@ -816,7 +816,8 @@ class CLITests(unittest.TestCase):
             run[:2],
             (*run, "--samples", "0"),
             (*run, "--max-attempts", "x"),
-            (*run, "--agent-timeout", "0"),
+            (*run, "--agent-timeout", "-1"),
+            (*run, "--ci-wait", "nan"),
         ):
             with (
                 self.subTest(args),
