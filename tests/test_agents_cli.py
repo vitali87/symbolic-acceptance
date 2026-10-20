@@ -36,6 +36,13 @@ from symbolic_acceptance.draft import DraftError, draft
 # For agents that run git themselves: like the test's own git, theirs reads
 # no one's settings, which could run hooks or refuse to commit.
 NO_GIT_CONFIG = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+# The package under test, for a process of its own to import.
+SRC = str(Path(sa.__file__).parents[1])
+# A checklist that asks a person and nothing else.
+ASKS_A_PERSON = (
+    '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+    '[[require]]\nthat = "ok"\nfail = "not ok"\n'
+)
 
 
 class CommandAgentTests(unittest.TestCase):
@@ -90,7 +97,7 @@ class CommandAgentTests(unittest.TestCase):
                 env=dict(
                     os.environ,
                     GIT_CONFIG_GLOBAL=str(gitconfig),
-                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                    PYTHONPATH=SRC,
                 ),
                 check=True,
             )
@@ -121,7 +128,7 @@ class CommandAgentTests(unittest.TestCase):
                     GIT_CONFIG_GLOBAL=str(gitconfig),
                     # Git's own switch to take every repository for another's.
                     GIT_TEST_ASSUME_DIFFERENT_OWNER="1",
-                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                    PYTHONPATH=SRC,
                 ),
                 capture_output=True,
                 text=True,
@@ -478,7 +485,7 @@ class CommandAgentTests(unittest.TestCase):
                 env=dict(
                     os.environ,
                     GITHUB_TOKEN="secret",
-                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                    PYTHONPATH=SRC,
                 ),
                 check=True,
             )
@@ -515,7 +522,7 @@ class CommandAgentTests(unittest.TestCase):
                 env=dict(
                     os.environ,
                     GITHUB_TOKEN="secret",
-                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                    PYTHONPATH=SRC,
                 ),
                 check=True,
             )
@@ -785,7 +792,7 @@ class CLITests(unittest.TestCase):
                 "GH_TOKEN",
             }
             bare = {k: v for k, v in os.environ.items() if k not in secrets}
-            bare["PYTHONPATH"] = str(Path(sa.__file__).parents[1])
+            bare["PYTHONPATH"] = SRC
 
             def run(checklist, *more, **given):
                 return subprocess.run(
@@ -832,7 +839,7 @@ class CLITests(unittest.TestCase):
         env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}
         done = subprocess.run(
             [sys.executable, "-m", "symbolic_acceptance", "template", "feature"],
-            env=env | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+            env=env | {"PYTHONPATH": SRC},
             stdout=writer,
             stderr=subprocess.PIPE,
             text=True,
@@ -902,7 +909,7 @@ class CLITests(unittest.TestCase):
                     capture_output=True,
                     text=True,
                     # The same package as this process, wherever that came from.
-                    env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                    env=dict(os.environ, PYTHONPATH=SRC),
                     check=False,
                     timeout=60,
                 )
@@ -1184,7 +1191,7 @@ class CLITests(unittest.TestCase):
                         ANTHROPIC_API_KEY="key",
                         NO_PROXY="127.0.0.1",
                         no_proxy="127.0.0.1",
-                        PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                        PYTHONPATH=SRC,
                     ),
                     capture_output=True,
                     text=True,
@@ -1226,7 +1233,7 @@ class CLITests(unittest.TestCase):
                 "GH_TOKEN": "token",
                 "NO_PROXY": "127.0.0.1",
                 "no_proxy": "127.0.0.1",
-                "PYTHONPATH": str(Path(sa.__file__).parents[1]),
+                "PYTHONPATH": SRC,
             },
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -1242,10 +1249,7 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             saved = str(Path(outside, "run.json"))
             first = self.run_on_github(
                 checklist, tmp, url, "--pr", "5", "--record", saved
@@ -1281,10 +1285,7 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             done = self.run_on_github(checklist, tmp, url)
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("no terminal to ask a person", done.stdout)
@@ -1314,7 +1315,7 @@ class CLITests(unittest.TestCase):
                 + ["--agent", shlex.join(write), "--cwd", tmp],
                 env=NO_GIT_CONFIG
                 | {
-                    "PYTHONPATH": str(Path(sa.__file__).parents[1]),
+                    "PYTHONPATH": SRC,
                     "ANTHROPIC_API_KEY": "key",
                     "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{port}",
                     "NO_PROXY": "127.0.0.1",
@@ -1356,10 +1357,7 @@ class CLITests(unittest.TestCase):
                 )
                 hook.chmod(0o755)
                 checklist = Path(outside, "acceptance.toml")
-                checklist.write_text(
-                    '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                    '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-                )
+                checklist.write_text(ASKS_A_PERSON)
                 pid = Path(outside, "pid")
                 # Told to stop, it lets git end and ends cleanly, its work
                 # half done.
@@ -1380,7 +1378,7 @@ class CLITests(unittest.TestCase):
                     [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                     + ["--agent", shlex.join([sys.executable, "-c", commits])]
                     + ["--cwd", tmp, "--record", str(saved)],
-                    env=env | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                    env=env | {"PYTHONPATH": SRC},
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
@@ -1417,10 +1415,7 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             saved = Path(outside, "run.json")
             keyboard, terminal = os.openpty()
@@ -1429,7 +1424,7 @@ class CLITests(unittest.TestCase):
             with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
-                env=env | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                env=env | {"PYTHONPATH": SRC},
                 stdin=terminal,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1464,10 +1459,7 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             saved = Path(outside, "run.json")
             keyboard, terminal = os.openpty()
@@ -1480,7 +1472,7 @@ class CLITests(unittest.TestCase):
             with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
-                env=NO_GIT_CONFIG | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                env=NO_GIT_CONFIG | {"PYTHONPATH": SRC},
                 stdin=terminal,
                 stdout=subprocess.DEVNULL,
                 stderr=written,
@@ -1524,17 +1516,14 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             saved = Path(outside, "run.json")
             keyboard, terminal = os.openpty()
             with subprocess.Popen(
                 [sys.executable, "-c", interrupt, str(saved), "run", str(checklist)]
                 + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
-                env=NO_GIT_CONFIG | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
+                env=NO_GIT_CONFIG | {"PYTHONPATH": SRC},
                 stdin=terminal,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -1572,7 +1561,7 @@ class CLITests(unittest.TestCase):
                     ANTHROPIC_API_KEY="key",
                     NO_PROXY="127.0.0.1",
                     no_proxy="127.0.0.1",
-                    PYTHONPATH=str(Path(sa.__file__).parents[1]),
+                    PYTHONPATH=SRC,
                 ),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -1591,17 +1580,14 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             # An agent that will not stop when asked to.
             group = Path(outside, "group")
             agent = f"trap '' TERM; echo $$ > {shlex.quote(str(group))}; sleep 60"
             with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--agent", shlex.join(["sh", "-c", agent]), "--cwd", tmp],
-                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                env=dict(os.environ, PYTHONPATH=SRC),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -1638,10 +1624,7 @@ class CLITests(unittest.TestCase):
         ):
             repo(tmp)
             checklist = Path(outside, "acceptance.toml")
-            checklist.write_text(
-                '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
-                '[[require]]\nthat = "ok"\nfail = "not ok"\n'
-            )
+            checklist.write_text(ASKS_A_PERSON)
             started = Path(outside, "started")
             agent = (
                 f"import time; open({str(started)!r}, 'w').close(); time.sleep(1);"
@@ -1651,7 +1634,7 @@ class CLITests(unittest.TestCase):
                 ["sh", "-c", 'trap "" INT; exec "$@"', "sh"]
                 + [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--agent", shlex.join([sys.executable, "-c", agent]), "--cwd", tmp],
-                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                env=dict(os.environ, PYTHONPATH=SRC),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1713,7 +1696,7 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             done = subprocess.run(
                 [sys.executable, "-c", script, str(Path(tmp, "started"))],
-                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                env=dict(os.environ, PYTHONPATH=SRC),
                 capture_output=True,
                 text=True,
                 check=True,
