@@ -3,11 +3,11 @@
 :class:`Checks` answers each question by its options:
 
 * ``frozen = [<globs>]``: the attempt leaves the files matching these
-  patterns alone; ``allow_new`` lists the patterns a new file may match
-  anyway (the regression test). Patterns use :mod:`fnmatch`, where ``*``
-  also matches ``/``, and ignore case; in ``allow_new``, which lets files
-  in, a pattern matches only paths as deep as itself, so ``*`` stays within
-  a directory.
+  patterns alone; ``allow_new`` lists the patterns a new file, or one moved
+  in, may match anyway (the regression test). Patterns use :mod:`fnmatch`,
+  where ``*`` also matches ``/``, and ignore case; in ``allow_new``, which
+  lets files in, a pattern matches only paths as deep as itself, so ``*``
+  stays within a directory.
 * ``run = "<command>"``: the command passes in a fresh checkout of the
   attempt's commit (see :class:`Commands`). ``expect = "fail"`` inverts its
   exit status. Commands run without a shell.
@@ -94,9 +94,15 @@ def frozen_files(question: Question, context: Context) -> Answer:
     files, _ = parse(diff)
     violations = []
     for change in files:
-        if not (matches(change.path, frozen) or matches(change.old_path, frozen)):
+        was_frozen = matches(change.old_path, frozen)
+        if not (matches(change.path, frozen) or was_frozen):
             continue
-        if change.status == "added" and admits(change.path, allow_new):
+        # A file moved in from elsewhere is as new to the frozen ones as one
+        # added: the new regression test may come from the issue's repro.
+        added = change.status == "added" or (
+            change.status == "renamed" and not was_frozen
+        )
+        if added and admits(change.path, allow_new):
             continue
         violations.append(
             f"{change.old_path} -> {change.path} (renamed)"

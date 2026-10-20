@@ -329,6 +329,21 @@ class FrozenTests(unittest.TestCase):
             ("tests/test_x/conftest.py (added)",),
         )
 
+    def test_a_file_moved_in_is_new_there(self):
+        q = self.question(frozen=["tests/*"], allow_new=["tests/test_*.py"])
+        diff = (
+            "diff --git a/repro/issue.py b/tests/test_issue.py\n"
+            "similarity index 95%\n"
+            "rename from repro/issue.py\nrename to tests/test_issue.py\n"
+            "diff --git a/repro/setup.py b/tests/conftest.py\n"
+            "similarity index 95%\n"
+            "rename from repro/setup.py\nrename to tests/conftest.py\n"
+        )
+        self.assertEqual(
+            frozen_files(q, context(diff)).evidence,
+            ("repro/setup.py -> tests/conftest.py (renamed)",),
+        )
+
     def test_frozen_paths_ignore_case(self):
         # On a case-insensitive file system TESTS/ is tests/.
         q = self.question(frozen=["tests/*"], allow_new=["tests/test_*.py"])
