@@ -1254,10 +1254,12 @@ class CLITests(unittest.TestCase):
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             saved = Path(outside, "run.json")
             keyboard, terminal = os.openpty()
+            # Its output buffered, so that a prompt it does not flush never shows.
+            env = {k: v for k, v in os.environ.items() if k != "PYTHONUNBUFFERED"}
             with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
-                env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
+                env=env | {"PYTHONPATH": str(Path(sa.__file__).parents[1])},
                 stdin=terminal,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
