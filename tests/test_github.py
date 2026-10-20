@@ -1,4 +1,5 @@
 import asyncio
+import time
 import unittest
 
 from helpers import FakeHTTP, json_response
@@ -177,6 +178,13 @@ class ChecksTests(unittest.TestCase):
         checks = GitHubChecks(github, wait=60, poll=0)
         answers = asyncio.run(checks([TESTS], context()))
         self.assertTrue(answers["suite_green"].is_met)
+        self.assertEqual(len(fake.requests), 2)
+        # The last read is when the wait is up, however long the poll.
+        github, fake = gh(*[json_response({"check_runs": [going]})] * 2)
+        started = time.monotonic()
+        with self.assertRaises(sa.Pending):
+            asyncio.run(GitHubChecks(github, wait=0.2, poll=30)([TESTS], context()))
+        self.assertLess(time.monotonic() - started, 10)
         self.assertEqual(len(fake.requests), 2)
 
     def test_only_runs_from_the_trusted_app_count(self):
