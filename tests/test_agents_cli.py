@@ -1903,6 +1903,33 @@ class CLITests(unittest.TestCase):
         # grace was up; none started after it.
         self.assertEqual(done.stdout, f"{-signal.SIGTERM} refused True\n")
 
+    def test_a_signal_handler_can_stop_the_program_its_thread_waits_on(self):
+        # The thread reaps nothing while the handler runs, so the program it
+        # stopped stays ended, unreaped: a group macOS refuses to signal.
+        script = (
+            "import os, signal, sys, threading, time\n"
+            "from symbolic_acceptance.agents import run_program, stop_programs\n"
+            "started = sys.argv[1]\n"
+            "program = [sys.executable, '-c',"
+            " f'import time; open({started!r}, \"w\"); time.sleep(60)']\n"
+            "signal.signal(signal.SIGUSR1, lambda *_: stop_programs(grace=1))\n"
+            "def stop():\n"
+            "    while not os.path.exists(started):\n"
+            "        time.sleep(0.05)\n"
+            "    os.kill(os.getpid(), signal.SIGUSR1)\n"
+            "threading.Thread(target=stop).start()\n"
+            "print(run_program(program, cwd='.', env=os.environ, timeout=60)[0])\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            done = subprocess.run(
+                [sys.executable, "-c", script, str(Path(tmp, "started"))],
+                env=dict(os.environ, PYTHONPATH=SRC),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        self.assertEqual(done.stdout, f"{-signal.SIGTERM}\n")
+
     def test_templates_load(self):
         for kind in ("bug", "feature"):
             code, out = cli("template", kind)

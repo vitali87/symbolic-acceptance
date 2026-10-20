@@ -139,8 +139,8 @@ def stop_programs(grace: float = GRACE) -> None:
     for target in targets:
         _signal(target, signal.SIGTERM)
     deadline = time.monotonic() + grace
-    # Signal 0 only asks whether a process is left. One that ended is left
-    # until it is reaped, which nothing does where the runner is a
+    # Signal 0 only asks whether a process is left. On Linux, one that ended
+    # is left until it is reaped, which nothing does where the runner is a
     # container's first process: there, stopping takes the whole grace.
     while any(_signal(t, 0) for t in targets) and time.monotonic() < deadline:
         time.sleep(0.05)
@@ -155,10 +155,12 @@ def stopping() -> bool:
 
 
 def _signal(target: int, number: int) -> bool:
-    """Send ``target`` signal ``number``: whether there was a process."""
+    """Send ``target`` signal ``number``: whether there was a process to take
+    it. A group has none where none of it may be signalled (EPERM): another
+    user's, or, on macOS, one whose processes have all ended, unreaped."""
     try:
         os.kill(target, number)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
         return False
     return True
 
