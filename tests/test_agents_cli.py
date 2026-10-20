@@ -1171,15 +1171,14 @@ class CLITests(unittest.TestCase):
             write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
             saved = Path(outside, "run.json")
             keyboard, terminal = os.openpty()
-            runner = subprocess.Popen(
+            with subprocess.Popen(
                 [sys.executable, "-m", "symbolic_acceptance", "run", str(checklist)]
                 + ["--cwd", tmp, "--agent", shlex.join(write), "--record", str(saved)],
                 env=dict(os.environ, PYTHONPATH=str(Path(sa.__file__).parents[1])),
                 stdin=terminal,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-            )
-            try:
+                stderr=subprocess.PIPE,
+            ) as runner:
                 assert runner.stdout is not None
                 asked = b""
                 while b"[y/n, then why]" not in asked:
@@ -1187,13 +1186,10 @@ class CLITests(unittest.TestCase):
                     self.assertTrue(read, "the run never asked")
                     asked += read
                 runner.send_signal(signal.SIGINT)
-                runner.wait(timeout=20)
-            finally:
-                os.close(keyboard)
-                os.close(terminal)
-                runner.kill()
-                runner.stdout.close()
-            self.assertEqual(runner.returncode, 128 + signal.SIGINT)
+                _, err = runner.communicate(timeout=20)
+            os.close(keyboard)
+            os.close(terminal)
+            self.assertEqual(runner.returncode, 128 + signal.SIGINT, err.decode())
             self.assertEqual(json.loads(saved.read_text())["status"], "running")
 
     def test_a_second_ctrl_c_quits_at_once(self):
