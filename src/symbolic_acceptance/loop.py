@@ -279,8 +279,7 @@ async def _put(
     oracle: Oracle, questions: tuple[Question, ...], context: Context
 ) -> object:
     """Ask ``oracle``. A pause or a hand-over is its result; any other error is
-    raised, so the questions put to other oracles at the same time are not
-    waited for."""
+    raised."""
     try:
         return await _call(oracle, questions, context)
     except (Pending, Escalate) as stop:
@@ -369,9 +368,17 @@ async def evaluate(
             checklist, attempt, MappingProxyType(known | provisional), issue
         )
         names = list(groups)
-        results = await asyncio.gather(
-            *(_put(oracles[name], tuple(groups[name]), context) for name in names)
-        )
+        tasks = [
+            asyncio.ensure_future(_put(oracles[name], tuple(groups[name]), context))
+            for name in names
+        ]
+        try:
+            results = await asyncio.gather(*tasks)
+        finally:
+            # One oracle's error stops those asked with it, which nobody would
+            # wait for; a sync one, in a thread, can only be left to finish.
+            for task in tasks:
+                task.cancel()
         got: dict[str, Answer] = {}
         for name, result in zip(names, results, strict=True):
             asked = [q.id for q in groups[name]]

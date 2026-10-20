@@ -218,17 +218,28 @@ class EvaluateTests(unittest.TestCase):
             ):
                 evaluate(self.checklist, dict(script.oracles(), ci=bad))
 
-    def test_an_oracle_error_does_not_wait_for_the_others(self):
+    def test_an_oracle_error_stops_the_others(self):
+        stopped = []
+
         async def slow(questions, context):
-            await asyncio.sleep(30)
+            try:
+                await asyncio.sleep(30)
+            finally:
+                stopped.append("ci")
 
         async def broken(questions, context):
             raise RuntimeError("the judge is down")
 
-        oracles = dict(Scripted(PASSING).oracles(), ci=slow, llm=broken)
+        async def main():
+            oracles = dict(Scripted(PASSING).oracles(), ci=slow, llm=broken)
+            with self.assertRaisesRegex(RuntimeError, "the judge is down"):
+                await sa.evaluate(self.checklist, sa.Attempt("abc", 1), oracles)
+            await asyncio.sleep(0)
+            # Before the end of the loop, which would stop anything left.
+            return list(stopped)
+
         started = time.monotonic()
-        with self.assertRaisesRegex(RuntimeError, "the judge is down"):
-            evaluate(self.checklist, oracles)
+        self.assertEqual(asyncio.run(main()), ["ci"])
         self.assertLess(time.monotonic() - started, 10)
 
     def test_sync_oracles_work(self):
