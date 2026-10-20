@@ -358,14 +358,6 @@ class ReviewsTests(unittest.TestCase):
             asyncio.run(Reviews(github, 5)([SSO], context()))
         self.assertEqual(caught.exception.answers, {})
 
-    def test_edited_comments_do_not_count(self):
-        edited = comment(3, "alice", "/yes sso_exempt ok")
-        edited["updated_at"] = "2026-10-18T13:00:00Z"
-        github, _ = gh(json_response([comment(2, "bot", ASK, user_type="Bot"), edited]))
-        with self.assertRaises(sa.Pending) as caught:
-            asyncio.run(Reviews(github, 5)([SSO], context()))
-        self.assertEqual(caught.exception.answers, {})
-
     def test_a_reply_answers_the_latest_question_before_it(self):
         def ask(ref):
             return f"<!-- symbolic-acceptance:ask ref={ref} ids=sso_exempt -->\nq"

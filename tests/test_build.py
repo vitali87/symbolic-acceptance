@@ -44,7 +44,9 @@ class BuildTests(unittest.TestCase):
     def test_wheel(self):
         with tempfile.TemporaryDirectory() as tmp:
             name = self.backend.build_wheel(tmp)
-            self.assertEqual(name, "symbolic_acceptance-0.1.0-py3-none-any.whl")
+            self.assertEqual(
+                name, f"symbolic_acceptance-{sa.__version__}-py3-none-any.whl"
+            )
             with zipfile.ZipFile(Path(tmp, name)) as wheel:
                 names = wheel.namelist()
                 self.assertIn("symbolic_acceptance/__init__.py", names)
@@ -52,7 +54,7 @@ class BuildTests(unittest.TestCase):
                 self.assertFalse(
                     [n for n in names if "__pycache__" in n or n.startswith("tests/")]
                 )
-                dist = "symbolic_acceptance-0.1.0.dist-info"
+                dist = f"symbolic_acceptance-{sa.__version__}.dist-info"
                 self.assertIn(f"{dist}/licenses/LICENSE", names)
                 record = list(
                     csv.reader(io.StringIO(wheel.read(f"{dist}/RECORD").decode()))
@@ -90,10 +92,10 @@ class BuildTests(unittest.TestCase):
     def test_sdist(self):
         with tempfile.TemporaryDirectory() as tmp:
             name = self.backend.build_sdist(tmp)
-            self.assertEqual(name, "symbolic_acceptance-0.1.0.tar.gz")
+            self.assertEqual(name, f"symbolic_acceptance-{sa.__version__}.tar.gz")
             with tarfile.open(Path(tmp, name)) as sdist:
                 names = sdist.getnames()
-            base = "symbolic_acceptance-0.1.0"
+            base = f"symbolic_acceptance-{sa.__version__}"
             for required in (
                 "PKG-INFO",
                 "pyproject.toml",

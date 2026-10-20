@@ -17,6 +17,7 @@ from pathlib import Path
 
 from helpers import (
     EXAMPLE,
+    SRC,
     FakeHTTP,
     cli,
     example,
@@ -36,8 +37,6 @@ from symbolic_acceptance.draft import DraftError, draft
 # For agents that run git themselves: like the test's own git, theirs reads
 # no one's settings, which could run hooks or refuse to commit.
 NO_GIT_CONFIG = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
-# The package under test, for a process of its own to import.
-SRC = str(Path(sa.__file__).parents[1])
 
 
 def run_cli(*args: str) -> subprocess.CompletedProcess[str]:

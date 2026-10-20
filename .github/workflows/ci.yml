@@ -1,6 +1,7 @@
-# Tests, lint and a reproducible build, with no third-party actions and no
-# downloads: the checkout is plain git, the Pythons the runner image holds
-# run the tests, and the package has no dependencies to install.
+# Tests, which build the package twice to compare, and lint, with no
+# third-party actions and no downloads: the checkout is plain git, the
+# Pythons the runner image holds run the tests, and the package has no
+# dependencies to install.
 name: ci
 
 on:
@@ -31,23 +32,14 @@ jobs:
           git checkout -q FETCH_HEAD
 
       # Every Python the package supports is in the runner image's tool cache.
+      # A suite that hangs is stopped after three minutes, showing where.
       - name: Test on Python 3.11 to 3.14
         run: |
           for minor in 11 12 13 14; do
             python=$(ls -d "$RUNNER_TOOL_CACHE"/Python/3."$minor".*/x64/bin/python3."$minor" | sort -V | tail -n 1)
             "$python" --version
-            PYTHONPATH=src:tests "$python" -m unittest discover -s tests -t tests
+            PYTHONPATH=src:tests timeout -s ABRT 180 "$python" -X faulthandler -m unittest discover -s tests -t tests
           done
 
       - name: Lint the example checklists
         run: PYTHONPATH=src python3 -m symbolic_acceptance lint --strict examples/*.toml
-
-      - name: Build twice and compare
-        run: |
-          for out in one two; do
-            mkdir "$out"
-            python3 -c "import sys; sys.path.insert(0, '_build'); import backend; print(backend.build_wheel('$out'), backend.build_sdist('$out'))" >/dev/null
-          done
-          cmp one/*.whl two/*.whl
-          cmp one/*.tar.gz two/*.tar.gz
-          sha256sum one/*

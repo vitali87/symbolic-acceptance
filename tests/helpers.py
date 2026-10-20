@@ -43,6 +43,8 @@ for _stop in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
         signal.signal(_stop, lambda signum, frame: None)
 
 ROOT = Path(__file__).resolve().parent.parent
+# The package under test, for a process of its own to import.
+SRC = str(Path(sa.__file__).parents[1])
 EXAMPLE = ROOT / "examples" / "issue-342.toml"
 
 PASSING = {
