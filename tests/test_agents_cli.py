@@ -3,6 +3,7 @@ import http.server
 import io
 import json
 import os
+import select
 import shlex
 import signal
 import subprocess
@@ -1259,13 +1260,21 @@ class CLITests(unittest.TestCase):
                 stderr=subprocess.PIPE,
             ) as runner:
                 assert runner.stdout is not None
-                asked = b""
-                while b"[y/n, then why]" not in asked:
-                    read = os.read(runner.stdout.fileno(), 1024)
-                    self.assertTrue(read, "the run never asked")
-                    asked += read
-                runner.send_signal(signal.SIGINT)
-                _, err = runner.communicate(timeout=20)
+                try:
+                    asked = b""
+                    deadline = time.monotonic() + 30
+                    while b"[y/n, then why]" not in asked:
+                        left = max(0.0, deadline - time.monotonic())
+                        readable = select.select([runner.stdout], [], [], left)[0]
+                        read = (
+                            os.read(runner.stdout.fileno(), 1024) if readable else b""
+                        )
+                        self.assertTrue(read, "the run never asked")
+                        asked += read
+                    runner.send_signal(signal.SIGINT)
+                    _, err = runner.communicate(timeout=20)
+                finally:
+                    runner.kill()  # a run that never asked, or never ended
             os.close(keyboard)
             os.close(terminal)
             self.assertEqual(runner.returncode, 128 + signal.SIGINT, err.decode())
