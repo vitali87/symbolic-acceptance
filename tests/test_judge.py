@@ -10,7 +10,7 @@ import symbolic_acceptance as sa
 from symbolic_acceptance import http
 from symbolic_acceptance.claude import Claude, ClaudeError
 from symbolic_acceptance.github import GitHub
-from symbolic_acceptance.judge import MIN_QUOTE, Judge, Verdict
+from symbolic_acceptance.judge import CONCURRENCY, MIN_QUOTE, Judge, Verdict
 
 
 def verdict(answer, quotes=(), missing="", tampering=False, reasoning="looked"):
@@ -194,7 +194,7 @@ class RequestTests(unittest.TestCase):
             time.sleep(0.2)
             return verdict("NO", missing="x")
 
-        ids = [f"q{n}" for n in range(8)]
+        ids = [f"q{n}" for n in range(CONCURRENCY + 4)]
         j, fake = judge(*[reply] * len(ids))
         checklist = sa.loads(
             "".join(f'[q.{q}]\nask = "?"\nby = "llm"\n' for q in ids)
@@ -210,9 +210,9 @@ class RequestTests(unittest.TestCase):
             await asyncio.sleep(0.5)  # longer than the rest would take
 
         asyncio.run(main())
-        # q0 alone, then q1 to q4 at once, and q5 if q1's turn ending let it
-        # in before its escalation was seen; q6 and q7, waiting, never.
-        self.assertIn(len(fake.requests), (5, 6))
+        # q0 alone, then as many as may ask at once, and one more if q1's turn
+        # ending let it in before its escalation was seen; the rest, never.
+        self.assertIn(len(fake.requests), (1 + CONCURRENCY, 2 + CONCURRENCY))
 
     def test_once_a_question_escalates_the_others_ask_no_more(self):
         def reply(request):

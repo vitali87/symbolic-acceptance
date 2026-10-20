@@ -75,7 +75,7 @@ class RejectTests(unittest.TestCase):
             sa.loads(text)
 
     def test_toml_syntax_error(self):
-        self.assertRejected("[q.a\n", "<checklist>")
+        self.assertRejected("[q.a\n", "^<checklist>: .*line 1, column 5")
 
     def test_unknown_top_level_key(self):
         self.assertRejected("requires = 1\n" + MINIMAL, "unknown top-level")

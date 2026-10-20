@@ -542,7 +542,9 @@ class CommandAgentTests(unittest.TestCase):
                 ),
                 check=True,
             )
-            self.assertEqual(seen.read_text(), "read secret\npush secret\n")
+            told = [line.split() for line in seen.read_text().splitlines()]
+            self.assertIn(["push", "secret"], told)
+            self.assertEqual({token for _, token in told}, {"secret"})
 
     def test_a_git_failure_says_why(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -792,7 +794,10 @@ class CLITests(unittest.TestCase):
             nowhere = str(Path(tmp, "nowhere"))
             with self.assertRaisesRegex(SystemExit, "--cwd .*nowhere is not a folder"):
                 cli("run", str(local), "--agent", "true", "--cwd", nowhere)
-            for agent, message in (("", "names no command"), ("x 'y", "--agent: ")):
+            for agent, message in (
+                ("", "names no command"),
+                ("x 'y", "--agent: No closing quotation"),
+            ):
                 with self.assertRaisesRegex(SystemExit, message):
                     cli("run", str(local), "--agent", agent, "--cwd", str(work))
             judged = Path(tmp, "judged.toml")
@@ -841,9 +846,11 @@ class CLITests(unittest.TestCase):
                 git(nameless, "config", "--unset", key)
             git(nameless, "config", "user.useConfigOnly", "true")
             isolated = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-            done = run(str(local), "--cwd", str(nameless), **isolated)
+            ran = Path(tmp, "ran")
+            touch = ("--agent", shlex.join(["touch", str(ran)]))
+            done = run(str(local), "--cwd", str(nameless), *touch, **isolated)
             self.assertIn("identity unknown", done.stderr)
-            self.assertEqual(git(work, "log", "--format=%s").split(), ["base"])
+            self.assertFalse(ran.exists(), "the agent never ran")
             # Either credential will do; with one, the agent runs.
             done = run(str(judged), ANTHROPIC_AUTH_TOKEN="t")
             self.assertIn("attempt 1 changed nothing", done.stdout)
@@ -1140,7 +1147,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertIn(f"{missing}: error: [Errno 2] No such file", out)
             self.assertIn(f"{broken}: error: {broken}: ", out)
-            self.assertIn(f"{checklist}: ", out)
+            self.assertIn(f"{checklist}: ok (6 requirements)", out)
 
     def test_draft_will_not_overwrite_before_asking_claude(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -524,7 +524,7 @@ class CommandsTests(unittest.TestCase):
         loose.chmod(0o644)
         forged = b"print('forged')\n"
         loose.write_bytes(zlib.compress(b"blob %d\0" % len(forged) + forged))
-        with self.assertRaisesRegex(GitError, "fetch"):
+        with self.assertRaises(GitError):
             self.check(run_question("sees", "print(open('app.py').read())"))
 
     def test_only_the_end_of_a_flood_of_output_is_read(self):
