@@ -38,6 +38,22 @@ from symbolic_acceptance.draft import DraftError, draft
 NO_GIT_CONFIG = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
 # The package under test, for a process of its own to import.
 SRC = str(Path(sa.__file__).parents[1])
+
+
+def run_cli(*args: str) -> subprocess.CompletedProcess[str]:
+    """The command line in a process of its own, as a run is: one that fails
+    stops for good what its process runs, which would fail every test after."""
+    return subprocess.run(
+        [sys.executable, "-m", "symbolic_acceptance", *args],
+        env=os.environ | {"PYTHONPATH": SRC},
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+
+
 # A checklist that asks a person and nothing else.
 ASKS_A_PERSON = (
     '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
@@ -877,13 +893,13 @@ class CLITests(unittest.TestCase):
                 '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
                 '[[require]]\nthat = "a"\nfail = "x"\n'
             )
-            code, out = cli(
+            done = run_cli(
                 "run",
                 str(checklist),
                 *("--agent", "sleep 30", "--cwd", tmp, "--agent-timeout", "0.5"),
             )
-        self.assertEqual(code, 1)
-        self.assertIn("escalated: agent: the agent ran past 0.5s", out)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("escalated: agent: the agent ran past 0.5s", done.stdout)
 
     def test_run_asks_a_person_on_the_terminal_if_there_is_one(self):
         def run(stdin):
@@ -969,9 +985,11 @@ class CLITests(unittest.TestCase):
                 "else:\n    open('a', 'w')"
             )
             agent = shlex.join([sys.executable, "-c", swap])
-            code, out = cli("run", str(checklist), "--cwd", tmp, "--agent", agent)
-        self.assertEqual(code, 1)
-        self.assertIn("regression: a held in attempt 1 and fails in attempt 2", out)
+            done = run_cli("run", str(checklist), "--cwd", tmp, "--agent", agent)
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn(
+            "regression: a held in attempt 1 and fails in attempt 2", done.stdout
+        )
 
     def test_run_saves_a_run_and_resumes_it(self):
         with (
@@ -992,17 +1010,16 @@ class CLITests(unittest.TestCase):
             args = ("run", str(checklist), "--cwd", tmp, "--agent")
             issue = Path(outside, "issue.md")
             issue.write_text("app.py should print v2\n")
-            code, out = cli(
-                *args, write, "--record", record_path, "--issue", str(issue)
-            )
-            self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+            approved = (0, "approved: every requirement holds\n")
+            done = run_cli(*args, write, "--record", record_path, "--issue", str(issue))
+            self.assertEqual((done.returncode, done.stdout), approved, done.stderr)
             saved = record.load(record_path, sa.load(checklist))
             self.assertEqual(saved.status, sa.APPROVED)
             # Resuming a finished run runs no agent: `false` would fail. The
             # record may be named twice, any way that names the same file.
             same = os.path.join(outside, ".", "run.json")
-            code, out = cli(*args, "false", "--resume", record_path, "--record", same)
-            self.assertEqual((code, out), (0, "approved: every requirement holds\n"))
+            done = run_cli(*args, "false", "--resume", record_path, "--record", same)
+            self.assertEqual((done.returncode, done.stdout), approved, done.stderr)
             other = Path(outside, "other.md")
             other.write_text("Another issue\n")
             with self.assertRaisesRegex(SystemExit, "--issue differs"):
@@ -1038,8 +1055,8 @@ class CLITests(unittest.TestCase):
             git("-C", "vendored", "checkout", "-q", "-")
             # An edit inside it, which no commit here can hold, is not one.
             Path(tmp, "vendored", "scratch.txt").write_text("x\n")
-            _, out = cli(*run)
-            self.assertIn("attempt 1 changed nothing", out)
+            done = run_cli(*run)
+            self.assertIn("attempt 1 changed nothing", done.stdout)
 
     def test_a_resumed_run_keeps_diffing_from_where_it_started(self):
         with (
@@ -1060,10 +1077,10 @@ class CLITests(unittest.TestCase):
                 return shlex.join([sys.executable, "-c", script])
 
             args = ("run", str(checklist), "--cwd", tmp, "--agent")
-            code, _ = cli(*args, agent(2), "--record", saved, "--max-attempts", "1")
-            self.assertEqual(code, 1, "escalated at the attempt cap")
-            code, _ = cli(*args, agent(3), "--resume", saved, "--max-attempts", "2")
-            self.assertEqual(code, 0)
+            done = run_cli(*args, agent(2), "--record", saved, "--max-attempts", "1")
+            self.assertEqual(done.returncode, 1, "escalated at the attempt cap")
+            done = run_cli(*args, agent(3), "--resume", saved, "--max-attempts", "2")
+            self.assertEqual(done.returncode, 0, done.stderr)
             resumed = record.load(saved, sa.load(checklist))
             base = git(tmp, "rev-parse", "HEAD~2").strip()
         self.assertEqual(resumed.base, base)
