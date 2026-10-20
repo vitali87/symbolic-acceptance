@@ -80,7 +80,7 @@ class Finding:
 
 def _assignments(ids: tuple[str, ...]) -> Iterator[dict[str, bool]]:
     for values in itertools.product((True, False), repeat=len(ids)):
-        yield dict(zip(ids, values, strict=True))
+        yield dict(zip(ids, values))
 
 
 def _constant(expr: Expr) -> bool | None:

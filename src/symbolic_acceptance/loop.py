@@ -392,7 +392,7 @@ async def evaluate(
             _put(oracles[name], tuple(groups[name]), context) for name in names
         )
         got: dict[str, Answer] = {}
-        for name, result in zip(names, results, strict=True):
+        for name, result in zip(names, results):
             asked = [q.id for q in groups[name]]
             if isinstance(result, Pending):
                 partial = _accepted(name, asked, result.answers)
