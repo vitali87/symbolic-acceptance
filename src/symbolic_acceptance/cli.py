@@ -34,6 +34,7 @@ from symbolic_acceptance.github import GitHub, GitHubChecks, Reviews, post_repor
 from symbolic_acceptance.http import HTTPError
 from symbolic_acceptance.judge import Judge
 from symbolic_acceptance.lint import lint
+from symbolic_acceptance.logic import facts, plan
 from symbolic_acceptance.loop import (
     APPROVED,
     WAITING,
@@ -159,6 +160,9 @@ def _cmd_explain(args: argparse.Namespace) -> int:
     if assessment.failures:
         print()
         sys.stdout.write(render_failures(assessment.failures))
+    if assessment.status == "open":
+        ask = plan(checklist, facts(answers), last=())
+        print(f"\nTo decide it, answer: {', '.join(ask)}")
     return {"approved": 0, "changes": 1, "open": 3}[assessment.status]
 
 
@@ -301,6 +305,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         raise SystemExit(f"error: --agent: {error}") from None
     if not argv:
         raise SystemExit("error: --agent names no command")
+    if not Path(args.cwd).is_dir():
+        raise SystemExit(f"error: --cwd {args.cwd} is not a folder")
     # What would fail only once the agent has worked is checked now.
     _on_path(argv[0], "--agent")
     for qid in checklist.used():

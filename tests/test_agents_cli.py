@@ -610,7 +610,9 @@ class CLITests(unittest.TestCase):
             self.assertIn("Why: no delay", out)
             del truth["suite_green"]
             answers.write_text(json.dumps(dict(truth, backs_off=True)))
-            self.assertEqual(cli("explain", str(EXAMPLE), str(answers))[0], 3)
+            code, out = cli("explain", str(EXAMPLE), str(answers))
+            self.assertEqual(code, 3)
+            self.assertIn("To decide it, answer: suite_green", out)
             for data, refusal in (
                 ({"backs_off": {"is_met": "no"}}, "backs_off: is_met must be a bool"),
                 (["backs_off"], "answers must be a JSON object"),
@@ -694,6 +696,9 @@ class CLITests(unittest.TestCase):
             ):
                 with self.subTest(refusal), self.assertRaisesRegex(SystemExit, refusal):
                     cli("run", *setup, "--cwd", str(work))
+            nowhere = str(Path(tmp, "nowhere"))
+            with self.assertRaisesRegex(SystemExit, "--cwd .*nowhere is not a folder"):
+                cli("run", str(local), "--agent", "true", "--cwd", nowhere)
             for agent, message in (("", "names no command"), ("x 'y", "--agent: ")):
                 with self.assertRaisesRegex(SystemExit, message):
                     cli("run", str(local), "--agent", agent, "--cwd", str(work))

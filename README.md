@@ -198,11 +198,12 @@ The judge calls the Claude Messages API over HTTPS with `urllib`. It uses
 `claude-opus-5-5` at `high` effort, structured outputs for the verdict, and
 server-side refusal fallback (`fallbacks: "default"`), so a classifier false
 positive is retried on another model instead of failing the check; if every
-model declines, a person answers it. It sends no sampling parameters, which
-current models reject. Set `ANTHROPIC_API_KEY` (or `ANTHROPIC_AUTH_TOKEN`),
-and for `--pr` a token in `GITHUB_TOKEN` or `GH_TOKEN`; `run` checks them
-before the agent starts. `GITHUB_API_URL`, which GitHub Actions sets, names
-the API of a server other than github.com.
+model declines, the attempt goes to a person. It sends no sampling
+parameters, which current models reject. Set `ANTHROPIC_API_KEY` (or
+`ANTHROPIC_AUTH_TOKEN`), and for `--pr` a token in `GITHUB_TOKEN` or
+`GH_TOKEN`; `run` checks them before the agent starts, with the programs it
+will run and git's name for its commits. `GITHUB_API_URL`, which GitHub
+Actions sets, names the API of a server other than github.com.
 
 ## Use it
 
