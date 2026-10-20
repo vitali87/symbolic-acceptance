@@ -269,11 +269,12 @@ A resumed run needs the agent's checkout at its last attempt, or at a
 commit after it that the runner made but did not get to record (as when a
 push failed), which then counts with the next attempt; and one run must not
 be resumed twice at once: the resumes would share the checkout and the
-record. An agent that fails, times out or changes nothing escalates the
-run, which is saved like any other outcome. An error in the runner itself
-(git, the network, a misconfigured oracle) stops it instead, and the record
-keeps the run as it was, ready to resume; an attempt that was being checked
-is checked again, without asking the agent for another. Ctrl-C, or SIGTERM
+record. An agent that fails, runs past `--agent-timeout` (an hour by
+default) or changes nothing escalates the run, which is saved like any
+other outcome. An error in the runner itself (git, the network, a
+misconfigured oracle) stops it instead, and the record keeps the run as it
+was, ready to resume; an attempt that was being checked is checked again,
+without asking the agent for another. Ctrl-C, or SIGTERM
 from a supervisor or a cancelled CI job, stops a run the same way, ending
 the agent or check it is running and what that started; they are given
 five seconds to clean up, and a second Ctrl-C ends them at once. Without

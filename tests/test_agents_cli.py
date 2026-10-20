@@ -762,6 +762,25 @@ class CLITests(unittest.TestCase):
                 cli(*args)
             self.assertEqual(caught.exception.code, 2)
 
+    def test_run_gives_the_agent_the_time_it_is_given(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            tempfile.TemporaryDirectory() as outside,
+        ):
+            repo(tmp)
+            checklist = Path(outside, "acceptance.toml")
+            checklist.write_text(
+                '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+                '[[require]]\nthat = "a"\nfail = "x"\n'
+            )
+            code, out = cli(
+                "run",
+                str(checklist),
+                *("--agent", "sleep 30", "--cwd", tmp, "--agent-timeout", "0.5"),
+            )
+        self.assertEqual(code, 1)
+        self.assertIn("escalated: agent: the agent ran past 0.5s", out)
+
     def test_run_asks_a_person_on_the_terminal_if_there_is_one(self):
         def run(stdin):
             with (

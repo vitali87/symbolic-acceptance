@@ -400,6 +400,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     agent = CommandAgent(
         argv,
         cwd=args.cwd,
+        timeout=args.agent_timeout,
         base=(resume.base if resume else "") or None,
         push=args.push,
     )
@@ -509,6 +510,12 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_argument("--agent", required=True, help='agent command, e.g. "claude -p"')
     sub.add_argument("--issue", help="file with the issue text")
     sub.add_argument("--cwd", default=".", help="the agent's checkout (default .)")
+    sub.add_argument(
+        "--agent-timeout",
+        type=float,
+        default=3600.0,
+        help="seconds the agent has for each attempt (default 3600)",
+    )
     sub.add_argument(
         "--max-attempts",
         type=_count,
