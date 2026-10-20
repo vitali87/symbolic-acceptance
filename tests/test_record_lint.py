@@ -63,6 +63,14 @@ class RecordTests(unittest.TestCase):
         data["evaluations"][0]["status"] = "approved"
         with self.assertRaisesRegex(ValueError, "answers say changes"):
             record.loads(json.dumps(data), self.checklist)
+        data["evaluations"][0]["answers"] = {}
+        with self.assertRaisesRegex(ValueError, "not decided by its answers"):
+            record.loads(json.dumps(data), self.checklist)
+
+    def test_saves_a_run_only_with_its_own_checklist(self):
+        other = sa.loads(EXAMPLE.read_text().replace("Throttle", "Limit"))
+        with self.assertRaisesRegex(ValueError, "made with a different checklist"):
+            record.dumps(self.result, other)
 
     def test_rejects_a_run_status_its_attempts_do_not_support(self):
         data = json.loads(record.dumps(self.result, self.checklist))

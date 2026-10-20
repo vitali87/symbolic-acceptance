@@ -434,6 +434,10 @@ class VerdictTests(unittest.TestCase):
         asked = fake.body()["messages"][0]["content"][1]["text"]
         self.assertIn("This question is about absence.", asked)
 
+    def test_samples_must_be_one_or_more(self):
+        with self.assertRaisesRegex(ValueError, "samples must be at least 1"):
+            judge(samples=0)
+
     def test_unknown_kind(self):
         j, _ = judge()
         odd = sa.Question("x", "X?", "llm", options={"kind": "maybe"})

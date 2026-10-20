@@ -93,6 +93,8 @@ class AnswerTests(unittest.TestCase):
             sa.Answer(data["is_met"])
         with self.assertRaisesRegex(TypeError, "not one string"):
             sa.Answer(True, evidence=data["evidence"])
+        with self.assertRaisesRegex(TypeError, "evidence must be strings"):
+            sa.Answer(True, evidence=json.loads("[1]"))
         with self.assertRaisesRegex(TypeError, "must be strings"):
             sa.Answer(True, by=json.loads("null"))
         self.assertEqual(sa.Answer(True, evidence=["a", "b"]).evidence, ("a", "b"))

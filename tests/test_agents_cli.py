@@ -44,6 +44,13 @@ class CommandAgentTests(unittest.TestCase):
             issue="make it v2", checklist=example(), number=number, previous=previous
         )
 
+    def test_an_agent_needs_a_command(self):
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaisesRegex(ValueError, "argv must name"),
+        ):
+            CommandAgent([], cwd=tmp)
+
     def test_uncommitted_changes_become_the_attempt(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo(tmp)
@@ -573,6 +580,10 @@ class CommandAgentTests(unittest.TestCase):
 
 
 class DraftTests(unittest.TestCase):
+    def test_unknown_template(self):
+        with self.assertRaisesRegex(ValueError, "unknown template 'chore'"):
+            draft("an issue", template="chore", claude=Claude(transport=FakeHTTP()))
+
     def test_bad_drafts_are_sent_back_with_their_problems(self):
         good = EXAMPLE.read_text()
         fake = FakeHTTP(
@@ -1129,8 +1140,14 @@ class CLITests(unittest.TestCase):
             '[q.b]\nask = "B?"\nby = "llm"\n[[require]]\nthat = "a"\nfail = "x"\n'
         )
         reply = message({"checklist": checklist, "questions_for_reporter": ["Why?"]})
-        # First a proxy's page in its place, not even UTF-8, then the API's reply.
-        replies = ["<html>Accès refusé</html>".encode("latin-1"), reply.body]
+        # First the API refuses the request, then a proxy's page stands in its
+        # place, not even UTF-8, then the API replies.
+        refusal = {"type": "error", "error": {"message": "max_tokens: too large"}}
+        replies = [
+            (400, json.dumps(refusal).encode()),
+            (200, "<html>Accès refusé</html>".encode("latin-1")),
+            (200, reply.body),
+        ]
         asked = []
 
         class MessagesAPI(http.server.BaseHTTPRequestHandler):
@@ -1139,8 +1156,8 @@ class CLITests(unittest.TestCase):
                 asked.append(
                     (self.path, self.headers["x-api-key"], self.rfile.read(length))
                 )
-                body = replies.pop(0)
-                self.send_response(200)
+                status, body = replies.pop(0)
+                self.send_response(status)
                 self.send_header("content-length", str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
@@ -1174,9 +1191,14 @@ class CLITests(unittest.TestCase):
                     check=False,
                 )
 
-            proxied, done = drafting(), drafting()
+            refused, proxied, done = drafting(), drafting(), drafting()
             server.shutdown()
             written = out.read_text()
+        self.assertEqual(refused.returncode, 1)
+        self.assertRegex(
+            refused.stderr,
+            "^error: POST .* failed with HTTP 400: max_tokens: too large$",
+        )
         self.assertEqual(proxied.returncode, 1)
         self.assertEqual(
             proxied.stderr,

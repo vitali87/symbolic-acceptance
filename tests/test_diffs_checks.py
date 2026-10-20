@@ -13,10 +13,18 @@ from helpers import DIFF, repo
 import symbolic_acceptance as sa
 from symbolic_acceptance.agents import OUTPUT, GitError, diff, run_program
 from symbolic_acceptance.checks import Checks, Commands, frozen_files
-from symbolic_acceptance.diffs import locate, parse
+from symbolic_acceptance.diffs import FileChange, locate, parse
 
 
 class ParseTests(unittest.TestCase):
+    def test_nothing_and_no_prefixes(self):
+        self.assertEqual(parse(""), ([], []))
+        files, lines = parse(
+            "diff --git app.py app.py\n--- app.py\n+++ app.py\n@@ -1 +1 @@\n-v1\n+v2\n"
+        )
+        self.assertEqual(files, [FileChange("app.py", "modified")])
+        self.assertEqual([line.where for line in lines], ["app.py:-1", "app.py:1"])
+
     def test_files(self):
         files, _ = parse(DIFF)
         self.assertEqual(
@@ -561,6 +569,14 @@ class CommandsTests(unittest.TestCase):
             {qid: (a.is_met, a.by) for qid, a in answers.items()},
             {"local": (False, "ci:run"), "remote": (True, "ci:tests")},
         )
+
+    def test_a_fallback_must_answer_with_a_mapping(self):
+        def listing(questions, context):
+            return [sa.Answer(True) for q in questions]
+
+        remote = sa.Question("r", "R?", "ci", options={"check": "x"})
+        with self.assertRaisesRegex(sa.OracleError, "did not return a mapping"):
+            asyncio.run(Checks(fallback=listing)([remote], context()))
 
     def test_router_without_fallback(self):
         with self.assertRaisesRegex(sa.OracleError, "no local check"):

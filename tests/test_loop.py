@@ -226,10 +226,14 @@ class EvaluateTests(unittest.TestCase):
         async def wrong_type(questions, context):
             return {q.id: True for q in questions}
 
+        async def listed(questions, context):
+            return [sa.Answer(True) for q in questions]
+
         for bad, pattern in [
             (silent, "none of"),
             (overreach, "not asked"),
             (wrong_type, "expected Answer"),
+            (listed, "returned list, expected a mapping"),
         ]:
             with (
                 self.subTest(bad=bad.__name__),
@@ -498,6 +502,18 @@ class RunTests(unittest.TestCase):
                         **other,
                     )
                 )
+
+    def test_a_run_has_at_least_one_attempt(self):
+        script = Scripted(PASSING)
+        with self.assertRaisesRegex(ValueError, "max_attempts must be at least 1"):
+            asyncio.run(
+                sa.run(
+                    self.checklist,
+                    agent=Agent(script, [PASSING]),
+                    oracles=script.oracles(),
+                    max_attempts=0,
+                )
+            )
 
     def test_resume_rejects_a_changed_checklist(self):
         result, agent = run(
