@@ -113,8 +113,8 @@ hours later, or a GitHub Action with a time limit. An oracle raises
 `Pending` once it has asked; the run returns `waiting` and is saved
 (`record.save`), and the next event resumes it. Records keep answers, not
 conclusions: statuses are re-derived on load and must match. A resume
-needs the checkout at the last attempt, and one run must not be resumed
-twice at once. Every outcome is saved, including an agent that fails or
+needs the checkout at the last attempt or after it, and one run must not be
+resumed twice at once. Every outcome is saved, including an agent that fails or
 changes nothing, which escalates rather than crashing the run; an error in
 the runner itself, or Ctrl-C or SIGTERM, stops it with the record left as
 it was.

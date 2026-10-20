@@ -267,15 +267,17 @@ class CommandAgent:
     ``base`` is the commit attempts are compared with; it defaults to the
     checkout's HEAD now, before the agent has run, so pass it to
     :func:`symbolic_acceptance.loop.run` to keep it with the run, and pass
-    the recorded one back when resuming. Each later attempt starts from the
-    previous one, which the checkout must have checked out. With ``push``,
-    each attempt is pushed to that branch of ``origin``, so CI runs on it;
-    the agent may rewrite its earlier attempts, and the branch follows as
-    long as nobody else has pushed to it. An attempt that changes
-    ``.github/`` is not pushed but handed to a person: pushing would run the
-    workflows it holds, with whatever token they ask for, before any check
-    could refuse them. The agent gets ``env`` (by default this process's
-    environment) without :data:`RUNNER_SECRETS`.
+    the recorded one back when resuming. Each attempt starts from the
+    previous one, or ``base`` for the first, which the checkout must hold:
+    a commit the runner made after it that no record kept, as when a push
+    failed, counts with the attempt. With ``push``, each attempt is pushed
+    to that branch of ``origin``, so CI runs on it; the agent may rewrite
+    its earlier attempts, and the branch follows as long as nobody else has
+    pushed to it. An attempt that changes ``.github/`` is not pushed but
+    handed to a person: pushing would run the workflows it holds, with
+    whatever token they ask for, before any check could refuse them. The
+    agent gets ``env`` (by default this process's environment) without
+    :data:`RUNNER_SECRETS`.
 
     An agent that fails, runs past ``timeout`` or changes nothing hands the
     run to a person (:class:`Escalate`).
@@ -308,11 +310,17 @@ class CommandAgent:
 
     def __call__(self, task: Task) -> Attempt:
         before = self._head()
-        if task.previous is not None and before != task.previous.ref:
+        start, what = (
+            (task.previous.ref, f"attempt {task.number - 1}")
+            if task.previous
+            else (self.base, "the run's base")
+        )
+        # What follows it is the runner's commits that no record kept, as when
+        # a push failed, which count with this attempt.
+        if git(self.cwd, "rev-list", "-1", start, "--not", before).strip():
             raise Escalate(
-                f"the checkout is at {before[:12]}, not at attempt "
-                f"{task.number - 1} ({task.previous.ref[:12]}); check that out "
-                "to continue"
+                f"the checkout is at {before[:12]}, which does not follow {what} "
+                f"({start[:12]}); check that out to continue"
             )
         status, output = run_program(
             self.argv,
@@ -334,7 +342,7 @@ class CommandAgent:
         after = self._head()
         # The tree, not the commit: an empty commit, or one and its revert,
         # change nothing either.
-        if self._tree(after) == self._tree(before):
+        if self._tree(after) == self._tree(start):
             raise Escalate(f"attempt {task.number} changed nothing")
         changed = diff(self.cwd, self.base, after)
         if self.push is not None:

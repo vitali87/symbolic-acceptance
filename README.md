@@ -264,9 +264,11 @@ symbolic-acceptance report acceptance.toml run.json  # Markdown, for the PR
 commit it started from in the record, so every attempt is compared with it.
 A checkout that belongs to another user, as in a container job, needs
 `safe.directory` in the runner's git configuration, as git asks of any.
-A resumed run needs the agent's checkout at its last attempt, and one run
-must not be resumed twice at once: the resumes would share the checkout and
-the record. An agent that fails, times out or changes nothing escalates the
+A resumed run needs the agent's checkout at its last attempt, or at a
+commit after it that the runner made but did not get to record (as when a
+push failed), which then counts with the next attempt; and one run must not
+be resumed twice at once: the resumes would share the checkout and the
+record. An agent that fails, times out or changes nothing escalates the
 run, which is saved like any other outcome. An error in the runner itself
 (git, the network, a misconfigured oracle) stops it instead, and the record
 keeps the run as it was, ready to resume; an attempt that was being checked

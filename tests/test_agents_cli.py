@@ -364,13 +364,26 @@ class CommandAgentTests(unittest.TestCase):
                 git(remote, "rev-parse", "refs/heads/agent").strip(), theirs
             )
 
-    def test_a_later_attempt_starts_from_the_previous_one(self):
+    def test_an_attempt_follows_the_last_one_recorded(self):
+        # A commit of the runner's that no record kept, as when its push
+        # failed, counts with the next attempt; a checkout elsewhere does not.
         with tempfile.TemporaryDirectory() as tmp:
-            repo(tmp)
-            agent = CommandAgent([sys.executable, "-c", "pass"], cwd=tmp)
-            elsewhere = sa.Attempt("0" * 40, 1)
-            with self.assertRaisesRegex(sa.Escalate, "not at attempt 1"):
-                agent(self.task(2, previous=elsewhere))
+            git = repo(tmp)
+            base = git("rev-parse", "HEAD").strip()
+            noop = [sys.executable, "-c", "pass"]
+            agent = CommandAgent(noop, cwd=tmp, base=base)
+            Path(tmp, "app.py").write_text("print('v2')\n")
+            git("commit", "-qam", "Attempt 1")
+            first = agent(self.task())
+            self.assertIn("+print('v2')", first.diff)
+            Path(tmp, "app.py").write_text("print('v3')\n")
+            git("commit", "-qam", "Attempt 2")
+            self.assertIn("+print('v3')", agent(self.task(2, previous=first)).diff)
+            git("checkout", "-q", base)
+            with self.assertRaisesRegex(sa.Escalate, "does not follow attempt 1"):
+                agent(self.task(2, previous=first))
+            with self.assertRaisesRegex(sa.Escalate, "does not follow the run's base"):
+                CommandAgent(noop, cwd=tmp, base=first.ref)(self.task())
 
     def test_the_agent_never_gets_the_runners_github_token(self):
         with tempfile.TemporaryDirectory() as tmp:
