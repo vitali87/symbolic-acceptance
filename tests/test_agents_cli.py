@@ -891,7 +891,8 @@ class CLITests(unittest.TestCase):
         # asked again.
         done, saved = typed(b"maybe\nnothing to add\nn/a\nYes: looks fine\n")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.count("ok: Is it ok? [y/n, then why]"), 4)
+        self.assertEqual(done.stderr.count("ok: Is it ok? [y/n, then why]"), 4)
+        self.assertNotIn("Is it ok?", done.stdout, "the result alone")
         self.assertEqual(
             saved["evaluations"][-1]["answers"]["ok"],
             {"is_met": True, "reasoning": "looks fine", "by": "human:terminal"},
@@ -1374,15 +1375,15 @@ class CLITests(unittest.TestCase):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             ) as runner:
-                assert runner.stdout is not None
+                assert runner.stderr is not None
                 try:
                     asked = b""
                     deadline = time.monotonic() + 30
                     while b"[y/n, then why]" not in asked:
                         left = max(0.0, deadline - time.monotonic())
-                        readable = select.select([runner.stdout], [], [], left)[0]
+                        readable = select.select([runner.stderr], [], [], left)[0]
                         read = (
-                            os.read(runner.stdout.fileno(), 1024) if readable else b""
+                            os.read(runner.stderr.fileno(), 1024) if readable else b""
                         )
                         self.assertTrue(read, "the run never asked")
                         asked += read

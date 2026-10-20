@@ -202,18 +202,20 @@ _REPLY = re.compile(r"(yes|y|no|n)(?:[\s,:;.!-]+(.*))?", re.IGNORECASE)
 async def _ask_at_the_terminal(
     questions: Sequence[Question], context: Context
 ) -> dict[str, Answer]:
-    """A ``human`` oracle that asks on the terminal."""
+    """A ``human`` oracle that asks on the terminal. It writes to stderr, so
+    that the questions show when the run's result is sent elsewhere."""
     if not sys.stdin.isatty():
         raise Pending("no terminal to ask a person; pass --pr to ask on GitHub")
     attempt = context.attempt
     answers: dict[str, Answer] = {}
-    print(f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):")
+    asked = f"\nQuestions about attempt {attempt.number} ({attempt.ref[:12]}):"
+    print(asked, file=sys.stderr)
     for question in questions:
         if question.context:
-            print(f"  ({' '.join(question.context.split())})")
+            print(f"  ({' '.join(question.context.split())})", file=sys.stderr)
         while True:
             prompt = f"  {question.id}: {question.ask} [y/n, then why] "
-            print(prompt, end="", flush=True)
+            print(prompt, end="", flush=True, file=sys.stderr)
             typed = await _typed()
             if not typed:
                 raise Pending(
