@@ -568,6 +568,38 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(json.loads(response.body), {"ok": True})
         self.assertEqual(slept, [3.0, 2.0])
 
+    def test_github_rate_limits_sent_as_403_are_waited_out(self):
+        slept = []
+        reset = str(int(time.time()) + 30)
+        used_up = {"x-ratelimit-remaining": "0", "x-ratelimit-reset": reset}
+        fake = FakeHTTP(
+            json_response({"message": "secondary limit"}, 403, {"retry-after": "5"}),
+            json_response({"message": "API rate limit exceeded"}, 403, used_up),
+            json_response({"ok": True}),
+        )
+        http.request(
+            "POST", "https://example.test/x", transport=fake, sleep=slept.append
+        )
+        self.assertEqual(slept[0], 5.0)
+        self.assertAlmostEqual(slept[1], 30, delta=2)
+        # GitHub tells every reply its limit; one not used up waits for no reset.
+        left = {"x-ratelimit-remaining": "41", "x-ratelimit-reset": reset}
+        slept.clear()
+        fake = FakeHTTP(json_response({}, 503, left), json_response({}))
+        http.request(
+            "GET", "https://example.test/x", transport=fake, sleep=slept.append
+        )
+        self.assertEqual(slept, [1.0])
+        # And a 403 that is no rate limit is no retry.
+        fake = FakeHTTP(
+            json_response({"message": "Resource not accessible"}, 403, left)
+        )
+        with self.assertRaisesRegex(
+            http.HTTPError, "HTTP 403: Resource not accessible"
+        ):
+            http.request("GET", "https://example.test/x", transport=fake)
+        self.assertEqual(len(fake.requests), 1)
+
     def test_claude_retries_server_errors(self):
         # Asking again costs tokens but changes nothing, so even a POST is
         # repeated.

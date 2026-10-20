@@ -7,6 +7,7 @@ not end up in logs.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 import urllib.error
@@ -62,19 +63,35 @@ def urlopen(request: urllib.request.Request, timeout: float) -> Response:
         return Response(error.code, error.read(), dict(error.headers.items()))
 
 
+def _used_up(response: Response) -> bool:
+    """Whether the client used up its rate limit, as GitHub says on any reply."""
+    return response.header("x-ratelimit-remaining") == "0"
+
+
+def _limited(response: Response) -> bool:
+    """Whether a 403 is a rate limit, which GitHub sends as one as well as a
+    429: the request was not acted on."""
+    return response.status == 403 and (
+        response.header("retry-after") is not None or _used_up(response)
+    )
+
+
 def _wait(response: Response | None, attempt: int) -> float:
-    """Seconds before the next try: the server's ``Retry-After``, else backoff."""
-    value = response.header("retry-after") if response is not None else None
-    if value:
+    """Seconds before the next try: the server's ``Retry-After``, or when a
+    rate limit used up resets (``x-ratelimit-reset``), else backoff; what
+    cannot be read is backoff too."""
+    seconds = 2.0**attempt
+    if response is None:
+        return seconds
+    after, reset = response.header("retry-after"), response.header("x-ratelimit-reset")
+    if after:
         try:
-            seconds = float(value)
+            seconds = float(after)
         except ValueError:
-            try:
-                seconds = parsedate_to_datetime(value).timestamp() - time.time()
-            except ValueError:
-                seconds = 2.0**attempt
-    else:
-        seconds = 2.0**attempt
+            with contextlib.suppress(ValueError):
+                seconds = parsedate_to_datetime(after).timestamp() - time.time()
+    elif _used_up(response) and reset and reset.isdigit():
+        seconds = int(reset) - time.time()
     return min(MAX_WAIT, max(0.0, seconds))
 
 
@@ -111,8 +128,8 @@ def request(
     otherwise. Idempotent methods are retried on connection failures, rate
     limits and server errors. Other methods, such as POST, may already have
     taken effect when they fail, so they are retried only when the server
-    says it did not process the request (408, 429, 529). Pass ``repeatable``
-    to say whether sending this request twice is harmless.
+    says it did not process the request (408, 529, or a rate limit). Pass
+    ``repeatable`` to say whether sending this request twice is harmless.
     """
     send = transport or urlopen
     data = None
@@ -138,7 +155,7 @@ def request(
             if 200 <= response.status < 300:
                 return response
             retryable = RETRY_STATUSES if idempotent else UNPROCESSED
-            if final or response.status not in retryable:
+            if final or not (response.status in retryable or _limited(response)):
                 raise HTTPError(method, url, response.status, _detail(response))
             sleep(_wait(response, attempt))
         attempt += 1
