@@ -66,16 +66,24 @@ class RecordTests(unittest.TestCase):
 
     def test_rejects_a_run_status_its_attempts_do_not_support(self):
         data = json.loads(record.dumps(self.result, self.checklist))
+        approved = data["evaluations"][1]
+        first = dict(approved, attempt=dict(approved["attempt"], number=1))
         for status, evaluations in (
             ("approved", data["evaluations"][:1]),
             ("escalated", data["evaluations"]),
             ("running", data["evaluations"]),
-            ("approved", [data["evaluations"][1]] * 2),
+            ("approved", [first, approved]),
         ):
             with self.subTest(status, attempts=len(evaluations)):
                 changed = dict(data, status=status, evaluations=evaluations)
                 with self.assertRaisesRegex(ValueError, f"recorded as {status} but"):
                     record.loads(json.dumps(changed), self.checklist)
+
+    def test_rejects_attempts_not_numbered_in_turn(self):
+        data = json.loads(record.dumps(self.result, self.checklist))
+        data["evaluations"][1]["attempt"]["number"] = 7
+        with self.assertRaisesRegex(ValueError, "attempt 2 is numbered 7"):
+            record.loads(json.dumps(data), self.checklist)
 
     def test_rejects_what_is_not_shaped_like_a_record(self):
         def broken(path, value):

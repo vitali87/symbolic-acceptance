@@ -6,7 +6,7 @@ cannot claim an approval its answers don't support; a pause or an escalation
 is kept as recorded, and the run's status must fit its attempts. The
 checklist's digest is stored and checked, and loading against a different
 checklist fails, as does loading a record whose fields do not have the
-types they are written with.
+types they are written with, or whose attempts are not numbered in turn.
 """
 
 from __future__ import annotations
@@ -165,7 +165,11 @@ def loads(text: str, checklist: Checklist) -> Result:
             + ("; it holds that one as checklist.source" if held else "")
         )
     evaluations = []
-    for item in data["evaluations"]:
+    for number, item in enumerate(data["evaluations"], start=1):
+        if item["attempt"]["number"] != number:
+            raise ValueError(
+                f"attempt {number} is numbered {item['attempt']['number']}"
+            )
         answers = {qid: Answer(**body) for qid, body in item["answers"].items()}
         unknown = sorted(set(answers) - set(checklist.questions))
         if unknown:
