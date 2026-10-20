@@ -382,7 +382,10 @@ class CommandAgent:
 
     An agent that fails, runs past ``timeout`` or changes nothing hands the
     run to a person (:class:`Escalate`), as does an attempt whose diff is
-    over :data:`MAX_DIFF` bytes.
+    over :data:`MAX_DIFF` bytes. What it leaves uncommitted is committed for
+    it, but for a rename that changes only the case of a name, which git
+    does not see where the file system ignores case, as macOS's does: an
+    agent there makes such a rename with ``git mv``.
     """
 
     def __init__(
