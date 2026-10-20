@@ -316,8 +316,10 @@ class CommandAgent:
             else (self.base, "the run's base")
         )
         # What follows it is the runner's commits that no record kept, as when
-        # a push failed, which count with this attempt.
-        if git(self.cwd, "rev-list", "-1", start, "--not", before).strip():
+        # a push failed, which count with this attempt; another clone may not
+        # hold it at all.
+        held = git(self.cwd, "rev-list", "-1", "--ignore-missing", start).strip()
+        if not held or git(self.cwd, "rev-list", "-1", start, "--not", before).strip():
             raise Escalate(
                 f"the checkout is at {before[:12]}, which does not follow {what} "
                 f"({start[:12]}); check that out to continue"
@@ -360,13 +362,14 @@ class CommandAgent:
                     "pushing would run; a person must review it first"
                 )
             branch = f"refs/heads/{self.push}"
-            # The branch holds the previous attempt, which the agent may have
-            # rewritten; anything else on it is someone else's and stays.
-            lease = (
-                [f"--force-with-lease={branch}:{task.previous.ref}"]
-                if task.previous
-                else []
-            )
+            # The branch holds the previous attempt, or the commit this one
+            # started from, pushed by a run stopped before it kept it; the agent
+            # may have rewritten either. Anything else is someone else's.
+            ls = ("ls-remote", "origin", branch)
+            pushed = git(self.cwd, *ls, secrets=True).split()[:1] == [before]
+            previous = task.previous.ref if task.previous else None
+            expected = before if pushed else previous
+            lease = [f"--force-with-lease={branch}:{expected}"] if expected else []
             push = ("push", "--quiet", *lease, "origin", f"{after}:{branch}")
             git(self.cwd, *push, secrets=True)
         return Attempt(

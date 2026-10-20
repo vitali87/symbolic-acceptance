@@ -341,6 +341,31 @@ class CommandAgentTests(unittest.TestCase):
                 agent(self.task())
             self.assertEqual(git(remote, "branch", "--list").strip(), "")
 
+    def test_a_push_follows_one_that_a_stopped_run_did_not_record(self):
+        with (
+            tempfile.TemporaryDirectory() as remote,
+            tempfile.TemporaryDirectory() as tmp,
+        ):
+            git(remote, "init", "-q", "--bare")
+            local = repo(tmp)
+            local("remote", "add", "origin", remote)
+            write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
+            base = local("rev-parse", "HEAD").strip()
+            first = CommandAgent(write, cwd=tmp, push="agent")(self.task())
+            # Attempt 2 was committed and pushed, and the run stopped then.
+            Path(tmp, "app.py").write_text("v3\n")
+            local("commit", "-qam", "Attempt 2")
+            local("push", "-q", "origin", "HEAD:refs/heads/agent")
+            # Asked again, the agent rewrites it.
+            amend = ["git", "commit", "-q", "--amend", "-m", "Attempt 2, again"]
+            agent = CommandAgent(
+                amend, cwd=tmp, push="agent", base=base, env=NO_GIT_CONFIG
+            )
+            second = agent(self.task(2, previous=first))
+            self.assertEqual(
+                git(remote, "rev-parse", "refs/heads/agent").strip(), second.ref
+            )
+
     def test_a_push_never_overwrites_someone_elses_commit(self):
         with (
             tempfile.TemporaryDirectory() as remote,
@@ -381,8 +406,10 @@ class CommandAgentTests(unittest.TestCase):
             git("commit", "-qam", "Attempt 2")
             self.assertIn("+print('v3')", agent(self.task(2, previous=first)).diff)
             git("checkout", "-q", base)
-            with self.assertRaisesRegex(sa.Escalate, "does not follow attempt 1"):
-                agent(self.task(2, previous=first))
+            # Elsewhere, or not in this clone at all.
+            for previous in (first, sa.Attempt("1" * 40, 1)):
+                with self.assertRaisesRegex(sa.Escalate, "does not follow attempt 1"):
+                    agent(self.task(2, previous=previous))
             with self.assertRaisesRegex(sa.Escalate, "does not follow the run's base"):
                 CommandAgent(noop, cwd=tmp, base=first.ref)(self.task())
 
