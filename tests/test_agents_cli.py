@@ -877,6 +877,7 @@ class CLITests(unittest.TestCase):
                 checklist = Path(outside, "acceptance.toml")
                 checklist.write_text(
                     '[q.ok]\nask = "Is it ok?"\nby = "human"\n'
+                    'context = "Try the  login\\npage."\n'
                     '[[require]]\nthat = "ok"\nfail = "not ok"\n'
                 )
                 write = [sys.executable, "-c", "open('app.py', 'w').write('v2\\n')"]
@@ -914,6 +915,7 @@ class CLITests(unittest.TestCase):
         done, saved = typed(b"maybe\nnothing to add\nn/a\nYes: looks fine\n")
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stderr.count("ok: Is it ok? [y/n, then why]"), 4)
+        self.assertIn("  (Try the login page.)\n", done.stderr)
         self.assertNotIn("Is it ok?", done.stdout, "the result alone")
         self.assertEqual(
             saved["evaluations"][-1]["answers"]["ok"],
@@ -1089,6 +1091,8 @@ class CLITests(unittest.TestCase):
                 (("report", checklist, broken), "broken.json: Expecting"),
                 (("report", checklist, other), "not a symbolic-acceptance/run v1"),
                 (("explain", checklist, broken), "broken.json: Expecting"),
+                (("show", missing), "No such file"),
+                (("show", broken), "broken.json: "),
                 (("run", checklist, "--agent", "true", "--issue", binary), "not UTF-8"),
             ):
                 with (
@@ -1096,6 +1100,12 @@ class CLITests(unittest.TestCase):
                     self.assertRaisesRegex(SystemExit, f"^error: .*{message}"),
                 ):
                     cli(*args)
+            # Lint says so of each, and goes on to the next.
+            code, out = cli("lint", missing, broken, checklist)
+            self.assertEqual(code, 1)
+            self.assertIn(f"{missing}: error: [Errno 2] No such file", out)
+            self.assertIn(f"{broken}: error: {broken}: ", out)
+            self.assertIn(f"{checklist}: ", out)
 
     def test_draft_will_not_overwrite_before_asking_claude(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1113,7 +1123,11 @@ class CLITests(unittest.TestCase):
                 cli("draft", str(issue), "--out", tmp, "--force")
 
     def test_draft_asks_claude_over_http_and_writes_the_checklist(self):
-        checklist = '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n[[require]]\nthat = "a"\nfail = "x"\n'
+        # With a question nothing reads, which lint warns of.
+        checklist = (
+            '[q.a]\nask = "A?"\nby = "ci"\nrun = "true"\n'
+            '[q.b]\nask = "B?"\nby = "llm"\n[[require]]\nthat = "a"\nfail = "x"\n'
+        )
         reply = message({"checklist": checklist, "questions_for_reporter": ["Why?"]})
         # First a proxy's page in its place, not even UTF-8, then the API's reply.
         replies = ["<html>Accès refusé</html>".encode("latin-1"), reply.body]
@@ -1170,6 +1184,7 @@ class CLITests(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(written, checklist)
+        self.assertIn("  warning: unused-question [b]", done.stdout)
         self.assertIn("Questions for the reporter:\n  - Why?", done.stdout)
         for path, key, body in asked:
             self.assertEqual((path, key), ("/v1/messages", "key"))
