@@ -22,6 +22,7 @@ from helpers import (
     cli,
     example,
     finished_run,
+    folds_case,
     github_api,
     message,
     rendered,
@@ -764,6 +765,21 @@ class CLITests(unittest.TestCase):
                     answers.write_text(json.dumps(data))
                     with self.assertRaisesRegex(SystemExit, refusal):
                         cli("explain", str(EXAMPLE), str(answers))
+
+    @unittest.skipUnless(folds_case(), "this file system holds the names apart")
+    def test_a_record_in_the_checkout_is_refused_however_its_name_is_spelt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            checklist = Path(tmp, "acceptance.toml")
+            checklist.write_text(ASKS_A_PERSON)
+            work = Path(tmp, "Work")
+            work.mkdir()
+            repo(str(work))
+            record_there = str(Path(tmp, "work", "run.json"))
+            with self.assertRaisesRegex(SystemExit, "outside the agent's checkout"):
+                cli(
+                    *("run", str(checklist), "--agent", "true"),
+                    *("--cwd", str(work), "--record", record_there),
+                )
 
     def test_run_refuses_setups_that_cannot_work(self):
         with tempfile.TemporaryDirectory() as tmp:

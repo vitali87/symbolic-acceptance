@@ -394,8 +394,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         folder = Path(record_path).parent.resolve()
         if not folder.is_dir():
             raise SystemExit(f"error: no folder to save {record_path} in")
-        top = git(args.cwd, "rev-parse", "--show-toplevel").strip()
-        if folder.is_relative_to(Path(top).resolve()):
+        # The same folder, however its name is spelt: macOS takes a name in
+        # other letters, or another Unicode form, for the checkout's.
+        top = Path(git(args.cwd, "rev-parse", "--show-toplevel").strip())
+        if any(top.samefile(path) for path in (folder, *folder.parents)):
             raise SystemExit(
                 "error: keep the run record outside the agent's checkout (--cwd); "
                 "inside it, the record would be committed with the attempt and "
