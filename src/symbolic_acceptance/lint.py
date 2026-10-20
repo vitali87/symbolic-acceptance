@@ -11,7 +11,8 @@ looks for checklists that load but cannot mean what their author intended:
 * warnings: requirements that can never fail (``never-fails``), ``when``
   conditions that are always or never YES (``when-always``, ``when-never``),
   checks held up behind a person (``gated-by-person``), questions nothing
-  reads (``unused-question``) or asked twice (``duplicate-question``), CI
+  reads (``unused-question``) or asked twice (``duplicate-question``),
+  options no built-in oracle reads, as a typo is (``unknown-option``), CI
   check runs an attempt could fake (``unfrozen-workflows``), and blanks a
   template left to fill in (``placeholder``);
 * info: checklists too large for the exhaustive checks (``not-exhaustive``).
@@ -19,6 +20,7 @@ looks for checklists that load but cannot mean what their author intended:
 
 from __future__ import annotations
 
+import difflib
 import itertools
 import re
 import shlex
@@ -36,7 +38,7 @@ from symbolic_acceptance.checklist import (
 )
 from symbolic_acceptance.checks import admits, command, frozen_paths, matches
 from symbolic_acceptance.logic import DEFAULT_LAST, FAIL, NA, status, value
-from symbolic_acceptance.templates import ORACLES
+from symbolic_acceptance.templates import ORACLES, TEMPLATES
 
 __all__ = ["MAX_EXHAUSTIVE", "Finding", "lint"]
 
@@ -54,10 +56,14 @@ _READERS = {
     "allow_new": "ci",
     "kind": "llm",
 }
+# A question's other keys, which a typo in an option may have meant.
+_KEYS = (*_READERS, "ask", "by", "context")
 # What a shell's pipes, command lists and redirections are made of.
 _SHELL = frozenset("|&;<>")
-# A template's blank, such as "<short title>": words in angle brackets.
-_PLACEHOLDER = re.compile(r"<[^<>\n]*\s[^<>\n]*>")
+# The blanks the templates leave to fill in, such as "<short title>", and
+# only those: other text in angle brackets is text ("x < lo or x > hi").
+_BLANKS = sorted({b for t in TEMPLATES.values() for b in re.findall(r"<[^<>]+>", t)})
+_PLACEHOLDER = re.compile("|".join(map(re.escape, _BLANKS)))
 
 
 @dataclass(frozen=True)
@@ -194,6 +200,19 @@ def _option_findings(question: Question) -> list[Finding]:
     ]
 
 
+def _unread_option_findings(question: Question) -> list[Finding]:
+    """Options on a built-in oracle's question that none of them reads."""
+    findings = []
+    for key in question.options:
+        if key in _READERS:
+            continue
+        message = f"q.{question.id}.{key} is read by no built-in oracle"
+        if close := difflib.get_close_matches(key, _KEYS, n=1):
+            message += f"; did you mean {close[0]}?"
+        findings.append(Finding("warning", "unknown-option", message, question.id))
+    return findings
+
+
 def _freezes(question: Question, path: str) -> bool:
     """Whether ``question`` is a frozen check that fails a new file at ``path``."""
     if question.by != "ci" or "frozen" not in question.options:
@@ -266,6 +285,8 @@ def lint(
 
     for question in checklist.questions.values():
         findings.extend(_option_findings(question))
+        if question.by in ORACLES:
+            findings.extend(_unread_option_findings(question))
         if question.id not in used:
             findings.append(
                 Finding(

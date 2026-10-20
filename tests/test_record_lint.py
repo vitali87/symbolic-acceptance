@@ -305,6 +305,27 @@ class LintTests(unittest.TestCase):
         )
         self.assertTrue(all(f.level == "error" for f in findings))
 
+    def test_an_option_no_oracle_reads_is_taken_for_a_typo(self):
+        c = sa.loads(
+            '[q.a]\nask = "A?"\nby = "ci"\nfrozen = ["tests/*"]\n'
+            'alow_new = ["tests/test_*.py"]\n'
+            '[q.b]\nask = "B?"\nby = "llm"\ncontxt = "Only src/ counts."\n'
+            '[q.c]\nask = "C?"\nby = "human"\nowner = "security"\n'
+            '[q.d]\nask = "D?"\nby = "scanner"\nseverity = "high"\n'
+            '[[require]]\nid = "r"\nthat = { all = ["a", "b", "c", "d"] }\n'
+            'fail = "x"\n'
+        )
+        findings = [f for f in sa.lint(c) if f.code == "unknown-option"]
+        unread = "is read by no built-in oracle"
+        self.assertEqual(
+            [(f.level, f.where, f.message) for f in findings],
+            [
+                ("warning", "a", f"q.a.alow_new {unread}; did you mean allow_new?"),
+                ("warning", "b", f"q.b.contxt {unread}; did you mean context?"),
+                ("warning", "c", f"q.c.owner {unread}"),
+            ],
+        )
+
     def test_blanks_a_template_leaves_are_reported_until_filled_in(self):
         findings = [
             f for f in sa.lint(sa.loads(templates.FEATURE)) if f.code == "placeholder"
@@ -315,12 +336,18 @@ class LintTests(unittest.TestCase):
             [f.message for f in findings],
         )
         self.assertTrue(all(f.level == "warning" for f in findings))
-        # Angle brackets around one word are text, as in HTML.
-        page = sa.loads(
-            '[q.a]\nask = "Does the page set its <title>?"\nby = "llm"\n'
-            '[[require]]\nthat = "a"\nfail = "x"\n'
-        )
-        self.assertNotIn("placeholder", [f.code for f in sa.lint(page)])
+        # Other text in angle brackets is just text.
+        for ask in (
+            "Does the page set its <title>?",
+            "Is lo returned when x < lo, and hi when x > hi?",
+            "Does cache stay a Map<String, Long>?",
+        ):
+            with self.subTest(ask):
+                text = sa.loads(
+                    f'[q.a]\nask = "{ask}"\nby = "llm"\n'
+                    '[[require]]\nthat = "a"\nfail = "x"\n'
+                )
+                self.assertNotIn("placeholder", [f.code for f in sa.lint(text)])
 
     def test_check_runs_need_frozen_workflows(self):
         unfrozen = sa.loads(
