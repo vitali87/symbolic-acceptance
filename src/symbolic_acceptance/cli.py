@@ -334,6 +334,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     resuming_it = (
         args.resume and Path(args.record or "").resolve() == Path(args.resume).resolve()
     )
+    if args.record and Path(args.record).is_dir():
+        raise SystemExit(f"error: {args.record} is a folder; name the file to save in")
     if args.record and not resuming_it and Path(args.record).exists():
         raise SystemExit(
             f"error: {args.record} holds a run; pass --resume {args.record} to "

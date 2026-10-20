@@ -657,6 +657,8 @@ class CLITests(unittest.TestCase):
             kept.write_text("{}")
             with self.assertRaisesRegex(SystemExit, "pass --resume"):
                 cli("run", str(local), "--agent", "true", "--record", str(kept))
+            with self.assertRaisesRegex(SystemExit, "is a folder"):
+                cli("run", str(local), "--agent", "true", "--record", tmp)
             # Inside the repository, though --cwd names only part of it.
             work = Path(tmp, "work")
             work.mkdir()
