@@ -318,6 +318,7 @@ class RunTests(unittest.TestCase):
             (self.checklist.requirement("new_test"), "fail"),
             (self.checklist.requirement("new_test").that, "id"),
             (self.checklist.requirement("protected").that, "items"),
+            (self.checklist.requirement("protected").that.items[0], "items"),
             (self.checklist.requirement("sso").when, "item"),
         ):
             with (
