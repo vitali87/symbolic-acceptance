@@ -224,9 +224,9 @@ def git(
     ``isolated`` also leaves out the user's and the system's configuration.
     Git may run programs the checkout's configuration names (a filter, a
     credential helper), so the runner's GitHub token is withheld unless
-    ``secrets``, for a push whose credential helper needs it. Git does not
-    ask for a password itself (ssh may, on the terminal), and gives up
-    after five minutes.
+    ``secrets``: a push, and the look at the branch before it, may need it
+    for a credential helper. Git does not ask for a password itself (ssh
+    may, on the terminal), and gives up after five minutes.
     """
     # A stopped run commits, pushes or checks nothing a program left.
     if _stopped.is_set():

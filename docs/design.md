@@ -72,7 +72,9 @@ gate"), the planner (`logic.plan`) decides:
 agent is told to fix three things when any one alternative would do.
 Explanations (`feedback.explain`) walk the expression: the items that are NO
 under a failed `all` (fix each), all alternatives under a failed `any` (fix
-any one), with `not` flipping what is wanted.
+any one), with `not` flipping what is wanted. A requirement that fails only
+`when` its condition holds also says why it holds, explained the same way,
+since making it not hold is the other way out.
 
 ### 4. The judge: evidence instead of temperature 0
 
@@ -188,8 +190,9 @@ off (`stop_on_regression=False`).
   The runner's own git (status, add, commit, push) reads the checkout's
   `.git`, whose configuration can name programs git runs (filters, a
   signing program, credential helpers) and where a push goes; only the
-  push sees the runner's GitHub token. So a sandboxed agent must not be
-  able to write `.git`: mount it read-only, and the runner commits for it.
+  push, and its look at the branch first, see the runner's GitHub token.
+  So a sandboxed agent must not be able to write `.git`: mount it
+  read-only, and the runner commits for it.
 - An `llm` question in a `when` condition helps the attempt with a NO,
   which has nothing to quote, so the judge's NO there stands unbacked.
   Where the condition is about files ("does it touch SSO?"), a frozen
