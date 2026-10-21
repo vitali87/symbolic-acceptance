@@ -1910,6 +1910,7 @@ class CLITests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=60,
             )
         # Asked to stop, it ended, and the stop with it, long before the
         # grace was up; none started after it.
@@ -1939,6 +1940,7 @@ class CLITests(unittest.TestCase):
                 capture_output=True,
                 text=True,
                 check=True,
+                timeout=60,
             )
         self.assertEqual(done.stdout, f"{-signal.SIGTERM}\n")
 
