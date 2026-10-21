@@ -282,9 +282,16 @@ T = TypeVar("T")
 async def _call(
     function: Callable[P, object], *args: P.args, **kwargs: P.kwargs
 ) -> object:
-    """Call ``function`` in a thread, so a sync one cannot block the loop, and
-    await what it returns when that is awaitable (an async one's coroutine)."""
-    result = await asyncio.to_thread(function, *args, **kwargs)
+    """Call ``function``, in a thread unless it is an ``async def`` one, so
+    that a sync one cannot block the loop, and await what it returns when that
+    is awaitable. An ``async def`` one's coroutine is made here: one made in
+    the thread is lost, never awaited, when the call is cancelled as it ends."""
+    if inspect.iscoroutinefunction(function) or inspect.iscoroutinefunction(
+        function.__call__
+    ):
+        result = function(*args, **kwargs)
+    else:
+        result = await asyncio.to_thread(function, *args, **kwargs)
     return await result if inspect.isawaitable(result) else result
 
 
