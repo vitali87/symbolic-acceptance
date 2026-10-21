@@ -1,7 +1,9 @@
 import asyncio
 import dataclasses
+import threading
 import time
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 
 from helpers import EXAMPLE, PASSING, Scripted, example
 
@@ -271,6 +273,27 @@ class EvaluateTests(unittest.TestCase):
 
         result = evaluate(self.checklist, dict(Scripted(PASSING).oracles(), ci=ci))
         self.assertEqual(result.status, sa.APPROVED)
+
+    def test_an_async_oracle_needs_none_of_the_threads_sync_ones_run_in(self):
+        # Sync oracles run in the loop's threads. With only one, a sync oracle
+        # that waits for an async one would wait in vain if the async one
+        # needed that thread too.
+        asked = threading.Event()
+
+        def ci(questions, context):
+            yes = asked.wait(10)
+            return {q.id: sa.Answer(yes) for q in questions}
+
+        async def llm(questions, context):
+            asked.set()
+            return {q.id: sa.Answer(True) for q in questions}
+
+        async def main():
+            asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(1))
+            oracles = dict(Scripted(PASSING).oracles(), ci=ci, llm=llm)
+            return await sa.evaluate(self.checklist, sa.Attempt("abc", 1), oracles)
+
+        self.assertEqual(asyncio.run(main()).status, sa.APPROVED)
 
     def test_missing_oracle(self):
         with self.assertRaisesRegex(ValueError, "no oracle for: human"):
